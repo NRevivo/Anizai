@@ -13,7 +13,7 @@ interface DashboardProps {
 export function Dashboard({ prediction, sentimentData, timelineEvents }: DashboardProps) {
     return (
         <div className="w-full h-full overflow-y-auto bg-gray-50">
-            <div className="px-8 py-8 space-y-8">
+            <div className="px-8 py-8 pt-16 lg:pt-8 space-y-8">
                 {/* Current Question */}
                 <div className="mb-8">
                     <h1 className="text-3xl font-semibold bg-gradient-to-r from-anizai-teal-700 via-anizai-blue-700 to-anizai-purple-700 bg-clip-text text-transparent leading-tight mb-2">
