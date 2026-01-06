@@ -52,7 +52,21 @@ export default {
       },
       boxShadow: {
         'card': '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
-        'card-hover': '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+        'card-hover': '0 10px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+        'glow-teal': '0 0 20px rgba(20, 184, 166, 0.3)',
+        'glow-blue': '0 0 20px rgba(59, 130, 246, 0.3)',
+        'glow-purple': '0 0 20px rgba(168, 85, 247, 0.3)',
+      },
+      animation: {
+        'gradient-shift': 'gradient-shift 3s ease infinite',
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'fade-in-up': 'fade-in-up 0.6s ease-out forwards',
+        'slide-in-left': 'slide-in-left 0.5s ease-out forwards',
+        'slide-in-right': 'slide-in-right 0.5s ease-out forwards',
+        'scale-in': 'scale-in 0.4s ease-out forwards',
+      },
+      backdropBlur: {
+        xs: '2px',
       },
     },
   },

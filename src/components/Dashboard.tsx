@@ -12,11 +12,11 @@ interface DashboardProps {
 
 export function Dashboard({ prediction, sentimentData, timelineEvents }: DashboardProps) {
     return (
-        <div className="flex-1 overflow-y-auto bg-gray-50 p-6">
-            <div className="max-w-6xl mx-auto space-y-6">
+        <div className="w-full h-full overflow-y-auto bg-gray-50">
+            <div className="px-8 py-8 space-y-8">
                 {/* Current Question */}
-                <div className="mb-6">
-                    <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                <div className="mb-8">
+                    <h1 className="text-3xl font-semibold bg-gradient-to-r from-anizai-teal-700 via-anizai-blue-700 to-anizai-purple-700 bg-clip-text text-transparent leading-tight mb-2">
                         {prediction.question}
                     </h1>
                     <p className="text-sm text-gray-500">
@@ -25,8 +25,8 @@ export function Dashboard({ prediction, sentimentData, timelineEvents }: Dashboa
                 </div>
 
                 {/* Card Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    {/* Prediction Overview - Full width on mobile, half on desktop */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    {/* Prediction Overview */}
                     <div className="lg:col-span-2">
                         <PredictionOverview
                             probability={prediction.probability}
@@ -44,7 +44,7 @@ export function Dashboard({ prediction, sentimentData, timelineEvents }: Dashboa
                     {/* Sentiment Analysis */}
                     <SentimentAnalysis data={sentimentData} />
 
-                    {/* Evidence Timeline - Full width */}
+                    {/* Evidence Timeline */}
                     <div className="lg:col-span-2">
                         <EvidenceTimeline events={timelineEvents} />
                     </div>

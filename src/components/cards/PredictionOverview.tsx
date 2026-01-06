@@ -8,7 +8,6 @@ interface PredictionOverviewProps {
 }
 
 export function PredictionOverview({ probability, confidenceIndex, explanation }: PredictionOverviewProps) {
-    // Calculate stroke dasharray for circular gauge
     const radius = 70;
     const circumference = 2 * Math.PI * radius;
     const strokeDashoffset = circumference - (probability / 100) * circumference;
@@ -20,20 +19,11 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
                 <CardDescription>Current probability and confidence assessment</CardDescription>
             </CardHeader>
             <CardContent>
-                <div className="flex items-center gap-8">
+                <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
                     {/* Probability Gauge */}
-                    <div className="relative flex items-center justify-center">
+                    <div className="relative flex items-center justify-center shrink-0">
                         <svg className="transform -rotate-90" width="160" height="160">
-                            {/* Background circle */}
-                            <circle
-                                cx="80"
-                                cy="80"
-                                r={radius}
-                                stroke="#e5e7eb"
-                                strokeWidth="12"
-                                fill="none"
-                            />
-                            {/* Progress circle with gradient */}
+                            <circle cx="80" cy="80" r={radius} stroke="#e5e7eb" strokeWidth="10" fill="none" />
                             <defs>
                                 <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
                                     <stop offset="0%" stopColor="rgb(20, 184, 166)" />
@@ -42,12 +32,9 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
                                 </linearGradient>
                             </defs>
                             <circle
-                                cx="80"
-                                cy="80"
-                                r={radius}
+                                cx="80" cy="80" r={radius}
                                 stroke="url(#gaugeGradient)"
-                                strokeWidth="12"
-                                fill="none"
+                                strokeWidth="10" fill="none"
                                 strokeDasharray={circumference}
                                 strokeDashoffset={strokeDashoffset}
                                 strokeLinecap="round"
@@ -55,7 +42,7 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
                             />
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
-                            <span className="text-4xl font-bold gradient-text">
+                            <span className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-anizai-teal-600 via-anizai-blue-600 to-anizai-purple-600 bg-clip-text text-transparent">
                                 {formatProbability(probability)}
                             </span>
                             <span className="text-xs text-gray-500 mt-1">Probability</span>
@@ -63,15 +50,17 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
                     </div>
 
                     {/* Confidence & Explanation */}
-                    <div className="flex-1">
-                        <div className="mb-4">
+                    <div className="flex-1 min-w-0 w-full">
+                        <div className="mb-6">
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-sm font-medium text-gray-700">Confidence Index</span>
-                                <span className="text-sm font-semibold text-gray-900">{confidenceIndex}/100</span>
+                                <span className="text-sm font-semibold bg-gradient-to-r from-anizai-teal-600 via-anizai-blue-600 to-anizai-purple-600 bg-clip-text text-transparent">
+                                    {confidenceIndex}/100
+                                </span>
                             </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                                 <div
-                                    className="bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 h-2 rounded-full transition-all duration-1000"
+                                    className="h-2 rounded-full transition-all duration-1000 ease-out bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500"
                                     style={{ width: `${confidenceIndex}%` }}
                                 />
                             </div>

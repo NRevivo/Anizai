@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { SentimentDataPoint } from '../../types';
 
 interface SentimentAnalysisProps {
@@ -7,63 +7,86 @@ interface SentimentAnalysisProps {
 }
 
 export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
+    const CustomTooltip = ({ active, payload }: any) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                    <p className="text-sm font-medium text-gray-900 mb-2">{payload[0].payload.date}</p>
+                    {payload.map((entry: any, index: number) => (
+                        <p key={index} className="text-sm" style={{ color: entry.color }}>
+                            {entry.name}: {entry.value}%
+                        </p>
+                    ))}
+                </div>
+            );
+        }
+        return null;
+    };
+
     return (
         <Card>
             <CardHeader>
                 <CardTitle>Sentiment Analysis</CardTitle>
                 <CardDescription>Expert vs public sentiment trends over time</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-4">
                 <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={data}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <AreaChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                        <defs>
+                            <linearGradient id="expertGradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
+                            </linearGradient>
+                            <linearGradient id="publicGradient" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#a855f7" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                            </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
                         <XAxis
                             dataKey="date"
-                            tick={{ fontSize: 12 }}
-                            stroke="#9ca3af"
+                            tick={{ fontSize: 12, fill: '#6b7280' }}
+                            axisLine={{ stroke: '#e5e7eb' }}
                         />
                         <YAxis
                             domain={[0, 100]}
-                            tick={{ fontSize: 12 }}
-                            stroke="#9ca3af"
+                            tick={{ fontSize: 12, fill: '#6b7280' }}
+                            axisLine={{ stroke: '#e5e7eb' }}
                         />
-                        <Tooltip
-                            contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                            formatter={(value: number) => `${value}%`}
-                        />
-                        <Legend />
-                        <Line
+                        <Tooltip content={<CustomTooltip />} />
+                        <Legend iconType="circle" />
+                        <Area
                             type="monotone"
                             dataKey="expertSentiment"
-                            stroke="rgb(59, 130, 246)"
+                            stroke="#14b8a6"
                             strokeWidth={2}
-                            dot={{ fill: 'rgb(59, 130, 246)', r: 4 }}
+                            fill="url(#expertGradient)"
                             name="Expert Sentiment"
                         />
-                        <Line
+                        <Area
                             type="monotone"
                             dataKey="publicSentiment"
-                            stroke="rgb(168, 85, 247)"
+                            stroke="#a855f7"
                             strokeWidth={2}
-                            dot={{ fill: 'rgb(168, 85, 247)', r: 4 }}
+                            fill="url(#publicGradient)"
                             name="Public Sentiment"
                         />
-                    </LineChart>
+                    </AreaChart>
                 </ResponsiveContainer>
-                <div className="mt-4 grid grid-cols-2 gap-4">
-                    <div className="p-3 bg-blue-50 rounded-lg">
-                        <p className="text-xs text-blue-700 font-medium mb-1">Expert Sentiment</p>
-                        <p className="text-2xl font-bold text-blue-900">
+                <div className="mt-6 grid grid-cols-2 gap-4">
+                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-xs text-gray-500 font-medium mb-1">Expert Sentiment</p>
+                        <p className="text-2xl font-semibold bg-gradient-to-r from-anizai-teal-600 to-anizai-teal-500 bg-clip-text text-transparent">
                             {data[data.length - 1]?.expertSentiment}%
                         </p>
-                        <p className="text-xs text-blue-600 mt-1">↑ Trending positive</p>
+                        <p className="text-xs text-gray-500 mt-1">Latest reading</p>
                     </div>
-                    <div className="p-3 bg-purple-50 rounded-lg">
-                        <p className="text-xs text-purple-700 font-medium mb-1">Public Sentiment</p>
-                        <p className="text-2xl font-bold text-purple-900">
+                    <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-xs text-gray-500 font-medium mb-1">Public Sentiment</p>
+                        <p className="text-2xl font-semibold bg-gradient-to-r from-anizai-purple-600 to-anizai-purple-500 bg-clip-text text-transparent">
                             {data[data.length - 1]?.publicSentiment}%
                         </p>
-                        <p className="text-xs text-purple-600 mt-1">↑ Growing support</p>
+                        <p className="text-xs text-gray-500 mt-1">Latest reading</p>
                     </div>
                 </div>
             </CardContent>

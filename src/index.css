@@ -3,28 +3,65 @@
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --anizai-teal: 14 184 166;
-    --anizai-blue: 59 130 246;
-    --anizai-purple: 168 85 247;
-  }
+    :root {
+        --anizai-teal: 14 184 166;
+        --anizai-blue: 59 130 246;
+        --anizai-purple: 168 85 247;
+    }
 
-  * {
-    @apply border-gray-200;
-  }
+    * {
+        @apply border-gray-200;
+    }
 
-  body {
-    @apply bg-gray-50 text-gray-900 antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  }
+    html,
+    body,
+    #root {
+        height: 100vh;
+        width: 100vw;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+    }
+
+    body {
+        @apply bg-gray-50 text-gray-900 antialiased;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
 }
 
 @layer components {
-  .card {
-    @apply bg-white rounded-lg shadow-card border border-gray-100 p-6 transition-shadow hover:shadow-card-hover;
-  }
+    .card {
+        @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
+    }
+}
 
-  .gradient-text {
-    @apply bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 bg-clip-text text-transparent;
-  }
+/* Smooth scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
 }

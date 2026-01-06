@@ -20,35 +20,67 @@ export function MarketComparison({ anizaiProbability, marketProbability }: Marke
         ? `Anizai is ${difference.toFixed(1)}% more bullish than the market`
         : `Anizai is ${Math.abs(difference).toFixed(1)}% more bearish than the market`;
 
+    const CustomTooltip = ({ active, payload }: any) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                    <p className="text-sm font-medium text-gray-900">{payload[0].name}</p>
+                    <p className="text-sm text-gray-600">{`${payload[0].value.toFixed(1)}%`}</p>
+                </div>
+            );
+        }
+        return null;
+    };
+
     return (
         <Card>
             <CardHeader>
                 <CardTitle>Market vs Anizai</CardTitle>
                 <CardDescription>Comparison with prediction market consensus</CardDescription>
             </CardHeader>
-            <CardContent>
-                <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={data} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                        <XAxis type="number" domain={[0, 100]} />
-                        <YAxis type="category" dataKey="name" />
-                        <Tooltip
-                            formatter={(value: number) => `${value.toFixed(1)}%`}
-                            contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb' }}
-                        />
-                        <Legend />
-                        <Bar dataKey="Market" fill="#94a3b8" radius={[0, 4, 4, 0]} />
-                        <Bar dataKey="Anizai" fill="url(#barGradient)" radius={[0, 4, 4, 0]} />
-                        <defs>
-                            <linearGradient id="barGradient" x1="0" y1="0" x2="1" y2="0">
-                                <stop offset="0%" stopColor="rgb(20, 184, 166)" />
-                                <stop offset="50%" stopColor="rgb(59, 130, 246)" />
-                                <stop offset="100%" stopColor="rgb(168, 85, 247)" />
-                            </linearGradient>
-                        </defs>
-                    </BarChart>
-                </ResponsiveContainer>
-                <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+            <CardContent className="pt-4">
+                <div className="w-full" style={{ height: 220 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                            data={data}
+                            layout="vertical"
+                            margin={{ top: 5, right: 20, left: 60, bottom: 5 }}
+                        >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+                            <XAxis
+                                type="number"
+                                domain={[0, 100]}
+                                tick={{ fontSize: 12, fill: '#6b7280' }}
+                                axisLine={{ stroke: '#e5e7eb' }}
+                            />
+                            <YAxis
+                                type="category"
+                                dataKey="name"
+                                tick={{ fontSize: 12, fill: '#6b7280' }}
+                                axisLine={{ stroke: '#e5e7eb' }}
+                                width={50}
+                            />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend
+                                wrapperStyle={{ paddingTop: '10px' }}
+                                iconType="circle"
+                            />
+                            <Bar
+                                dataKey="Market"
+                                fill="#94a3b8"
+                                radius={[0, 4, 4, 0]}
+                                barSize={24}
+                            />
+                            <Bar
+                                dataKey="Anizai"
+                                fill="#14b8a6"
+                                radius={[0, 4, 4, 0]}
+                                barSize={24}
+                            />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+                <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
                     <p className="text-sm text-gray-700">
                         <span className="font-medium">Analysis:</span> {differenceText}
                     </p>
