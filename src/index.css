@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --anizai-teal: 14 184 166;
+    --anizai-blue: 59 130 246;
+    --anizai-purple: 168 85 247;
+  }
+
+  * {
+    @apply border-gray-200;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-lg shadow-card border border-gray-100 p-6 transition-shadow hover:shadow-card-hover;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 bg-clip-text text-transparent;
+  }
+}
