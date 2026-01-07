@@ -1,6 +1,6 @@
 # Anizai - AI-Powered Event Forecasting
 
-![Anizai Hero](/.gemini/antigravity/brain/f48c6f28-e212-4482-8ba4-708d6891f640/landing_hero_1767800430305.png)
+![Anizai Hero](docs/images/landing-hero.png)
 
 Anizai is a sophisticated AI-powered forecasting platform that provides transparent, evidence-based predictions for future events. Built with React 19, TypeScript, and modern web technologies, Anizai delivers a professional SaaS experience for users seeking data-driven insights.
 
@@ -26,21 +26,21 @@ Anizai is a sophisticated AI-powered forecasting platform that provides transpar
 ## 📸 Screenshots
 
 ### Landing Page
-![How It Works](/.gemini/antigravity/brain/f48c6f28-e212-4482-8ba4-708d6891f640/how_it_works_1767800440695.png)
+![How It Works](docs/images/how-it-works.png)
 
 ### Plan Selection
-![Plan Selection](/.gemini/antigravity/brain/f48c6f28-e212-4482-8ba4-708d6891f640/plan_selection_1767800556703.png)
+![Plan Selection](docs/images/plan-selection.png)
 
 ### Dashboard Views
 
 #### Desktop
-![Dashboard Overview](/.gemini/antigravity/brain/f48c6f28-e212-4482-8ba4-708d6891f640/dashboard_overview_1767800579154.png)
+![Dashboard Overview](docs/images/dashboard-desktop.png)
 
 #### Tablet
-![Tablet View](/.gemini/antigravity/brain/f48c6f28-e212-4482-8ba4-708d6891f640/dashboard_tablet_1767800623812.png)
+![Tablet View](docs/images/dashboard-tablet.png)
 
 #### Mobile
-![Mobile View](/.gemini/antigravity/brain/f48c6f28-e212-4482-8ba4-708d6891f640/dashboard_mobile_1767800652057.png)
+![Mobile View](docs/images/dashboard-mobile.png)
 
 ## 🚀 Getting Started
 
