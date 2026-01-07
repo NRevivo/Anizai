@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import './App.css';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { ChatPanel } from './components/ChatPanel';
