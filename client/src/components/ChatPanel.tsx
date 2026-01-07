@@ -34,25 +34,6 @@ export function ChatPanel({
 
     return (
         <div className="w-full h-full bg-white border-l border-gray-200 flex flex-col overflow-hidden">
-            {/* Current Question & Answer Summary */}
-            {currentQuestion && (
-                <div className="p-6 border-b border-gray-100 bg-gradient-to-br from-anizai-teal-50/30 via-anizai-blue-50/30 to-anizai-purple-50/30 flex-shrink-0">
-                    <div className="mb-3">
-                        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Current Analysis</h3>
-                        <p className="text-sm font-medium text-gray-900 leading-relaxed">
-                            {currentQuestion}
-                        </p>
-                    </div>
-                    {currentAnswer && (
-                        <div className="p-3 bg-white/80 rounded-lg border border-gray-200">
-                            <p className="text-xs text-gray-600 leading-relaxed">
-                                {currentAnswer}
-                            </p>
-                        </div>
-                    )}
-                </div>
-            )}
-
             {/* Chat Messages - Scrollable */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
                 {messages.map((message) => (
@@ -62,8 +43,8 @@ export function ChatPanel({
                     >
                         <div
                             className={`max-w-[85%] rounded-lg p-3 ${message.role === 'user'
-                                    ? 'bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 text-white'
-                                    : 'bg-gray-100 text-gray-900 border border-gray-200'
+                                ? 'bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 text-white'
+                                : 'bg-gray-100 text-gray-900 border border-gray-200'
                                 }`}
                         >
                             <div className={`text-sm prose prose-sm max-w-none ${message.role === 'user' ? 'prose-invert' : ''

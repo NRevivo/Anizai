@@ -11,30 +11,42 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
     const radius = 70;
     const circumference = 2 * Math.PI * radius;
     const strokeDashoffset = circumference - (probability / 100) * circumference;
+    const uniqueGradientId = "gauge-gradient-" + Math.random().toString(36).substr(2, 9);
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Prediction Overview</CardTitle>
-                <CardDescription>Current probability and confidence assessment</CardDescription>
+        <Card className="h-full border-gray-200 bg-white shadow-sm">
+            <CardHeader className="pb-4 border-b border-gray-50">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <CardTitle className="text-lg font-semibold text-gray-900">Forecast Analysis</CardTitle>
+                        <CardDescription className="text-xs text-gray-500 mt-1">
+                            Multi-model synthesis v4.2
+                        </CardDescription>
+                    </div>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-anizai-teal-50 text-anizai-teal-700 border border-anizai-teal-100">
+                        High Confidence
+                    </span>
+                </div>
             </CardHeader>
-            <CardContent>
-                <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
+            <CardContent className="pt-6">
+                <div className="flex flex-col xl:flex-row items-center gap-8 xl:gap-10">
                     {/* Probability Gauge */}
                     <div className="relative flex items-center justify-center shrink-0">
-                        <svg className="transform -rotate-90" width="160" height="160">
-                            <circle cx="80" cy="80" r={radius} stroke="#e5e7eb" strokeWidth="10" fill="none" />
+                        <svg className="transform -rotate-90" width="180" height="180">
+                            {/* Track */}
+                            <circle cx="90" cy="90" r={radius} stroke="#f3f4f6" strokeWidth="12" fill="none" />
                             <defs>
-                                <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <linearGradient id={uniqueGradientId} x1="0%" y1="0%" x2="100%" y2="100%">
                                     <stop offset="0%" stopColor="rgb(20, 184, 166)" />
                                     <stop offset="50%" stopColor="rgb(59, 130, 246)" />
                                     <stop offset="100%" stopColor="rgb(168, 85, 247)" />
                                 </linearGradient>
                             </defs>
+                            {/* Progress */}
                             <circle
-                                cx="80" cy="80" r={radius}
-                                stroke="url(#gaugeGradient)"
-                                strokeWidth="10" fill="none"
+                                cx="90" cy="90" r={radius}
+                                stroke={`url(#${uniqueGradientId})`}
+                                strokeWidth="12" fill="none"
                                 strokeDasharray={circumference}
                                 strokeDashoffset={strokeDashoffset}
                                 strokeLinecap="round"
@@ -42,32 +54,41 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
                             />
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
-                            <span className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-anizai-teal-600 via-anizai-blue-600 to-anizai-purple-600 bg-clip-text text-transparent">
+                            <span className="text-4xl font-bold text-gray-900">
                                 {formatProbability(probability)}
                             </span>
-                            <span className="text-xs text-gray-500 mt-1">Probability</span>
+                            <span className="text-xs font-medium text-gray-500 mt-1 uppercase tracking-wide">Probability</span>
                         </div>
                     </div>
 
-                    {/* Confidence & Explanation */}
-                    <div className="flex-1 min-w-0 w-full">
-                        <div className="mb-6">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-gray-700">Confidence Index</span>
-                                <span className="text-sm font-semibold bg-gradient-to-r from-anizai-teal-600 via-anizai-blue-600 to-anizai-purple-600 bg-clip-text text-transparent">
-                                    {confidenceIndex}/100
-                                </span>
+                    {/* Content */}
+                    <div className="flex-1 min-w-0 w-full space-y-8">
+                        {/* Metrics Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-1">Confidence</p>
+                                <p className="text-lg font-bold text-gray-900">{confidenceIndex}/100</p>
                             </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                                <div
-                                    className="h-2 rounded-full transition-all duration-1000 ease-out bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500"
-                                    style={{ width: `${confidenceIndex}%` }}
-                                />
+                            <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-1">Evidence Vol.</p>
+                                <p className="text-lg font-bold text-gray-900">High</p>
+                            </div>
+                            <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-1">Consensus</p>
+                                <p className="text-lg font-bold text-gray-900">Strong</p>
                             </div>
                         </div>
-                        <p className="text-sm text-gray-600 leading-relaxed">
-                            {explanation}
-                        </p>
+
+                        {/* Explanation */}
+                        <div>
+                            <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-anizai-blue-500"></div>
+                                Executive Summary
+                            </h4>
+                            <div className="text-sm text-gray-600 leading-relaxed space-y-2">
+                                <p>{explanation}</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </CardContent>
