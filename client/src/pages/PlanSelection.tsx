@@ -36,8 +36,8 @@ export function PlanSelection({ onSelectPlan }: PlanSelectionProps) {
     };
 
     return (
-        <div className="min-h-screen w-full bg-gray-50 flex items-center justify-center px-6 py-12">
-            <div className="max-w-6xl w-full">
+        <div className="h-screen w-full bg-gray-50 overflow-y-auto">
+            <div className="max-w-6xl w-full mx-auto px-6 py-12">
                 {/* Header */}
                 <div className="text-center mb-12">
                     <h1 className="text-4xl font-semibold bg-gradient-to-r from-anizai-teal-700 via-anizai-blue-700 to-anizai-purple-700 bg-clip-text text-transparent mb-4">

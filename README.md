@@ -36,8 +36,7 @@ Anizai is a sophisticated AI-powered forecasting platform that provides transpar
 #### Desktop
 ![Dashboard Overview](docs/images/dashboard-desktop.png)
 
-#### Tablet
-![Tablet View](docs/images/dashboard-tablet.png)
+
 
 #### Mobile
 ![Mobile View](docs/images/dashboard-mobile.png)

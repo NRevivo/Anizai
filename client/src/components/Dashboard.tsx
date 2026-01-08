@@ -13,7 +13,7 @@ interface DashboardProps {
 export function Dashboard({ prediction, sentimentData, timelineEvents }: DashboardProps) {
     return (
         <div className="w-full h-full overflow-y-auto bg-slate-50 font-sans">
-            <div className="max-w-7xl mx-auto px-6 py-8 pt-20 xl:pt-8 space-y-6">
+            <div className="max-w-7xl mx-auto px-6 py-8 pt-28 lg:pt-8 space-y-6">
                 {/* Header - Simplified */}
                 <div className="flex items-center justify-between pb-2">
                     <div>
