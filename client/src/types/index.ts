@@ -29,6 +29,8 @@ export interface ChatMessage {
 export interface SentimentDataPoint {
     date: string;
     expertSentiment: number; // -100 to 100
+    expertUpper?: number;
+    expertLower?: number;
     publicSentiment: number; // -100 to 100
 }
 
@@ -38,6 +40,8 @@ export interface TimelineEvent {
     title: string;
     sourceType: 'news' | 'expert' | 'social';
     impact: 'positive' | 'negative' | 'neutral';
+    impactLabel?: string;
+    isKeyEvidence?: boolean;
     description: string;
 }
 

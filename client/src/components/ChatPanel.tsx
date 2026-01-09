@@ -42,17 +42,15 @@ export function ChatPanel({
                         className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                     >
                         <div
-                            className={`max-w-[85%] rounded-lg p-3 ${message.role === 'user'
-                                ? 'bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 text-white'
-                                : 'bg-gray-100 text-gray-900 border border-gray-200'
+                            className={`max-w-[85%] rounded-lg px-4 py-3 ${message.role === 'user'
+                                ? 'bg-slate-100 text-gray-900'
+                                : 'bg-white text-gray-900 border border-gray-100 shadow-sm'
                                 }`}
                         >
-                            <div className={`text-sm prose prose-sm max-w-none ${message.role === 'user' ? 'prose-invert' : ''
-                                }`}>
+                            <div className={`text-sm prose prose-sm max-w-none ${message.role === 'user' ? '' : 'prose-slate'}`}>
                                 <ReactMarkdown>{message.content}</ReactMarkdown>
                             </div>
-                            <p className={`text-xs mt-2 ${message.role === 'user' ? 'text-white/70' : 'text-gray-500'
-                                }`}>
+                            <p className="text-[10px] mt-1.5 text-gray-400">
                                 {formatRelativeTime(message.timestamp)}
                             </p>
                         </div>
@@ -62,9 +60,9 @@ export function ChatPanel({
 
             {/* Suggested Actions */}
             {suggestedActions.length > 0 && (
-                <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex-shrink-0">
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                        Suggested Actions
+                <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                        Next Steps
                     </p>
                     <div className="flex flex-wrap gap-2">
                         {suggestedActions.map((action) => (
@@ -82,20 +80,19 @@ export function ChatPanel({
                 </div>
             )}
 
-            {/* Chat Input */}
-            <div className="p-4 border-t border-gray-100 flex-shrink-0">
+            <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-white">
                 <div className="flex gap-2">
                     <Input
-                        placeholder="Ask a follow-up question..."
+                        placeholder="Ask a follow-up (drivers, risks, what could change)..."
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        className="focus:border-anizai-teal-400 focus:ring-anizai-teal-400"
+                        className="bg-gray-50 border-gray-200 focus:bg-white focus:border-anizai-teal-500 focus:ring-1 focus:ring-anizai-teal-500 transition-all text-sm"
                     />
                     <Button
                         onClick={handleSend}
                         disabled={!inputValue.trim()}
-                        className="bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 hover:from-anizai-teal-600 hover:via-anizai-blue-600 hover:to-anizai-purple-600 text-white border-0"
+                        className="bg-anizai-teal-600 hover:bg-anizai-teal-700 text-white border-0 shadow-sm"
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

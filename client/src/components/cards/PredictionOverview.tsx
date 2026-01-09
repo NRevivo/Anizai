@@ -20,7 +20,7 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
                     <div>
                         <CardTitle className="text-lg font-semibold text-gray-900">Forecast Analysis</CardTitle>
                         <CardDescription className="text-xs text-gray-500 mt-1">
-                            Multi-model synthesis v4.2
+                            Integrated multi-source assessment
                         </CardDescription>
                     </div>
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-anizai-teal-50 text-anizai-teal-700 border border-anizai-teal-100">
@@ -81,12 +81,16 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
 
                         {/* Explanation */}
                         <div>
-                            <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2 flex items-center gap-2">
                                 <div className="w-1.5 h-1.5 rounded-full bg-anizai-blue-500"></div>
                                 Executive Summary
                             </h4>
-                            <div className="text-sm text-gray-600 leading-relaxed space-y-2">
-                                <p>{explanation}</p>
+                            <div className="text-sm text-gray-700 leading-relaxed space-y-3">
+                                <p className="font-semibold text-gray-900">
+                                    <span className="text-anizai-teal-700 uppercase text-[10px] tracking-wider font-bold mr-2">Bottom Line</span>
+                                    Legislative momentum and expert consensus strongly signal Q2 passage, outweighing industry resistance.
+                                </p>
+                                <p className="text-gray-600">{explanation}</p>
                             </div>
                         </div>
                     </div>

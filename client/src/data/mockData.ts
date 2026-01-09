@@ -37,19 +37,19 @@ export const mockCurrentPrediction: Prediction = {
     probability: 72.3,
     confidenceIndex: 84,
     status: 'stable',
-    explanation: 'Based on recent legislative momentum, expert consensus, and historical precedent with GDPR implementation, there is a strong likelihood of comprehensive AI regulation passing in the EU by Q2 2026. Key indicators include accelerated committee discussions and broad political support.',
+    explanation: 'Committee discussions have accelerated significantly. While industry lobbying poses a delay risk, the political cost of inaction has risen, creating a favorable environment for comprehensive regulation by mid-2026.',
     marketProbability: 68.5,
     createdAt: new Date('2026-01-04T12:00:00'),
     updatedAt: new Date('2026-01-06T10:30:00'),
 };
 
 export const mockSentimentData: SentimentDataPoint[] = [
-    { date: 'Dec 15', expertSentiment: 65, publicSentiment: 42 },
-    { date: 'Dec 20', expertSentiment: 68, publicSentiment: 48 },
-    { date: 'Dec 25', expertSentiment: 70, publicSentiment: 52 },
-    { date: 'Dec 30', expertSentiment: 72, publicSentiment: 55 },
-    { date: 'Jan 4', expertSentiment: 75, publicSentiment: 58 },
-    { date: 'Jan 6', expertSentiment: 78, publicSentiment: 62 },
+    { date: 'Dec 15', expertSentiment: 65, expertUpper: 70, expertLower: 60, publicSentiment: 42 },
+    { date: 'Dec 20', expertSentiment: 68, expertUpper: 74, expertLower: 62, publicSentiment: 48 },
+    { date: 'Dec 25', expertSentiment: 70, expertUpper: 75, expertLower: 65, publicSentiment: 52 },
+    { date: 'Dec 30', expertSentiment: 72, expertUpper: 78, expertLower: 66, publicSentiment: 55 },
+    { date: 'Jan 4', expertSentiment: 75, expertUpper: 82, expertLower: 68, publicSentiment: 58 },
+    { date: 'Jan 6', expertSentiment: 78, expertUpper: 85, expertLower: 71, publicSentiment: 62 },
 ];
 
 export const mockTimelineEvents: TimelineEvent[] = [
@@ -59,7 +59,9 @@ export const mockTimelineEvents: TimelineEvent[] = [
         title: 'EU Parliament Committee Vote',
         sourceType: 'news',
         impact: 'positive',
-        description: 'Key committee approved draft regulation with 18-4 vote',
+        impactLabel: 'Strong positive',
+        isKeyEvidence: true,
+        description: 'Key committee approved draft regulation with 18-4 vote, clearing major legislative hurdle.',
     },
     {
         id: '2',
@@ -67,7 +69,9 @@ export const mockTimelineEvents: TimelineEvent[] = [
         title: 'Expert Panel Consensus',
         sourceType: 'expert',
         impact: 'positive',
-        description: 'Leading policy experts predict Q2 passage at 75% likelihood',
+        impactLabel: 'Moderate positive',
+        isKeyEvidence: true,
+        description: 'Leading policy experts predict Q2 passage at 75% likelihood given current momentum.',
     },
     {
         id: '3',
@@ -75,7 +79,8 @@ export const mockTimelineEvents: TimelineEvent[] = [
         title: 'Industry Pushback',
         sourceType: 'news',
         impact: 'negative',
-        description: 'Tech coalition lobbies for delay citing implementation concerns',
+        impactLabel: 'Minor negative',
+        description: 'Tech coalition lobbies for delay citing implementation concerns, but political will remains high.',
     },
     {
         id: '4',
@@ -83,14 +88,24 @@ export const mockTimelineEvents: TimelineEvent[] = [
         title: 'Public Support Grows',
         sourceType: 'social',
         impact: 'positive',
-        description: 'Polling shows 68% public support for AI regulation',
+        impactLabel: 'Contextual',
+        description: 'Polling shows 68% public support for AI regulation, reducing political risk for lawmakers.',
+    },
+    {
+        id: '5',
+        date: 'Dec 15',
+        title: 'Draft Text Leaked',
+        sourceType: 'news',
+        impact: 'neutral',
+        impactLabel: 'Neutral',
+        description: 'Leaked draft confirms focus on high-risk AI, aligning with market expectations.',
     },
 ];
 
 export const mockSuggestedActions: SuggestedAction[] = [
-    { id: '1', label: 'Explain uncertainty', icon: 'HelpCircle' },
-    { id: '2', label: 'Compare to similar events', icon: 'GitCompare' },
-    { id: '3', label: 'Track this event', icon: 'Bell' },
+    { id: '1', label: 'Uncertainty drivers', icon: 'HelpCircle' },
+    { id: '2', label: 'Similar historical events', icon: 'GitCompare' },
+    { id: '3', label: 'Track this forecast', icon: 'Bell' },
 ];
 
 export const mockChatMessages = [
