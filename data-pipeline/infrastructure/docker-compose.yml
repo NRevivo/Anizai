@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. CORE INFRASTRUCTURE (Kafka - KRaft Mode)
+  # ==========================================
+  kafka:
+    image: bitnami/kafka:3.5
+    container_name: anazai-kafka
+    ports:
+      - "9092:9092" # External access (from your Python script on host)
+    environment:
+      # KRaft settings (No Zookeeper needed!)
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+    volumes:
+      - kafka_data:/bitnami/kafka
+    networks:
+      - anazai-network
+
+  # ממשק גרפי לראות את ההודעות שנכנסות (קריטי לבדיקות!)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: anazai-kafka-ui
+    ports:
+      - "8080:8080" # כנס לדפדפן בכתובת localhost:8080
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=Anazai-Cluster
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - anazai-network
+
+  # ==========================================
+  # 2. PROCESSING ENGINE (Spark) - UNCOMMENT LATER
+  # ==========================================
+  # spark-master:
+  #   image: bitnami/spark:3.5.0
+  #   container_name: anazai-spark-master
+  #   environment:
+  #     - SPARK_MODE=master
+  #   ports:
+  #     - "8090:8080" # Spark Master UI
+  #     - "7077:7077"
+  #   networks:
+  #     - anazai-network
+
+  # spark-worker:
+  #   image: bitnami/spark:3.5.0
+  #   container_name: anazai-spark-worker
+  #   environment:
+  #     - SPARK_MODE=worker
+  #     - SPARK_MASTER_URL=spark://spark-master:7077
+  #   depends_on:
+  #     - spark-master
+  #   networks:
+  #     - anazai-network
+
+  # ==========================================
+  # 3. ORCHESTRATION (Airflow) - UNCOMMENT LAST
+  # ==========================================
+  # airflow-webserver:
+  #   image: apache/airflow:2.7.1
+  #   container_name: anazai-airflow
+  #   command: webserver
+  #   ports:
+  #     - "8081:8080" # Airflow UI
+  #   environment:
+  #     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+  #     - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+  #     - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=false
+  #   volumes:
+  #     - ../orchestration/dags:/opt/airflow/dags # חיבור לתיקיית ה-DAGs שלך
+  #   depends_on:
+  #     - postgres
+  #   networks:
+  #     - anazai-network
+
+  # postgres:
+  #   image: postgres:13
+  #   container_name: anazai-postgres
+  #   environment:
+  #     - POSTGRES_USER=airflow
+  #     - POSTGRES_PASSWORD=airflow
+  #     - POSTGRES_DB=airflow
+  #   networks:
+  #     - anazai-network
+
+volumes:
+  kafka_data:
+
+networks:
+  anazai-network:
+    driver: bridge
