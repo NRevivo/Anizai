@@ -23,3 +23,4 @@ export function LandingPage({ onAuth }: LandingPageProps) {
         </div>
     );
 }
+ 

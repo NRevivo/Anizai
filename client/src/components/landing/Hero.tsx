@@ -53,7 +53,7 @@ export function Hero({ onAuth }: HeroProps) {
                     <img
                         src="/logo-brain.png"
                         alt="Anizai"
-                        className="h-24 sm:h-28 w-auto relative mix-blend-multiply"
+                        className="h-48 sm:h-52 w-auto relative mix-blend-multiply"
                     />
                 </div>
 
