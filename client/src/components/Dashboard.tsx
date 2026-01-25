@@ -27,14 +27,7 @@ export function Dashboard({ prediction, sentimentData, timelineEvents }: Dashboa
                             {prediction.question}
                         </h1>
                     </div>
-                    <div className="flex gap-3">
-                        <button className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 text-xs font-medium rounded-md shadow-sm hover:bg-gray-50 transition-colors">
-                            Share
-                        </button>
-                        <button className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 text-xs font-medium rounded-md shadow-sm hover:bg-gray-50 transition-colors">
-                            Export Data
-                        </button>
-                    </div>
+                   
                 </div>
 
                 {/* Card Grid */}

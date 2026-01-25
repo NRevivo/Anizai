@@ -1,10 +1,12 @@
+import { ArrowLeft } from 'lucide-react';
 import { PlanCard } from '../components/plans/PlanCard';
 
 interface PlanSelectionProps {
     onSelectPlan: (plan: 'free' | 'premium') => void;
+    onBack?: () => void;
 }
 
-export function PlanSelection({ onSelectPlan }: PlanSelectionProps) {
+export function PlanSelection({ onSelectPlan, onBack }: PlanSelectionProps) {
     const freePlan = {
         name: 'Free',
         price: 'Free',
@@ -37,6 +39,17 @@ export function PlanSelection({ onSelectPlan }: PlanSelectionProps) {
 
     return (
         <div className="h-screen w-full bg-gray-50 overflow-y-auto">
+            <div className="bg-gray-50 border-b border-gray-200 px-6 py-6">
+                <div className="max-w-6xl mx-auto flex items-center gap-4">
+                    <button
+                        onClick={onBack}
+                        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+                    >
+                        <ArrowLeft className="w-5 h-5" />
+                        <span className="font-medium">Back</span>
+                    </button>
+                </div>
+            </div>
             <div className="max-w-6xl w-full mx-auto px-6 py-12">
                 {/* Header */}
                 <div className="text-center mb-12">

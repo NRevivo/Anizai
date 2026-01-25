@@ -1,4 +1,19 @@
-export function Footer() {
+interface FooterProps {
+    onAuth?: () => void;
+    onContact?: () => void;
+    onNavigation?: {
+        features: () => void;
+        methodology: () => void;
+        changelog: () => void;
+        about: () => void;
+        blog: () => void;
+        terms: () => void;
+        privacy: () => void;
+        cookies: () => void;
+    };
+}
+
+export function Footer({ onAuth, onContact, onNavigation }: FooterProps) {
     return (
         <footer className="bg-gray-50 border-t border-gray-200 pt-16 pb-12 px-6">
             <div className="max-w-6xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
@@ -29,10 +44,38 @@ export function Footer() {
                 <div>
                     <h3 className="text-sm font-semibold text-gray-900 tracking-wider uppercase mb-4">Product</h3>
                     <ul className="space-y-3">
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Features</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Methodology</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Pricing</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Changelog</a></li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.features()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Features
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.methodology()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Methodology
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                onClick={() => onAuth?.()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Pricing
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.changelog()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Changelog
+                            </button>
+                        </li>
                     </ul>
                 </div>
 
@@ -40,10 +83,30 @@ export function Footer() {
                 <div>
                     <h3 className="text-sm font-semibold text-gray-900 tracking-wider uppercase mb-4">Company</h3>
                     <ul className="space-y-3">
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">About</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Blog</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Careers</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Contact</a></li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.about()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                About
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.blog()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Blog
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                onClick={() => onContact?.()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Contact
+                            </button>
+                        </li>
                     </ul>
                 </div>
 
@@ -51,9 +114,30 @@ export function Footer() {
                 <div>
                     <h3 className="text-sm font-semibold text-gray-900 tracking-wider uppercase mb-4">Legal</h3>
                     <ul className="space-y-3">
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Terms</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Privacy</a></li>
-                        <li><a href="#" className="text-sm text-gray-500 hover:text-gray-900 transition-colors">Cookies</a></li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.terms()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Terms
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.privacy()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Privacy
+                            </button>
+                        </li>
+                        <li>
+                            <button
+                                onClick={() => onNavigation?.cookies()}
+                                className="text-sm text-gray-500 hover:text-gray-900 transition-colors text-left"
+                            >
+                                Cookies
+                            </button>
+                        </li>
                     </ul>
                 </div>
             </div>
