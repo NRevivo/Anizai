@@ -3,8 +3,29 @@ import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { PlanSelection } from './pages/PlanSelection';
 import { DashboardPage } from './pages/DashboardPage';
+import { ContactPage } from './pages/ContactPage';
+import { FeaturesPage } from './pages/FeaturesPage';
+import { MethodologyPage } from './pages/MethodologyPage';
+import { ChangelogPage } from './pages/ChangelogPage';
+import { AboutPage } from './pages/AboutPage';
+import { BlogPage } from './pages/BlogPage';
+import { TermsPage } from './pages/TermsPage';
+import { PrivacyPage } from './pages/PrivacyPage';
+import { CookiesPage } from './pages/CookiesPage';
 
-type AppState = 'landing' | 'login' | 'plan-selection' | 'dashboard';
+type AppState = 
+    | 'landing' 
+    | 'plan-selection' 
+    | 'dashboard' 
+    | 'contact'
+    | 'features'
+    | 'methodology'
+    | 'changelog'
+    | 'about'
+    | 'blog'
+    | 'terms'
+    | 'privacy'
+    | 'cookies';
 type UserType = 'new' | 'existing' | null;
 
 function App() {
@@ -43,6 +64,29 @@ function App() {
         setAppState('dashboard');
     };
 
+    const handleContact = () => {
+        setAppState('contact');
+    };
+
+    const handleBackFromContact = () => {
+        setAppState('landing');
+    };
+
+    const handleBackToLanding = () => {
+        setAppState('landing');
+    };
+
+    const navigationHandlers = {
+        features: () => setAppState('features'),
+        methodology: () => setAppState('methodology'),
+        changelog: () => setAppState('changelog'),
+        about: () => setAppState('about'),
+        blog: () => setAppState('blog'),
+        terms: () => setAppState('terms'),
+        privacy: () => setAppState('privacy'),
+        cookies: () => setAppState('cookies'),
+    };
+
     const handleLogout = () => {
         // Clear user state and go back to landing
         setUserType(null);
@@ -56,21 +100,47 @@ function App() {
 
     // Render appropriate screen based on state
     if (appState === 'landing') {
-        return <LandingPage onAuth={handleGoToLogin} />;
+        return <LandingPage onAuth={handleAuth} onContact={handleContact} onNavigation={navigationHandlers} />;
     }
 
-    if (appState === 'login') {
-        return (
-            <LoginPage
-                onGoogleAuth={handleAuth}
-                onEmailAuth={handleEmailAuth}
-                onBack={() => setAppState('landing')}
-            />
-        );
+    if (appState === 'contact') {
+        return <ContactPage onBack={handleBackFromContact} />;
+    }
+
+    if (appState === 'features') {
+        return <FeaturesPage onBack={handleBackToLanding} />;
+    }
+
+    if (appState === 'methodology') {
+        return <MethodologyPage onBack={handleBackToLanding} />;
+    }
+
+    if (appState === 'changelog') {
+        return <ChangelogPage onBack={handleBackToLanding} />;
+    }
+
+    if (appState === 'about') {
+        return <AboutPage onBack={handleBackToLanding} />;
+    }
+
+    if (appState === 'blog') {
+        return <BlogPage onBack={handleBackToLanding} />;
+    }
+
+    if (appState === 'terms') {
+        return <TermsPage onBack={handleBackToLanding} />;
+    }
+
+    if (appState === 'privacy') {
+        return <PrivacyPage onBack={handleBackToLanding} />;
+    }
+
+    if (appState === 'cookies') {
+        return <CookiesPage onBack={handleBackToLanding} />;
     }
 
     if (appState === 'plan-selection') {
-        return <PlanSelection onSelectPlan={handleSelectPlan} />;
+        return <PlanSelection onSelectPlan={handleSelectPlan} onBack={handleBackToLanding} />;
     }
 
     return (
