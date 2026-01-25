@@ -8,9 +8,20 @@ import { Footer } from '../components/landing/Footer';
 
 interface LandingPageProps {
     onAuth: () => void;
+    onContact?: () => void;
+    onNavigation?: {
+        features: () => void;
+        methodology: () => void;
+        changelog: () => void;
+        about: () => void;
+        blog: () => void;
+        terms: () => void;
+        privacy: () => void;
+        cookies: () => void;
+    };
 }
 
-export function LandingPage({ onAuth }: LandingPageProps) {
+export function LandingPage({ onAuth, onContact, onNavigation }: LandingPageProps) {
     return (
         <div className="w-full h-screen overflow-y-auto bg-white">
             <Hero onAuth={onAuth} />
@@ -19,7 +30,8 @@ export function LandingPage({ onAuth }: LandingPageProps) {
             <HowItWorks />
             <WhoItsFor />
             <FinalCTA onAuth={onAuth} />
-            <Footer />
+            <Footer onAuth={onAuth} onContact={onContact} onNavigation={onNavigation} />
         </div>
     );
 }
+ 

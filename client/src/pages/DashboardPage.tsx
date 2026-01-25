@@ -15,7 +15,12 @@ import {
 import type { ChatMessage } from '../types';
 import { useState } from 'react';
 
-export function DashboardPage() {
+interface DashboardPageProps {
+    onLogout?: () => void;
+    onSettings?: () => void;
+}
+
+export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
     const [activeSessionId, setActiveSessionId] = useState('1');
     const [messages] = useState<ChatMessage[]>(mockChatMessages);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -170,6 +175,8 @@ export function DashboardPage() {
                         onSessionSelect={handleSessionSelect}
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
+                        onLogout={onLogout}
+                        onSettings={onSettings}
                     />
                 </div>
                 <div className="h-full overflow-hidden border-x border-gray-200 bg-slate-50 relative">
@@ -189,6 +196,8 @@ export function DashboardPage() {
                         onSessionSelect={handleSessionSelect}
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
+                        onLogout={onLogout}
+                        onSettings={onSettings}
                     />
                 </div>
                 <div className="h-full overflow-hidden relative flex flex-col">
@@ -240,6 +249,8 @@ export function DashboardPage() {
                         onSessionSelect={handleSessionSelect}
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
+                        onLogout={onLogout}
+                        onSettings={onSettings}
                     />
                 </div>
                 <div className={`fixed inset-y-0 right-0 w-96 z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
