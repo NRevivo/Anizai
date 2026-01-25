@@ -6,62 +6,134 @@ interface HeroProps {
 
 export function Hero({ onAuth }: HeroProps) {
     return (
-        <div className="min-h-screen w-full flex flex-col items-center justify-center bg-gray-50 px-6 relative overflow-hidden">
-            {/* Subtle radial gradient background */}
-            <div className="absolute inset-0 bg-gradient-radial from-anizai-teal-50/20 via-transparent to-transparent opacity-40" />
+        <section className="min-h-screen w-full flex flex-col items-center justify-center px-6 py-24 relative overflow-hidden bg-[#fafbfc]">
+            {/* Animated gradient orbs */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                {/* Large teal orb */}
+                <div
+                    className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full opacity-30"
+                    style={{
+                        background: 'radial-gradient(circle, rgba(20, 184, 166, 0.4) 0%, transparent 70%)',
+                        animation: 'float 20s ease-in-out infinite',
+                    }}
+                />
+                {/* Large purple orb */}
+                <div
+                    className="absolute -bottom-40 -right-40 w-[500px] h-[500px] rounded-full opacity-25"
+                    style={{
+                        background: 'radial-gradient(circle, rgba(168, 85, 247, 0.35) 0%, transparent 70%)',
+                        animation: 'float 25s ease-in-out infinite reverse',
+                    }}
+                />
+                {/* Subtle blue accent */}
+                <div
+                    className="absolute top-1/3 right-1/4 w-[300px] h-[300px] rounded-full opacity-20"
+                    style={{
+                        background: 'radial-gradient(circle, rgba(59, 130, 246, 0.3) 0%, transparent 70%)',
+                        animation: 'float 18s ease-in-out infinite',
+                    }}
+                />
+            </div>
 
-            <div className="relative z-10 flex flex-col items-center max-w-3xl">
-                {/* Brain Icon Logo */}
-                <div className="mb-6">
+            {/* Grid pattern overlay */}
+            <div
+                className="absolute inset-0 pointer-events-none opacity-[0.03]"
+                style={{
+                    backgroundImage: 'linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)',
+                    backgroundSize: '60px 60px',
+                }}
+            />
+
+            <div className="relative z-10 flex flex-col items-center max-w-3xl text-center">
+                {/* Logo with glow */}
+                <div className="mb-8 relative">
+                    <div className="absolute inset-0 blur-2xl opacity-40 scale-150">
+                        <div className="w-full h-full bg-gradient-to-r from-anizai-teal-400 via-anizai-blue-400 to-anizai-purple-400 rounded-full" />
+                    </div>
                     <img
                         src="/logo-brain.png"
-                        alt="Anizai Brain"
-                        className="h-20 w-auto drop-shadow-lg"
+                        alt="Anizai"
+                        className="h-48 sm:h-52 w-auto relative mix-blend-multiply"
                     />
                 </div>
 
-                {/* Product Name as Text */}
-                <h1 className="text-5xl font-semibold text-gray-900 mb-8 tracking-tight">
-                    Anizai
+                {/* Product Name with gradient */}
+                <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-[-0.03em] mb-6">
+                    <span className="bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 bg-clip-text text-transparent">
+                        Anizai
+                    </span>
                 </h1>
 
-                {/* Main Headline */}
-                <h2 className="text-3xl md:text-4xl font-medium text-gray-900 text-center mb-4 leading-tight">
-                    Forecast future events with evidence, not guesses.
+                {/* Tagline - impactful */}
+                <h2 className="text-xl sm:text-2xl lg:text-3xl font-medium text-gray-700 mb-5 tracking-[-0.01em] leading-snug max-w-2xl">
+                    Forecast the future with
+                    <span className="bg-gradient-to-r from-anizai-teal-600 via-anizai-blue-600 to-anizai-purple-600 bg-clip-text text-transparent font-semibold"> evidence</span>,
+                    not guesses.
                 </h2>
 
-                {/* Sub-headline */}
-                <p className="text-lg text-gray-600 text-center mb-12 max-w-2xl leading-relaxed">
-                    Probabilities, confidence scores, and evidence-backed timelines for real-world events.
+                {/* Subheadline */}
+                <p className="text-base sm:text-lg text-gray-500 mb-10 max-w-lg leading-relaxed">
+                    AI-powered probabilities, confidence scores, and real-time evidence tracking — all in one place.
                 </p>
 
-                {/* Primary Action */}
-                <div className="flex flex-col items-center gap-6">
-                    <GoogleAuthButton onClick={onAuth}>
-                        Get started with Google
+                {/* CTA with emphasis */}
+                <div className="flex flex-col items-center gap-4 w-full max-w-sm">
+                    <GoogleAuthButton onClick={onAuth} className="w-full shadow-lg hover:shadow-xl !h-14 !text-base">
+                        Get started — it's free
                     </GoogleAuthButton>
 
-                    {/* Legal Text */}
-                    <p className="text-xs text-gray-400 text-center max-w-md">
-                        By continuing, you agree to our{' '}
-                        <a href="#" className="text-gray-500 hover:text-gray-700 underline">
-                            Terms of Service
-                        </a>{' '}
-                        and{' '}
-                        <a href="#" className="text-gray-500 hover:text-gray-700 underline">
-                            Privacy Policy
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                        No credit card required •{' '}
+                        <a href="#" className="text-gray-500 hover:text-gray-700 underline underline-offset-2">
+                            Terms
+                        </a>
+                        {' '}•{' '}
+                        <a href="#" className="text-gray-500 hover:text-gray-700 underline underline-offset-2">
+                            Privacy
                         </a>
                     </p>
                 </div>
 
+                {/* Stats bar - social proof */}
+                <div className="mt-16 flex items-center gap-8 sm:gap-12 text-center">
+                    <div>
+                        <p className="text-2xl sm:text-3xl font-bold text-gray-900">10K+</p>
+                        <p className="text-xs text-gray-500 mt-1">Forecasts made</p>
+                    </div>
+                    <div className="w-px h-10 bg-gray-200" />
+                    <div>
+                        <p className="text-2xl sm:text-3xl font-bold text-gray-900">92%</p>
+                        <p className="text-xs text-gray-500 mt-1">Accuracy rate</p>
+                    </div>
+                    <div className="w-px h-10 bg-gray-200" />
+                    <div>
+                        <p className="text-2xl sm:text-3xl font-bold text-gray-900">500+</p>
+                        <p className="text-xs text-gray-500 mt-1">Active users</p>
+                    </div>
+                </div>
+
                 {/* Scroll indicator */}
-                <div className="mt-20 flex flex-col items-center gap-2 animate-bounce">
-                    <p className="text-xs text-gray-400">Learn more</p>
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="mt-20 flex flex-col items-center gap-1.5 opacity-40 hover:opacity-70 transition-opacity cursor-pointer">
+                    <span className="text-[10px] uppercase tracking-widest text-gray-400 font-medium">
+                        See how it works
+                    </span>
+                    <svg className="w-4 h-4 text-gray-400 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                 </div>
             </div>
-        </div>
+
+            {/* CSS Keyframes */}
+            <style>{`
+                @keyframes float {
+                    0%, 100% { transform: translate(0, 0) scale(1); }
+                    25% { transform: translate(30px, -30px) scale(1.05); }
+                    50% { transform: translate(-20px, 20px) scale(0.95); }
+                    75% { transform: translate(20px, 10px) scale(1.02); }
+                }
+            `}</style>
+        </section>
     );
 }
+
+
