@@ -1,15 +1,29 @@
 import { Button } from '../ui/button';
+import { cn } from '../../lib/utils';
 
 interface GoogleAuthButtonProps {
     onClick: () => void;
     children: React.ReactNode;
+    className?: string;
 }
 
-export function GoogleAuthButton({ onClick, children }: GoogleAuthButtonProps) {
+export function GoogleAuthButton({ onClick, children, className }: GoogleAuthButtonProps) {
     return (
         <Button
             onClick={onClick}
-            className="px-8 py-6 text-base font-medium bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 hover:from-anizai-teal-600 hover:via-anizai-blue-600 hover:to-anizai-purple-600 text-white border-0 shadow-lg hover:shadow-xl transition-all duration-200"
+            className={cn(
+                "w-full h-12 px-6 text-base font-medium",
+                "bg-white text-gray-700",
+                "border border-gray-200 hover:border-anizai-teal-400",
+                "shadow-sm hover:shadow-md",
+                "transition-all duration-200",
+                "relative overflow-hidden",
+                // Subtle gradient top border on hover
+                "before:absolute before:inset-x-0 before:top-0 before:h-[2px]",
+                "before:bg-gradient-to-r before:from-anizai-teal-500 before:via-anizai-blue-500 before:to-anizai-purple-500",
+                "before:opacity-0 hover:before:opacity-100 before:transition-opacity",
+                className
+            )}
         >
             <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
@@ -21,3 +35,4 @@ export function GoogleAuthButton({ onClick, children }: GoogleAuthButtonProps) {
         </Button>
     );
 }
+
