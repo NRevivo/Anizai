@@ -1,0 +1,17 @@
+# Environments
+.env
+venv/
+
+# Data
+data/
+chroma_db/
+metastore_db/
+*.parquet
+*.checkpoint
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+logs/

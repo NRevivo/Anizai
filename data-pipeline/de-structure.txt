@@ -1,0 +1,47 @@
+anizai-data-engineering/
+│
+├── infrastructure/           # (משותף) קבצי הרמת הסביבה
+│   ├── docker-compose.yaml   # יכיל: Kafka, Spark, Airflow, Zookeeper-less setup
+│   └── airflow/              # קונפיגורציות ספציפיות ל-Airflow
+│       └── Dockerfile
+│
+├── ingestion/                # (אחריות השותפה) סקריפטים להבאת נתונים
+│   ├── __init__.py
+│   ├── news_producer.py      # מביא חדשות ל-news_raw_stream
+│   ├── reddit_producer.py    # מביא שיח ל-community_discourse_stream
+│   └── arxiv_producer.py     # מביא מאמרים ל-professional_stream
+│
+├── orchestration/            # (אחריות השותפה) ניהול התהליכים
+│   └── dags/
+│       └── ingestion_schedule.py  # ה-DAG שמריץ את ה-Producers
+│
+├── processing/               # (אחריות רון) המנוע של Spark
+│   ├── __init__.py
+│   ├── main_driver.py        # נקודת הכניסה שמפעילה את ה-Streaming
+│   │
+│   ├── pipelines/            # לוגיקת העיבוד (2 הפייפליינים)
+│   │   ├── professional_logic.py  # ניקוי ועיבוד לחדשות+מאמרים
+│   │   └── community_logic.py     # ניקוי ועיבוד לרדיט
+│   │
+│   └── spark_utils/          # כלי עזר
+│       └── session_builder.py     # יצירת SparkSession עם הקונפיגורציות
+│
+├── services/                 # (אחריות רון) אינטגרציות חיצוניות
+│   ├── __init__.py
+│   ├── openai_service.py     # פונקציות UDF לשימוש בתוך Spark (סיכום/סנטימנט)
+│   ├── vector_db_client.py   # מחלקה לכתיבה ל-ChromaDB (ניתוב ל-3 אוספים)
+│   └── delta_lake_writer.py  # ניהול השמירה ל-Parquet
+│
+├── config/                   # (משותף) הגדרות ופרומפטים
+│   ├── settings.py           # שמות טופיקים, נתיבים, קבועים
+│   └── prompts.py            # כאן נשמור את הפרומפטים השונים (Professional vs Community)
+│
+├── data/                     # (מקומי בלבד - לא עולה לגיט!)
+│   ├── raw/                  # אזור נחיתה
+│   ├── delta_lake/           # קבצי ה-Parquet המעובדים
+│   └── chroma_db/            # מסד הנתונים הוקטורי (הקובץ הפיזי)
+│
+├── .gitignore                # הגדרת התעלמות (Data, Env, Pycache)
+├── .env.example              # תבנית למשתני סביבה (בלי המפתחות האמיתיים)
+├── requirements.txt          # כל הספריות (pyspark, kafka-python, praw, openai)
+└── README.md                 # הסבר על הפרויקט

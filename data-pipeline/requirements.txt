@@ -1,0 +1,28 @@
+# --- Environment & General Utilities ---
+python-dotenv          # טעינת משתני סביבה מקובץ .env
+requests               # שליחת בקשות HTTP (ל-API של חדשות ועוד)
+pandas                 # עבודה עם דאטה-פריימס (נוח לבדיקות מקומיות)
+numpy                  # חישובים מתמטיים (תלות של ספריות רבות)
+
+# --- Ingestion (Producers) ---
+kafka-python           # ספרייה לתקשורת עם Kafka (לכתיבת Producers)
+praw                   # Python Reddit API Wrapper (למשיכת מידע מרדיט)
+arxiv                  # ספרייה למשיכת מאמרים אקדמיים מ-ArXiv
+beautifulsoup4         # ניתוח וגירוד דפי HTML (לבלוגים אם נצטרך)
+lxml                   # מנוע עיבוד ל-BeautifulSoup
+
+# --- Processing (Spark & Big Data) ---
+pyspark==3.5.0         # המנוע של Spark (חשוב שתהיה גרסה אחידה לכולם)
+delta-spark==3.0.0     # עבודה עם Delta Lake (שמירת קבצי Parquet)
+
+# --- AI & Enrichment ---
+openai                 # העבודה מול GPT-4o ו-Embeddings
+tiktoken               # ספירת טוקנים (לפעמים נדרש ע"י OpenAI)
+langchain              # (אופציונלי) מסגרת עבודה נוחה לניהול פרומפטים
+langchain-openai       # חיבור ספציפי של LangChain ל-OpenAI
+
+# --- Vector Database ---
+chromadb               # הלקוח של מסד הנתונים הוקטורי
+
+# --- Testing & Quality ---
+pytest                 # להרצת בדיקות יחידה אם תרצו
