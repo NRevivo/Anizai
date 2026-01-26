@@ -5,13 +5,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==========================================
-# 1. Infrastructure Configuration
+# 1. Project Paths (Moved to top for better structure)
+# ==========================================
+# Automatically detect the project's root directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
+# ==========================================
+# 2. Infrastructure Configuration
 # ==========================================
 # Kafka server address - dynamic based on environment
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
 # ==========================================
-# 2. Kafka Topics (The Ingestion Targets)
+# 3. Kafka Topics (The Ingestion Targets)
 # ==========================================
 # The 3 main pipelines (Producers will send data here)
 TOPIC_NEWS = "news_raw_stream"              # Target for: NewsAPI
@@ -19,7 +26,7 @@ TOPIC_COMMUNITY = "community_discourse_stream" # Target for: Reddit, Hacker News
 TOPIC_PROFESSIONAL = "professional_stream"  # Target for: ArXiv
 
 # ==========================================
-# 3. Data Source Credentials & Config
+# 4. Data Source Credentials & Config
 # ==========================================
 
 # --- Source 1: NewsAPI (General News) ---
@@ -42,13 +49,7 @@ HACKER_NEWS_API_BASE_URL = os.getenv("HACKER_NEWS_API_BASE_URL", "https://hacker
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 # ==========================================
-# 4. Processing & Enrichment (OpenAI)
+# 5. Processing & Enrichment (OpenAI)
 # ==========================================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
-
-# ==========================================
-# 5. Project Paths
-# ==========================================
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
