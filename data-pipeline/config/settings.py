@@ -1,15 +1,23 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from the .env file
-load_dotenv()
-
 # ==========================================
-# 1. Project Paths (Moved to top for better structure)
+# 1. Project Paths & Environment Loading
 # ==========================================
-# Automatically detect the project's root directory
+# Calculate the base directory (points to 'data-pipeline' folder)
+# We go up two levels: config/settings.py -> config -> data-pipeline
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
+
+# Construct the absolute path to the .env file explicitly
+# This ensures we find the file regardless of where the script is run from
+dotenv_path = os.path.join(BASE_DIR, ".env")
+
+# Load environment variables explicitly from that path
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+else:
+    print(f"[WARNING] .env file not found at: {dotenv_path}")
 
 # ==========================================
 # 2. Infrastructure Configuration
