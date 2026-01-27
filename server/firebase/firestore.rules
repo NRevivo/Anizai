@@ -1,0 +1,112 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnerUid(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function sessionDoc(sessionId) {
+      return get(/databases/$(database)/documents/sessions/$(sessionId));
+    }
+
+    function isSessionOwner(sessionId) {
+      return isSignedIn() && sessionDoc(sessionId).data.userId == request.auth.uid;
+    }
+
+    // USERS
+    // Server-only create (Admin SDK creates user profile on signup)
+    // Client can only read and update non-sensitive fields
+    match /users/{uid} {
+      allow read: if isOwnerUid(uid);
+
+      // Server-only create - prevents privilege escalation at creation time
+      allow create: if false;
+
+      // Allow only non-sensitive updates from client.
+      // Sensitive fields must be server-only (plan, planExpiresAt, usageMonth, monthlyForecastsUsed, email).
+      allow update: if isOwnerUid(uid)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.plan == resource.data.plan
+        && request.resource.data.planExpiresAt == resource.data.planExpiresAt
+        && request.resource.data.usageMonth == resource.data.usageMonth
+        && request.resource.data.monthlyForecastsUsed == resource.data.monthlyForecastsUsed;
+
+      allow delete: if false;
+
+      // Optional future: follows
+      match /follows/{sessionId} {
+        allow read, write: if isOwnerUid(uid);
+      }
+    }
+
+    // SESSIONS
+    match /sessions/{sessionId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      // Server-only writes (Admin SDK)
+      allow create, update, delete: if false;
+
+      // SESSION MESSAGES
+      match /messages/{messageId} {
+        allow read: if isSessionOwner(sessionId);
+
+        // Client can create only user messages (Q&A layer).
+        allow create: if isSessionOwner(sessionId)
+          && request.resource.data.role == "user"
+          && request.resource.data.content is string
+          && request.resource.data.content.size() > 0
+          && request.resource.data.content.size() < 10000
+          && request.resource.data.createdAt is timestamp;
+
+        allow update, delete: if false;
+      }
+
+      // EVIDENCE (read-only for client)
+      match /evidence/{evidenceId} {
+        allow read: if isSessionOwner(sessionId);
+        allow write: if false;
+      }
+
+      // PREDICTION SERIES (read-only for client)
+      match /predictionSeries/{pointId} {
+        allow read: if isSessionOwner(sessionId);
+        allow write: if false;
+      }
+    }
+
+    // SESSION RESULTS (read-only for client)
+    match /sessionResults/{sessionId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // SOURCES (safe to read; server-only write)
+    match /sources/{sourceId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // PAYMENTS (read-only for client)
+    match /payments/{paymentId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // TRENDING (public read)
+    match /trendingForecasts/{trendId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // CANONICAL (signed-in read)
+    match /canonicalForecasts/{canonicalKey} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+  }
+}
