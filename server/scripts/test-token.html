@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebase Token Helper</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+        .card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        input, textarea { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        code { background: #f4f4f4; padding: 2px 5px; border-radius: 4px; word-break: break-all; }
+        #tokenOutput { background: #f8f9fa; padding: 15px; border-radius: 4px; word-break: break-all; font-family: monospace; display: none; }
+    </style>
+</head>
+<body>
+    <h1>🔑 Firebase Token Helper</h1>
+    
+    <div class="card">
+        <h3>1. Configuration</h3>
+        <p>Paste your firebaseConfig object (JSON) or just the API Key:</p>
+        <input type="text" id="apiKey" placeholder="apiKey (AIza...)" />
+    </div>
+
+    <div class="card">
+        <h3>2. Sign In</h3>
+        <button onclick="signInAnon()">Sign In Anonymously</button>
+    </div>
+
+    <div class="card" id="tokenOutput">
+        <h3>3. Your ID Token</h3>
+        <p>Copy this token for your curl command:</p>
+        <textarea id="tokenText" rows="6" readonly></textarea>
+        <button onclick="copyToken()">Copy to Clipboard</button>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script>
+        function getConfig() {
+            const key = document.getElementById('apiKey').value.trim();
+            if (!key) return null;
+            // Handle if user pasted full JSON or just key
+            if (key.startsWith('{')) {
+                try { return JSON.parse(key); } catch(e) { alert('Invalid JSON'); return null; }
+            }
+            return { apiKey: key }; // Minimal config for Auth
+        }
+
+        async function signInAnon() {
+            const config = getConfig();
+            if (!config) return alert('Please enter API Key');
+
+            if (!firebase.apps.length) firebase.initializeApp(config);
+
+            try {
+                const userCred = await firebase.auth().signInAnonymously();
+                const token = await userCred.user.getIdToken();
+                showToken(token);
+            } catch (error) {
+                alert('Error: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        function showToken(token) {
+            document.getElementById('tokenOutput').style.display = 'block';
+            document.getElementById('tokenText').value = token;
+        }
+
+        function copyToken() {
+            const copyText = document.getElementById("tokenText");
+            copyText.select();
+            document.execCommand("copy");
+            alert("Token copied!");
+        }
+    </script>
+</body>
+</html>
