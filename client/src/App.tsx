@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
+import { SignupPage } from './pages/SignupPage';
 import { PlanSelection } from './pages/PlanSelection';
 import { DashboardPage } from './pages/DashboardPage';
 import { ContactPage } from './pages/ContactPage';
@@ -14,9 +15,11 @@ import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { CookiesPage } from './pages/CookiesPage';
 
+
 type AppState =
   | 'landing'
   | 'login'
+  | 'signup'
   | 'plan-selection'
   | 'dashboard'
   | 'contact'
@@ -41,6 +44,10 @@ function App() {
     setAppState('login');
   };
 
+  const handleGoToSignup = () => {
+    setAppState('signup');
+  };
+
   const handleBackToLanding = () => {
     setAppState('landing');
   };
@@ -60,9 +67,35 @@ function App() {
     }
   };
 
+  const handleGoogleAuth = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+      setUserType('existing');
+      setAppState('dashboard');
+    } catch (error) {
+      console.error('Google sign-in failed', error);
+    }
+  };
+
   const handleEmailAuth = (email: string) => {
     console.log(`Email auth for: ${email}`);
     handleAuth();
+  };
+
+  const handleCreateAccount = (payload: { name: string; email: string; password: string }) => {
+    console.log(`Create account for: ${payload.email}`);
+    setUserType('new');
+    setAppState('plan-selection');
+  };
+
+  const handleGoogleSignup = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+      setUserType('new');
+      setAppState('plan-selection');
+    } catch (error) {
+      console.error('Google sign-up failed', error);
+    }
   };
 
   // ---------- Plans ----------
@@ -75,6 +108,7 @@ function App() {
   // ---------- Footer / pages navigation ----------
 
   const navigationHandlers = {
+    home: () => setAppState('landing'),
     features: () => setAppState('features'),
     methodology: () => setAppState('methodology'),
     changelog: () => setAppState('changelog'),
@@ -83,7 +117,7 @@ function App() {
     terms: () => setAppState('terms'),
     privacy: () => setAppState('privacy'),
     cookies: () => setAppState('cookies'),
-    pricing: handleGoToLogin, // אם יש Pricing בפוטר
+    pricing: () => setAppState('plan-selection'),
   };
 
   // ---------- Dashboard actions ----------
@@ -112,9 +146,21 @@ function App() {
   if (appState === 'login') {
     return (
       <LoginPage
-        onGoogleAuth={handleAuth}
+        onGoogleAuth={handleGoogleAuth}
         onEmailAuth={handleEmailAuth}
         onBack={handleBackToLanding}
+        onSignUp={handleGoToSignup}
+      />
+    );
+  }
+
+  if (appState === 'signup') {
+    return (
+      <SignupPage
+        onCreateAccount={handleCreateAccount}
+        onGoogleSignup={handleGoogleSignup}
+        onBack={handleGoToLogin}
+        onSignIn={handleGoToLogin}
       />
     );
   }
@@ -122,10 +168,10 @@ function App() {
   if (appState === 'contact') {
     return <ContactPage onBack={handleBackToLanding} />;
   }
+if (appState === 'features') {
+  return <FeaturesPage onBack={handleBackToLanding} onGetStarted={handleGoToLogin} />;
+}
 
-  if (appState === 'features') {
-    return <FeaturesPage onBack={handleBackToLanding} />;
-  }
 
   if (appState === 'methodology') {
     return <MethodologyPage onBack={handleBackToLanding} />;
@@ -133,24 +179,23 @@ function App() {
 
   if (appState === 'changelog') {
     return <ChangelogPage onBack={handleBackToLanding} />;
-  }
+  } 
 
-  if (appState === 'about') {
-    return <AboutPage onBack={handleBackToLanding} />;
-  }
+    if (appState === 'about') {
+    return (
+        <AboutPage
+        onBack={handleBackToLanding}
+        onGetStarted={handleGoToLogin} // או plan-selection אם זו הכניסה אצלך
+        onMethodology={() => setAppState('methodology')}
+        />
+    );
+    }
 
   if (appState === 'blog') {
     return <BlogPage onBack={handleBackToLanding} />;
   }
-
-  if (appState === 'terms') {
-    return <TermsPage onBack={handleBackToLanding} />;
-  }
-
-  if (appState === 'privacy') {
-    return <PrivacyPage onBack={handleBackToLanding} />;
-  }
-
+if (appState === 'terms') return <TermsPage onBack={handleBackToLanding} />;
+if (appState === 'privacy') return <PrivacyPage onBack={handleBackToLanding} />;
   if (appState === 'cookies') {
     return <CookiesPage onBack={handleBackToLanding} />;
   }
