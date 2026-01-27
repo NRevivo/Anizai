@@ -2,9 +2,11 @@ import { GoogleAuthButton } from '../auth/GoogleAuthButton';
 
 interface HeroProps {
     onAuth: () => void;
+    onTerms?: () => void;
+    onPrivacy?: () => void;
 }
 
-export function Hero({ onAuth }: HeroProps) {
+export function Hero({ onAuth, onTerms, onPrivacy }: HeroProps) {
     return (
         <section className="min-h-screen w-full flex flex-col items-center justify-center px-6 py-24 relative overflow-hidden bg-[#fafbfc]">
             {/* Animated gradient orbs */}
@@ -84,13 +86,19 @@ export function Hero({ onAuth }: HeroProps) {
 
                     <p className="text-[11px] text-gray-400 leading-relaxed">
                         No credit card required •{' '}
-                        <a href="#" className="text-gray-500 hover:text-gray-700 underline underline-offset-2">
+                        <button
+                            onClick={onTerms}
+                            className="text-gray-500 hover:text-gray-700 underline underline-offset-2 bg-transparent border-none p-0 cursor-pointer"
+                        >
                             Terms
-                        </a>
+                        </button>
                         {' '}•{' '}
-                        <a href="#" className="text-gray-500 hover:text-gray-700 underline underline-offset-2">
+                        <button
+                            onClick={onPrivacy}
+                            className="text-gray-500 hover:text-gray-700 underline underline-offset-2 bg-transparent border-none p-0 cursor-pointer"
+                        >
                             Privacy
-                        </a>
+                        </button>
                     </p>
                 </div>
 

@@ -4,27 +4,29 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
 
-interface LoginPageProps {
-    onGoogleAuth: () => void;
-    onEmailAuth: (email: string) => void;
+interface SignupPageProps {
+    onCreateAccount: (payload: { name: string; email: string; password: string }) => void;
+    onGoogleSignup: () => void;
     onBack: () => void;
-    onSignUp: () => void;
+    onSignIn: () => void;
 }
 
-export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: LoginPageProps) {
+export function SignupPage({ onCreateAccount, onGoogleSignup, onBack, onSignIn }: SignupPageProps) {
+    const [name, setName] = useState('');
     const [email, setEmail] = useState('');
-    const [isEmailMode, setIsEmailMode] = useState(false);
+    const [password, setPassword] = useState('');
 
-    const handleEmailSubmit = (e: React.FormEvent) => {
+    const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (email.trim()) {
-            onEmailAuth(email);
+        if (name.trim() && email.trim() && password.trim()) {
+            onCreateAccount({ name, email, password });
         }
     };
 
+    const isDisabled = !name.trim() || !email.trim() || !password.trim();
+
     return (
         <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-white to-anizai-teal-50/20 flex flex-col items-center justify-center px-4">
-            {/* Back Button */}
             <button
                 onClick={onBack}
                 className="absolute top-6 left-6 flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors text-sm font-medium"
@@ -35,10 +37,8 @@ export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: Login
                 Back
             </button>
 
-            {/* Main Content */}
             <div className="w-full max-w-[400px] flex flex-col items-center">
-                {/* Logo */}
-                <div className="mb-4">
+                <div className="mb-8">
                     <img
                         src="/logo-brain.png"
                         alt="Anizai"
@@ -46,22 +46,18 @@ export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: Login
                     />
                 </div>
 
-                {/* Title */}
                 <h1 className="text-2xl font-semibold text-gray-900 mb-2 text-center">
-                    Welcome back
+                    Create your account
                 </h1>
                 <p className="text-gray-500 text-sm mb-8 text-center">
-                    Sign in to continue to Anizai
+                    Start forecasting with Anizai today
                 </p>
 
-                {/* Auth Options */}
                 <div className="w-full space-y-4">
-                    {/* Google Auth */}
-                    <GoogleAuthButton onClick={onGoogleAuth}>
+                    <GoogleAuthButton onClick={onGoogleSignup}>
                         Continue with Google
                     </GoogleAuthButton>
 
-                    {/* Divider */}
                     <div className="relative flex items-center justify-center my-6">
                         <div className="absolute inset-0 flex items-center">
                             <div className="w-full border-t border-gray-200" />
@@ -71,60 +67,58 @@ export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: Login
                         </span>
                     </div>
 
-                    {/* Email Auth */}
-                    {!isEmailMode ? (
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <Input
+                            type="text"
+                            placeholder="Full name"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
+                            autoFocus
+                        />
+                        <Input
+                            type="email"
+                            placeholder="Email address"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
+                        />
+                        <Input
+                            type="password"
+                            placeholder="Password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
+                        />
                         <Button
-                            onClick={() => setIsEmailMode(true)}
+                            type="submit"
+                            disabled={isDisabled}
                             className={cn(
                                 "w-full h-12 text-base font-medium",
                                 "bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500",
                                 "hover:from-anizai-teal-600 hover:via-anizai-blue-600 hover:to-anizai-purple-600",
-                                "text-white border-0 shadow-md hover:shadow-lg transition-all duration-200"
+                                "text-white border-0 shadow-md hover:shadow-lg transition-all duration-200",
+                                "disabled:opacity-50 disabled:cursor-not-allowed"
                             )}
                         >
-                            Continue with Email
+                            Create account
                         </Button>
-                    ) : (
-                        <form onSubmit={handleEmailSubmit} className="space-y-4">
-                            <Input
-                                type="email"
-                                placeholder="Enter your email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
-                                autoFocus
-                            />
-                            <Button
-                                type="submit"
-                                disabled={!email.trim()}
-                                className={cn(
-                                    "w-full h-12 text-base font-medium",
-                                    "bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500",
-                                    "hover:from-anizai-teal-600 hover:via-anizai-blue-600 hover:to-anizai-purple-600",
-                                    "text-white border-0 shadow-md hover:shadow-lg transition-all duration-200",
-                                    "disabled:opacity-50 disabled:cursor-not-allowed"
-                                )}
-                            >
-                                Continue
-                            </Button>
-                        </form>
-                    )}
+                    </form>
 
                     <p className="text-sm text-gray-500 text-center">
-                        Don't have an account?{' '}
+                        Already have an account?{' '}
                         <button
                             type="button"
-                            onClick={onSignUp}
+                            onClick={onSignIn}
                             className="text-anizai-blue-500 hover:underline"
                         >
-                            Sign up
+                            Sign in
                         </button>
                     </p>
                 </div>
 
-                {/* Terms */}
                 <p className="mt-8 text-xs text-gray-400 text-center leading-relaxed">
-                    By continuing, you agree to Anizai's{' '}
+                    By creating an account, you agree to Anizai's{' '}
                     <a href="#" className="text-anizai-blue-500 hover:underline">Terms of Service</a>
                     {' '}and{' '}
                     <a href="#" className="text-anizai-blue-500 hover:underline">Privacy Policy</a>
