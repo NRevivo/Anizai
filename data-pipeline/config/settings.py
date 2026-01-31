@@ -26,12 +26,18 @@ else:
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
 # ==========================================
-# 3. Kafka Topics (The Ingestion Targets)
+# 3. Kafka Topics (All Ingestion Targets)
 # ==========================================
-# The 3 main pipelines (Producers will send data here)
+# Core pipelines
 TOPIC_NEWS = "news_raw_stream"              # Target for: NewsAPI
 TOPIC_COMMUNITY = "community_discourse_stream" # Target for: Reddit, Hacker News, YouTube
 TOPIC_PROFESSIONAL = "professional_stream"  # Target for: ArXiv
+
+# OSINT streams
+TOPIC_WEATHER = "weather_raw_stream"        # Target for: OpenWeatherMap
+TOPIC_TELEGRAM = "telegram_raw_stream"      # Target for: Telegram channels
+TOPIC_FLIGHTS = "flights_raw_stream"        # Target for: Flight tracking APIs
+TOPIC_TRENDS = "trends_raw_stream"          # Target for: Google Trends
 
 # ==========================================
 # 4. Data Source Credentials & Config
@@ -55,6 +61,9 @@ HACKER_NEWS_API_BASE_URL = os.getenv("HACKER_NEWS_API_BASE_URL", "https://hacker
 
 # --- Source 5: YouTube Data API (Video Transcripts/Comments) ---
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+
+# --- Source 6: OpenWeatherMap (Weather Forecasts) ---
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 # ==========================================
 # 5. Processing & Enrichment (OpenAI)
