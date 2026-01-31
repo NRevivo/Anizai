@@ -5,12 +5,13 @@ from dotenv import load_dotenv
 # 1. Project Paths & Environment Loading
 # ==========================================
 # Calculate the base directory (points to 'data-pipeline' folder)
-# We go up two levels: config/settings.py -> config -> data-pipeline
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
+# Create data directory if it doesn't exist
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # Construct the absolute path to the .env file explicitly
-# This ensures we find the file regardless of where the script is run from
 dotenv_path = os.path.join(BASE_DIR, ".env")
 
 # Load environment variables explicitly from that path
@@ -52,18 +53,21 @@ REDDIT_SECRET = os.getenv("REDDIT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "AnazaiScraper/1.0")
 
 # --- Source 3: ArXiv (Academic/Professional) ---
-# Configuration for search limits (No private key usually required)
 ARXIV_MAX_RESULTS = int(os.getenv("ARXIV_MAX_RESULTS", 100))
 
 # --- Source 4: Hacker News (Tech Community) ---
-# Hacker News API is usually public, but we define the base URL here
 HACKER_NEWS_API_BASE_URL = os.getenv("HACKER_NEWS_API_BASE_URL", "https://hacker-news.firebaseio.com/v0")
 
-# --- Source 5: YouTube Data API (Video Transcripts/Comments) ---
+# --- Source 5: YouTube Data API ---
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# --- Source 6: OpenWeatherMap (Weather Forecasts) ---
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+# --- Source 6: OpenWeatherMap ---
+# Note: Renamed to match the import in weather_producer.py
+WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+
+# --- Source 7: Telegram (Channel Monitoring via MTProto) ---
+TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 
 # ==========================================
 # 5. Processing & Enrichment (OpenAI)
