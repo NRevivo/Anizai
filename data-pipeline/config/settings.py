@@ -62,7 +62,6 @@ HACKER_NEWS_API_BASE_URL = os.getenv("HACKER_NEWS_API_BASE_URL", "https://hacker
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 # --- Source 6: OpenWeatherMap ---
-# Note: Renamed to match the import in weather_producer.py
 WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 # --- Source 7: Telegram (Channel Monitoring via MTProto) ---

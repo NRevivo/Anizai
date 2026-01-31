@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 from config import (
     KAFKA_BOOTSTRAP_SERVERS,
     TOPIC_WEATHER,
-    OPENWEATHER_API_KEY,
+    WEATHER_API_KEY,
     BASE_DIR
 )
 
@@ -99,7 +99,7 @@ def get_coordinates(city_name: str) -> dict | None:
     params = {
         "q": city_name,
         "limit": 1,
-        "appid": OPENWEATHER_API_KEY
+        "appid": WEATHER_API_KEY
     }
     
     try:
@@ -150,7 +150,7 @@ def fetch_weather_forecast(lat: float, lon: float) -> dict | None:
     params = {
         "lat": lat,
         "lon": lon,
-        "appid": OPENWEATHER_API_KEY,
+        "appid": WEATHER_API_KEY,
         "units": "metric"  # Return temperatures in Celsius
     }
     
@@ -200,8 +200,8 @@ def run_producer():
     logger.info("=" * 50)
     
     # Validate required configuration
-    if not OPENWEATHER_API_KEY:
-        logger.error("OPENWEATHER_API_KEY is not set in .env file!")
+    if not WEATHER_API_KEY:
+        logger.error("WEATHER_API_KEY is not set in .env file!")
         sys.exit(1)
     
     logger.info(f"Kafka Bootstrap Servers: {KAFKA_BOOTSTRAP_SERVERS}")
