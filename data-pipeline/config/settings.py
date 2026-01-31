@@ -5,12 +5,13 @@ from dotenv import load_dotenv
 # 1. Project Paths & Environment Loading
 # ==========================================
 # Calculate the base directory (points to 'data-pipeline' folder)
-# We go up two levels: config/settings.py -> config -> data-pipeline
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
+# Create data directory if it doesn't exist
+os.makedirs(DATA_DIR, exist_ok=True)
+
 # Construct the absolute path to the .env file explicitly
-# This ensures we find the file regardless of where the script is run from
 dotenv_path = os.path.join(BASE_DIR, ".env")
 
 # Load environment variables explicitly from that path
@@ -26,12 +27,18 @@ else:
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 
 # ==========================================
-# 3. Kafka Topics (The Ingestion Targets)
+# 3. Kafka Topics (All Ingestion Targets)
 # ==========================================
-# The 3 main pipelines (Producers will send data here)
+# Core pipelines
 TOPIC_NEWS = "news_raw_stream"              # Target for: NewsAPI
 TOPIC_COMMUNITY = "community_discourse_stream" # Target for: Reddit, Hacker News, YouTube
 TOPIC_PROFESSIONAL = "professional_stream"  # Target for: ArXiv
+
+# OSINT streams
+TOPIC_WEATHER = "weather_raw_stream"        # Target for: OpenWeatherMap
+TOPIC_TELEGRAM = "telegram_raw_stream"      # Target for: Telegram channels
+TOPIC_FLIGHTS = "flights_raw_stream"        # Target for: Flight tracking APIs
+TOPIC_TRENDS = "trends_raw_stream"          # Target for: Google Trends
 
 # ==========================================
 # 4. Data Source Credentials & Config
@@ -46,15 +53,21 @@ REDDIT_SECRET = os.getenv("REDDIT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "AnazaiScraper/1.0")
 
 # --- Source 3: ArXiv (Academic/Professional) ---
-# Configuration for search limits (No private key usually required)
 ARXIV_MAX_RESULTS = int(os.getenv("ARXIV_MAX_RESULTS", 100))
 
 # --- Source 4: Hacker News (Tech Community) ---
-# Hacker News API is usually public, but we define the base URL here
 HACKER_NEWS_API_BASE_URL = os.getenv("HACKER_NEWS_API_BASE_URL", "https://hacker-news.firebaseio.com/v0")
 
-# --- Source 5: YouTube Data API (Video Transcripts/Comments) ---
+# --- Source 5: YouTube Data API ---
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+
+# --- Source 6: OpenWeatherMap ---
+# Note: Renamed to match the import in weather_producer.py
+WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+
+# --- Source 7: Telegram (Channel Monitoring via MTProto) ---
+TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID")
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH")
 
 # ==========================================
 # 5. Processing & Enrichment (OpenAI)

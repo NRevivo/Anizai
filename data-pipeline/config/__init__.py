@@ -8,10 +8,15 @@ from .settings import (
     # Infrastructure
     KAFKA_BOOTSTRAP_SERVERS,
     
-    # Topics
+    # Topics (Core)
     TOPIC_NEWS,
     TOPIC_COMMUNITY,
     TOPIC_PROFESSIONAL,
+    # Topics (OSINT)
+    TOPIC_WEATHER,
+    TOPIC_TELEGRAM,
+    TOPIC_FLIGHTS,
+    TOPIC_TRENDS,
     
     # Credentials & API Keys
     NEWS_API_KEY,
@@ -21,6 +26,9 @@ from .settings import (
     ARXIV_MAX_RESULTS,
     HACKER_NEWS_API_BASE_URL,
     YOUTUBE_API_KEY,
+    WEATHER_API_KEY,
+    TELEGRAM_API_ID,
+    TELEGRAM_API_HASH,
     OPENAI_API_KEY,
     OPENAI_MODEL_NAME,
     
