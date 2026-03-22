@@ -18,8 +18,6 @@ interface ChatPanelProps {
 export function ChatPanel({
     messages,
     suggestedActions,
-    currentQuestion,
-    currentAnswer,
     onSendMessage,
     onActionClick
 }: ChatPanelProps) {

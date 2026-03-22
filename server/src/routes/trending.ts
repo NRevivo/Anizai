@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { firestore } from '../lib/firebase.js';
+import * as trendingService from '../services/trending.service.js';
 import type { ApiSuccessResponse } from '../types/api.js';
 
 const router = Router();
@@ -10,18 +10,7 @@ const router = Router();
  */
 router.get('/trending', async (_req, res, next) => {
     try {
-        const snapshot = await firestore
-            .collection('trendingForecasts')
-            .orderBy('popularityScore', 'desc')
-            .limit(20)
-            .get();
-
-        const forecasts = snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-            createdAt: doc.data().createdAt?.toDate?.()?.toISOString(),
-            updatedAt: doc.data().updatedAt?.toDate?.()?.toISOString(),
-        }));
+        const forecasts = await trendingService.getTopTrending(20);
 
         const response: ApiSuccessResponse = {
             data: forecasts,
