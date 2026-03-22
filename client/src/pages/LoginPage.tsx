@@ -6,19 +6,20 @@ import { cn } from '../lib/utils';
 
 interface LoginPageProps {
     onGoogleAuth: () => void;
-    onEmailAuth: (email: string) => void;
+    onEmailAuth: (email: string, password?: string) => void;
     onBack: () => void;
     onSignUp: () => void;
 }
 
 export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: LoginPageProps) {
     const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
     const [isEmailMode, setIsEmailMode] = useState(false);
 
     const handleEmailSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (email.trim()) {
-            onEmailAuth(email);
+        if (email.trim() && password.trim()) {
+            onEmailAuth(email, password);
         }
     };
 
@@ -94,9 +95,16 @@ export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: Login
                                 className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
                                 autoFocus
                             />
+                            <Input
+                                type="password"
+                                placeholder="Enter your password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
+                            />
                             <Button
                                 type="submit"
-                                disabled={!email.trim()}
+                                disabled={!email.trim() || !password.trim()}
                                 className={cn(
                                     "w-full h-12 text-base font-medium",
                                     "bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500",

@@ -124,4 +124,25 @@ router.post('/sessions/:id/messages', authMiddleware, async (req, res, next) => 
     }
 });
 
+/**
+ * DELETE /sessions/:id
+ * Delete a session and all related records
+ */
+router.delete('/sessions/:id', authMiddleware, async (req, res, next) => {
+    try {
+        const user = req.user as AuthUser;
+        const sessionId = req.params.id as string;
+
+        await sessionsService.deleteSession(sessionId, user.uid);
+
+        const response: ApiSuccessResponse = {
+            data: { id: sessionId },
+        };
+
+        res.json(response);
+    } catch (error) {
+        next(error);
+    }
+});
+
 export default router;

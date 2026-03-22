@@ -33,6 +33,8 @@ export interface HealthResponse {
 export interface AuthUser {
     uid: string;
     email: string | undefined;
+    name: string | undefined;
+    picture: string | undefined;
 }
 
 /**

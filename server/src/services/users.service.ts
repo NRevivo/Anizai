@@ -3,9 +3,8 @@
  * Minimal user profile management
  */
 
-import { firestore } from '../lib/firebase.js';
-import { Timestamp } from 'firebase-admin/firestore';
 import { logger } from '../lib/logger.js';
+import { userRepository } from '../repositories/user.repository.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -14,9 +13,13 @@ import { logger } from '../lib/logger.js';
 export interface User {
     uid: string;
     email: string;
-    fullName: string | null;
+    displayName: string | null;
     admin: boolean;
-    subscriptionStatus: 'none' | 'active' | 'cancelled' | 'past_due';
+    plan: 'free' | 'premium';
+    planExpiresAt: string | null;
+    monthlyForecastsUsed: number;
+    usageMonth: string;
+    lastLoginAt: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -24,8 +27,12 @@ export interface User {
 export interface UserPublic {
     uid: string;
     email: string;
-    fullName: string | null;
-    subscriptionStatus: string;
+    displayName: string | null;
+    plan: 'free' | 'premium';
+    planExpiresAt: string | null;
+    monthlyForecastsUsed: number;
+    usageMonth: string;
+    lastLoginAt: string;
     createdAt: string;
 }
 
@@ -33,16 +40,16 @@ export interface UserPublic {
 // Helpers
 // ─────────────────────────────────────────────────────────────
 
-function toISOString(timestamp: FirebaseFirestore.Timestamp | null | undefined): string | null {
-    return timestamp?.toDate?.()?.toISOString() ?? null;
-}
-
 function toPublicUser(user: User): UserPublic {
     return {
         uid: user.uid,
         email: user.email,
-        fullName: user.fullName,
-        subscriptionStatus: user.subscriptionStatus,
+        displayName: user.displayName,
+        plan: user.plan,
+        planExpiresAt: user.planExpiresAt,
+        monthlyForecastsUsed: user.monthlyForecastsUsed,
+        usageMonth: user.usageMonth,
+        lastLoginAt: user.lastLoginAt,
         createdAt: user.createdAt,
     };
 }
@@ -55,64 +62,60 @@ function toPublicUser(user: User): UserPublic {
  * Get user by UID
  */
 export async function getUser(uid: string): Promise<User | null> {
-    const doc = await firestore.collection('users').doc(uid).get();
-
-    if (!doc.exists) {
-        return null;
-    }
-
-    const data = doc.data()!;
-
-    return {
-        uid: doc.id,
-        email: data.email,
-        fullName: data.fullName ?? null,
-        admin: data.admin ?? false,
-        subscriptionStatus: data.subscriptionStatus ?? 'none',
-        createdAt: toISOString(data.createdAt) ?? '',
-        updatedAt: toISOString(data.updatedAt) ?? '',
-    };
+    return userRepository.findById(uid);
 }
 
 /**
  * Get or create user
  * Creates a new user document if one doesn't exist for the given UID
  */
-export async function getOrCreateUser(uid: string, email: string): Promise<User> {
-    const existingUser = await getUser(uid);
+export async function getOrCreateUser(uid: string, email: string, displayName: string | null): Promise<User> {
+    const existingUser = await userRepository.findById(uid);
 
     if (existingUser) {
+        const shouldSyncEmail = existingUser.email !== email;
+        const shouldSyncName = existingUser.displayName !== displayName;
+
+        if (shouldSyncEmail || shouldSyncName) {
+            const synced = await userRepository.syncFromAuth(uid, email, displayName);
+            if (synced) {
+                return synced;
+            }
+        }
+
         return existingUser;
     }
 
     // Create new user
-    const now = Timestamp.now();
-
-    const userData = {
-        email,
-        fullName: null,
-        admin: false,
-        subscriptionStatus: 'none' as const,
-        createdAt: now,
-        updatedAt: now,
-    };
-
-    await firestore.collection('users').doc(uid).set(userData);
+    const newUser = await userRepository.create(uid, email, displayName);
 
     logger.info({ uid, email }, 'Created new user');
 
-    return {
-        uid,
-        ...userData,
-        createdAt: now.toDate().toISOString(),
-        updatedAt: now.toDate().toISOString(),
-    };
+    return newUser;
 }
 
 /**
  * Get public user profile (excludes sensitive fields like admin)
  */
-export async function getPublicProfile(uid: string, email: string): Promise<UserPublic> {
-    const user = await getOrCreateUser(uid, email);
+export async function getPublicProfile(uid: string, email: string, displayName: string | null): Promise<UserPublic> {
+    const user = await getOrCreateUser(uid, email, displayName);
     return toPublicUser(user);
+}
+
+/**
+ * Update user's plan (free | premium)
+ */
+export async function updatePlan(
+    uid: string,
+    plan: 'free' | 'premium'
+): Promise<UserPublic> {
+    const updated = await userRepository.updatePlan(uid, plan);
+    return toPublicUser(updated);
+}
+
+/**
+ * Increment usage and check plan limits
+ */
+export async function incrementUsage(uid: string): Promise<void> {
+    return userRepository.incrementUsage(uid);
 }
