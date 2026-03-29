@@ -1,13 +1,11 @@
 # Environments
 .env
+.env.example
+
 venv/
 
 # Data
 data/
-chroma_db/
-metastore_db/
-*.parquet
-*.checkpoint
 
 # Python
 __pycache__/
@@ -19,3 +17,9 @@ logs/
 # Telegram Session Files
 *.session
 *.session-journal
+
+# IDE
+.idea/
+.vscode/
+
+/task_plan.md
