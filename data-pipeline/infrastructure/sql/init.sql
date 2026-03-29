@@ -1,0 +1,476 @@
+-- ==========================================================
+-- Anizai Data Pipeline — PostgreSQL Schema Initialization
+-- ==========================================================
+-- Executed automatically on first container start via:
+--   /docker-entrypoint-initdb.d/01_init.sql
+--
+-- Creates all four vaults of the Multi-Vault Strategy (Section 5)
+-- plus the Divergence Alerts table and Mapping Dictionary.
+--
+-- Table overview:
+--   knowledge_vault    — Silver full-text document store (Section 5.1)
+--   social_vault       — Silver social discourse store (Section 5.1)
+--   knowledge_vectors  — Gold embeddings: signals/news/research (Section 5.2, C.5)
+--   social_vectors     — Gold embeddings: community discourse (Section 5.2, C.6)
+--   momentum_vault     — Gold time-series hypertable (Section 5.3)
+--   divergence_alerts  — Gold structured alerts (Section C.7)
+--   mapping_dict       — Cross-platform ID linkage (Section 5.4)
+--
+-- References:
+--   Section 5:   Multi-Vault Strategy
+--   Section C.1: Bronze Schema (ingestion_id → raw_data_ref bridge)
+--   Section C.2: Silver Structured Metric Schema
+--   Section C.3: Silver Document & Social Stores
+--   Section C.5: Gold Global Signal Schema
+--   Section C.6: Gold Social Pulse Schema
+--   Section C.7: Gold Divergence Alert Schema
+-- ==========================================================
+
+
+-- ==========================================================
+-- EXTENSIONS
+-- ==========================================================
+
+-- pgvector: high-dimensional vector similarity search (Section 5.2)
+-- Enables the vector(N) column type and HNSW / IVFFlat index methods.
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- TimescaleDB: time-series partitioning and Continuous Aggregates (Section 5.3)
+-- Must be created before any hypertable is defined.
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- pg_trgm: trigram-based text search for full-text keyword queries
+-- Used by Knowledge Vault to support fast LIKE/ILIKE searches on article text.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+
+-- ==========================================================
+-- 1. KNOWLEDGE VAULT — Silver Document Store (Section 5.1, C.3)
+-- ==========================================================
+-- Stores cleaned full-text articles and research papers.
+-- JSONB for schema flexibility so schema evolution of detected_entities
+-- or sniper_keywords does not require ALTER TABLE.
+--
+-- Why document_hash UNIQUE: SHA-256 dedup guarantee. The Flink Silver Job
+-- computes the hash before insert; a duplicate INSERT is rejected here as
+-- a last-resort guard (Section 4.1C).
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS knowledge_vault (
+    doc_id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_hash           VARCHAR(64)     NOT NULL UNIQUE, -- SHA-256 hex digest (Section 4.1C)
+    canonical_event_id      TEXT            NOT NULL,        -- shared key linking Bronze → Silver → Gold
+    silver_data_ref         UUID,                            -- self-referencing ID for Gold drill-down (Section 5.1)
+    raw_data_ref            UUID            NOT NULL,        -- Bronze ingestion_id for full audit trail (Section C.5)
+
+    -- Core document fields (Section C.3)
+    source_name             TEXT            NOT NULL,        -- 'newsapi' | 'arxiv'
+    author                  TEXT,
+    original_url            TEXT,
+    publish_date            TIMESTAMPTZ,
+    full_text_raw           TEXT            NOT NULL,
+    inverted_pyramid_lead   TEXT,                            -- first sentence / abstract lead
+
+    -- Enrichment metadata
+    detected_entities       JSONB           NOT NULL DEFAULT '[]', -- extracted actors, locations, systems
+    relevance_score         FLOAT           NOT NULL DEFAULT 0.0   -- Keyword Sniper score 0.0–1.0 (Section 4.1A)
+                            CHECK (relevance_score BETWEEN 0.0 AND 1.0),
+    sniper_keywords         JSONB           NOT NULL DEFAULT '[]', -- keywords that triggered passage through Sniper
+
+    -- Audit
+    ingested_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for Knowledge Vault
+CREATE INDEX IF NOT EXISTS idx_kv_canonical_event
+    ON knowledge_vault (canonical_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_kv_source_date
+    ON knowledge_vault (source_name, publish_date DESC);
+
+-- GIN index for fast JSONB querying on entities (e.g., WHERE detected_entities @> '["NATO"]')
+CREATE INDEX IF NOT EXISTS idx_kv_entities
+    ON knowledge_vault USING GIN (detected_entities);
+
+-- Trigram index for full-text ILIKE queries during drill-down (Section 5.1)
+CREATE INDEX IF NOT EXISTS idx_kv_fulltext_trgm
+    ON knowledge_vault USING GIN (full_text_raw gin_trgm_ops);
+
+
+-- ==========================================================
+-- 2. SOCIAL VAULT — Silver Social Discourse Store (Section 5.1, C.3)
+-- ==========================================================
+-- Manages raw comment trees and threaded discourse from four platforms.
+-- JSONB platform_data stores the structurally different fields per
+-- platform (Reddit, Polymarket, Telegram, HackerNews) without forcing
+-- a single rigid schema (Section C.3).
+--
+-- Why GIN on platform_data: allows queries like
+--   WHERE platform_data->>'market_id' = 'abc123'
+-- across all platforms without separate tables.
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS social_vault (
+    social_id               UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_event_id      TEXT,                           -- NULL for standalone messages (e.g., Telegram breaking news)
+    raw_data_ref            UUID            NOT NULL,       -- Bronze ingestion_id
+
+    -- Common fields across all platforms
+    source_name             TEXT            NOT NULL        -- 'reddit' | 'polymarket' | 'telegram' | 'hackernews'
+                            CHECK (source_name IN ('reddit', 'polymarket', 'telegram', 'hackernews')),
+
+    -- Platform-specific payload stored in JSONB (Section C.3 four patterns):
+    --   Reddit:     {post_id, subreddit, post_body, upvote_ratio, full_comment_archive}
+    --   Polymarket: {market_id, raw_comments}
+    --   Telegram:   {message_id, message_text, channel_source, extracted_links}
+    --   HackerNews: {story_id, title, url, points, author, published_at, top_comments}
+    platform_data           JSONB           NOT NULL,
+
+    ingested_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+-- Indexes for Social Vault
+CREATE INDEX IF NOT EXISTS idx_sv_source
+    ON social_vault (source_name, ingested_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sv_canonical_event
+    ON social_vault (canonical_event_id);
+
+-- GIN on platform_data for cross-platform JSONB key queries
+CREATE INDEX IF NOT EXISTS idx_sv_platform_data
+    ON social_vault USING GIN (platform_data);
+
+
+-- ==========================================================
+-- 3a. KNOWLEDGE VECTORS — Gold Signals/News/Research (Section 5.2, C.5)
+-- ==========================================================
+-- Stores Gold Layer embeddings for NewsAPI articles, ArXiv papers,
+-- and Telegram channel messages — sources treated as direct signals
+-- rather than community discourse. Serves The Researcher agent (Section 6.2).
+--
+-- WHY SEPARATE FROM social_vectors: mixing heterogeneous object types
+-- in a single HNSW index degrades recall quality. Post-hoc filtering
+-- by entry_type consumes neighbor slots after ANN search, returning
+-- fewer relevant results to both The Researcher and The Pulse Analyst.
+-- Two independent indexes eliminate this penalty entirely.
+--
+-- Embedding dimension: 1536 — OpenAI text-embedding-3-small output size.
+-- If switching to text-embedding-3-large (3072-dim), update the
+-- vector(1536) declaration and rebuild both HNSW indexes.
+--
+-- domain_context stores academic (ArXiv) and tactical (NewsAPI/Telegram)
+-- extension fields without polluting the shared common schema (Section C.5).
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS knowledge_vectors (
+    signal_id               UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_event_id      TEXT            NOT NULL,
+    silver_data_ref         UUID,           -- bridge to knowledge_vault (Section 5.1)
+    raw_data_ref            UUID,           -- bridge to Bronze ingestion_id
+
+    -- Signal identity (Section C.5 metadata block)
+    source_platform         TEXT            NOT NULL
+                            CHECK (source_platform IN ('newsapi', 'arxiv', 'telegram')),
+    entry_type              TEXT            NOT NULL,  -- 'news_article' | 'arxiv_paper' | 'direct_message'
+    published_at            TIMESTAMPTZ,
+
+    -- Structured metadata blocks (Section C.5)
+    content_vitals          JSONB           NOT NULL,  -- {title, url, description_snippet}
+    enrichment_ai           JSONB           NOT NULL,  -- {impact_level, urgency_level, reliability_score, ...}
+
+    -- Academic / tactical domain extensions (Section C.5 Domain Extensions)
+    --   ArXiv:    {authors, is_peer_reviewed, citation_count, domain_tags}
+    --   NewsAPI:  {share_count, is_breaking, sniper_keywords, geospatial_focus}
+    --   Telegram: {is_breaking_alert, forwarded_from, extracted_links}
+    domain_context          JSONB,
+
+    -- The embedding vector (1536 dimensions)
+    embedding               vector(1536)    NOT NULL,
+
+    ingested_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+-- HNSW index — knowledge_vectors only (Section 5.2)
+-- Independent from social_vectors HNSW: The Researcher queries stay within
+-- this index with no cross-contamination from community discourse neighbor slots.
+-- m=16, ef_construction=64: good recall/performance balance for news-density workloads.
+CREATE INDEX IF NOT EXISTS idx_kvec_embedding_hnsw
+    ON knowledge_vectors
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+-- Supporting indexes for metadata-filtered queries on knowledge_vectors
+CREATE INDEX IF NOT EXISTS idx_kvec_canonical_event
+    ON knowledge_vectors (canonical_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_kvec_source_platform
+    ON knowledge_vectors (source_platform, published_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_kvec_entry_type
+    ON knowledge_vectors (entry_type);
+
+-- GIN on enrichment_ai for filter queries like
+--   WHERE (enrichment_ai->>'impact_level')::int > 4
+CREATE INDEX IF NOT EXISTS idx_kvec_enrichment_ai
+    ON knowledge_vectors USING GIN (enrichment_ai);
+
+
+-- ==========================================================
+-- 3b. SOCIAL VECTORS — Gold Community Discourse (Section 5.2, C.6)
+-- ==========================================================
+-- Stores Gold Layer embeddings for Reddit posts, Polymarket consensus
+-- vectors, and HackerNews story summaries — sources representing
+-- community sentiment and market discourse. Serves The Pulse Analyst
+-- agent (Section 6.2).
+--
+-- WHY SEPARATE FROM knowledge_vectors: see rationale in Section 3a above.
+-- The Pulse Analyst queries must not compete with news/research neighbor
+-- slots in a shared index — independent HNSW guarantees full recall budget.
+--
+-- social_context: community name, author handle, engagement score (Section C.6).
+-- platform_logic: platform-specific extension fields without schema drift:
+--   Reddit:      {thread_depth, upvote_ratio, key_community_arguments}
+--   Polymarket:  {aggregation_window_hours, comment_volume_analyzed,
+--                 consensus_rating, market_id_ref}
+--   HackerNews:  {story_type, points, top_technical_insights,
+--                 external_link_ref, community_sentiment}
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS social_vectors (
+    signal_id               UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_event_id      TEXT            NOT NULL,
+    silver_data_ref         UUID,           -- bridge to social_vault (Section 5.1)
+    raw_data_ref            UUID,           -- bridge to Bronze ingestion_id
+
+    -- Signal identity (Section C.6 metadata block)
+    source_platform         TEXT            NOT NULL
+                            CHECK (source_platform IN ('reddit', 'polymarket', 'hackernews')),
+    entry_type              TEXT            NOT NULL,  -- 'reddit_post_summary' | 'market_consensus' |
+                                                       -- 'hackernews_story_summary'
+    published_at            TIMESTAMPTZ,
+
+    -- Structured metadata blocks (Section C.6)
+    content_vitals          JSONB           NOT NULL,  -- {title, url, description_snippet}
+    enrichment_ai           JSONB           NOT NULL,  -- {impact_level, urgency_level, reliability_score, ...}
+
+    -- Community identity block (Section C.6 social_context)
+    social_context          JSONB           NOT NULL,  -- {community_name, author_handle,
+                                                       --  author_reputation, primary_engagement_score}
+
+    -- Platform-specific extension fields (Section C.6 Platform Extensions)
+    platform_logic          JSONB           NOT NULL DEFAULT '{}',
+
+    -- The embedding vector (1536 dimensions)
+    embedding               vector(1536)    NOT NULL,
+
+    ingested_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+-- HNSW index — social_vectors only (Section 5.2)
+-- Independent from knowledge_vectors HNSW: The Pulse Analyst queries stay within
+-- this index with no cross-contamination from news/research neighbor slots.
+CREATE INDEX IF NOT EXISTS idx_svec_embedding_hnsw
+    ON social_vectors
+    USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+-- Supporting indexes for metadata-filtered queries on social_vectors
+CREATE INDEX IF NOT EXISTS idx_svec_canonical_event
+    ON social_vectors (canonical_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_svec_source_platform
+    ON social_vectors (source_platform, published_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_svec_entry_type
+    ON social_vectors (entry_type);
+
+-- GIN on enrichment_ai for filter queries like
+--   WHERE (enrichment_ai->>'urgency_level')::int >= 4
+CREATE INDEX IF NOT EXISTS idx_svec_enrichment_ai
+    ON social_vectors USING GIN (enrichment_ai);
+
+
+-- ==========================================================
+-- 4. MOMENTUM VAULT — Gold Time-Series Hypertable (Section 5.3)
+-- ==========================================================
+-- Stores all numerical metrics (FRED indicators, Prediction Prices,
+-- weather readings, flight density counts) as a time-series.
+-- TimescaleDB partitions by timestamp_utc for fast range queries.
+--
+-- Pre-calculated Momentum Block (change_24h/7d/30d) is computed
+-- by Flink before insert, allowing the API to serve trend data
+-- instantly without runtime math (Section 4.2B, 5.3).
+--
+-- metadata_extension stores source-specific fields (Section C.2):
+--   FRED:        {series_id, observation_date, release_priority, seasonal_adjustment}
+--   Polymarket:  {liquidity_pool_tvl, bid_ask_spread, 24h_volume, whale_alert}
+--   OpenWeather: {coordinates, strategic_tag, condition_severity, wind_speed_knots}
+--   OpenSky:     {bounding_box_id, aircraft_density_count, transponder_silence_events}
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS momentum_vault (
+    metric_id               UUID            NOT NULL DEFAULT gen_random_uuid(),
+    canonical_event_id      TEXT            NOT NULL,
+    source_name             TEXT            NOT NULL,   -- 'fred' | 'polymarket' | 'predictit' | 'openweather' | 'opensky' | 'googletrends'
+    external_reference_id   TEXT            NOT NULL,   -- e.g., 'FEDFUNDS', Polymarket market slug
+
+    -- Data point (Section C.2 data_point block)
+    current_value           DOUBLE PRECISION NOT NULL,
+    unit                    TEXT            NOT NULL,
+    status                  TEXT,
+    timestamp_utc           TIMESTAMPTZ     NOT NULL,  -- partitioning key — must not be NULL
+
+    -- Momentum Block — pre-calculated by Flink (Section 4.2B)
+    change_24h              DOUBLE PRECISION,
+    change_7d               DOUBLE PRECISION,
+    change_30d              DOUBLE PRECISION,
+    is_new_market           BOOLEAN         NOT NULL DEFAULT FALSE,
+
+    -- Source-specific extension fields (Section C.2 metadata_extension)
+    metadata_extension      JSONB           NOT NULL DEFAULT '{}',
+
+    ingested_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (metric_id, timestamp_utc)  -- composite PK required for hypertable
+);
+
+-- Convert to TimescaleDB hypertable partitioned by timestamp_utc (Section 5.3)
+-- chunk_time_interval = 1 day: each partition covers one calendar day,
+-- aligning with FRED daily observations and OpenWeather hourly snapshots.
+SELECT create_hypertable(
+    'momentum_vault',
+    'timestamp_utc',
+    chunk_time_interval => INTERVAL '1 day',
+    if_not_exists => TRUE
+);
+
+-- Supporting indexes (TimescaleDB automatically creates one on timestamp_utc)
+CREATE INDEX IF NOT EXISTS idx_mv_source_ref
+    ON momentum_vault (source_name, external_reference_id, timestamp_utc DESC);
+
+CREATE INDEX IF NOT EXISTS idx_mv_canonical_event
+    ON momentum_vault (canonical_event_id, timestamp_utc DESC);
+
+-- GIN index for querying metadata_extension (e.g., Flink trigger conditions
+-- like VIXCLS > 30 or T10Y2Y < 0 described in Section B.3)
+CREATE INDEX IF NOT EXISTS idx_mv_metadata
+    ON momentum_vault USING GIN (metadata_extension);
+
+
+-- ==========================================================
+-- 5. DIVERGENCE ALERTS — Gold Structured Alerts (Section C.7)
+-- ==========================================================
+-- Generated by the Flink Gold Job (non-AI, deterministic) when
+-- Polymarket vs PredictIt price discrepancy exceeds 3% on the
+-- same canonical event (Section 4.2B).
+--
+-- Stored separately from knowledge_vectors / social_vectors because Divergence Alerts are
+-- structured alerts — not vectorized documents — and are queried
+-- by the Market Bridge agent primarily by canonical_event_id and
+-- urgency_level (Section 6.2).
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS divergence_alerts (
+    alert_id                UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_event_id      TEXT            NOT NULL,
+    timestamp_generated     TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    -- Source comparison (Section C.7 divergence_data block)
+    platform_a              TEXT            NOT NULL,    -- 'polymarket'
+    market_id_ref_a         TEXT            NOT NULL,
+    current_price_a         DOUBLE PRECISION NOT NULL,
+
+    platform_b              TEXT            NOT NULL,    -- 'predictit'
+    market_id_ref_b         TEXT            NOT NULL,
+    current_price_b         DOUBLE PRECISION NOT NULL,
+
+    spread_delta            DOUBLE PRECISION NOT NULL,   -- % difference
+    is_statistically_significant BOOLEAN   NOT NULL,
+
+    -- Alert classification (Section C.7 alert_metrics block)
+    urgency_level           SMALLINT        NOT NULL
+                            CHECK (urgency_level BETWEEN 1 AND 5),
+    confidence_score        FLOAT           NOT NULL
+                            CHECK (confidence_score BETWEEN 0.0 AND 1.0),
+    impact_area             TEXT            NOT NULL,    -- e.g., 'Geopolitics', 'US Elections'
+
+    -- AI-generated context (Section C.7 ai_trigger_logic block)
+    -- Populated by Gold Job's LLM call after structural detection
+    divergence_summary      TEXT,
+    anomaly_type            TEXT,           -- 'Information Lag' | 'Liquidity Gap' | 'Insider Movement'
+    suggested_action        TEXT,
+
+    -- Audit
+    resolved_at             TIMESTAMPTZ                  -- NULL = still active alert
+);
+
+CREATE INDEX IF NOT EXISTS idx_da_canonical_event
+    ON divergence_alerts (canonical_event_id, timestamp_generated DESC);
+
+CREATE INDEX IF NOT EXISTS idx_da_urgency
+    ON divergence_alerts (urgency_level DESC, timestamp_generated DESC);
+
+-- Active alerts view — used by the Market Bridge agent (Section 6.2)
+CREATE OR REPLACE VIEW active_divergence_alerts AS
+SELECT *
+FROM divergence_alerts
+WHERE resolved_at IS NULL
+ORDER BY urgency_level DESC, timestamp_generated DESC;
+
+
+-- ==========================================================
+-- 6. MAPPING DICTIONARY — Cross-Platform ID Linkage (Section 5.4)
+-- ==========================================================
+-- Maps platform-specific IDs to canonical_event_id, enabling the
+-- system to link a Polymarket contract to a Reuters article or a
+-- PredictIt market to a FRED indicator covering the same event.
+--
+-- canonical_event_id is determined by vector similarity threshold
+-- > 0.85 (Section B.9 PredictIt Canonical Linkage).
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS mapping_dict (
+    mapping_id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    canonical_event_id      TEXT            NOT NULL,
+    platform                TEXT            NOT NULL,    -- 'polymarket' | 'predictit' | 'reuters' | 'fred' | ...
+    platform_specific_id    TEXT            NOT NULL,    -- the platform's own ID/slug
+    similarity_score        FLOAT,                       -- vector similarity at link time (Section B.9)
+    created_at              TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    notes                   TEXT,                        -- optional: human or LLM annotation on the linkage
+
+    CONSTRAINT uq_platform_id UNIQUE (platform, platform_specific_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_md_canonical_event
+    ON mapping_dict (canonical_event_id);
+
+CREATE INDEX IF NOT EXISTS idx_md_platform
+    ON mapping_dict (platform, platform_specific_id);
+
+
+-- ==========================================================
+-- VERIFICATION
+-- ==========================================================
+-- Log installed extensions and created tables for startup confirmation.
+-- Visible in Docker logs: docker logs anizai-postgres
+
+DO $$
+DECLARE
+    ext_list TEXT;
+    tbl_list TEXT;
+BEGIN
+    SELECT string_agg(extname, ', ' ORDER BY extname)
+    INTO ext_list
+    FROM pg_extension
+    WHERE extname IN ('vector', 'timescaledb', 'pg_trgm');
+
+    SELECT string_agg(tablename, ', ' ORDER BY tablename)
+    INTO tbl_list
+    FROM pg_tables
+    WHERE schemaname = 'public';
+
+    RAISE NOTICE '=== Anizai DB Initialized ===';
+    RAISE NOTICE 'Extensions active : %', ext_list;
+    RAISE NOTICE 'Tables created    : %', tbl_list;
+    RAISE NOTICE '==============================';
+END $$;

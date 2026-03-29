@@ -1,103 +1,405 @@
+# ==========================================================
+# Anizai Data Pipeline — Docker Compose Stack
+# ==========================================================
+# One-command startup of the full development environment.
+# Ensures complete parity between local machine and GCP production
+# — moving to GCP is a configuration change only (Section 9.1).
+#
+# Services (Section 8.2):
+#   1. kafka            — Message broker, KRaft mode (no Zookeeper)
+#   2. kafka-ui         — Web UI for topic/message inspection
+#   3. kafka-init       — One-shot topic creation with retention settings
+#   4. flink-jobmanager — Flink cluster coordinator
+#   5. flink-taskmanager— Flink worker (Silver + Gold job slots)
+#   6. postgres         — Unified DB with pgvector + TimescaleDB
+#
+# Producers (11 containers) are commented out below.
+# Uncomment each producer as its vertical slice is implemented (Section 9.2).
+#
+# Usage:
+#   cd data-pipeline/
+#   cp .env.example .env && <fill in API keys>
+#   docker compose -f infrastructure/docker-compose.yml up -d
+#
+# References:
+#   - Section 8.1: Orchestration Strategy
+#   - Section 8.2: Core Services
+#   - Section 8.3: Network & Volume Persistence
+#   - Section 3.1: Topic naming (used in kafka-init)
+#   - Section 3.3: Retention & Lifecycle Policy
+#   - Section 4.3: Flink checkpointing every 60s, EXACTLY_ONCE
+# ==========================================================
+
 services:
-  # ==========================================
-  # 1. CORE INFRASTRUCTURE (Kafka - Official Apache Image)
-  # ==========================================
+
+  # ----------------------------------------------------------
+  # 1. KAFKA — KRaft mode (Section 8.2)
+  # ----------------------------------------------------------
+  # Single-node broker. KRaft eliminates Zookeeper dependency,
+  # simplifying cluster management and reducing startup time.
+  # Dual-listener setup: INTERNAL for Docker-to-Docker traffic,
+  # EXTERNAL for host-to-Kafka access during producer development.
+  # ----------------------------------------------------------
   kafka:
     image: apache/kafka:3.7.0
-    container_name: anazai-kafka
+    container_name: anizai-kafka
     ports:
-      - "9092:9092" # External access (host)
-      - "29092:29092" # Internal access (Docker network)
+      - "9092:9092"   # EXTERNAL — host access for local producers
+      - "29092:29092" # INTERNAL — Docker network access
     environment:
-      # KRaft settings (no Zookeeper)
-      - KAFKA_NODE_ID=0
-      - KAFKA_PROCESS_ROLES=controller,broker
-      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
-      # Dual listeners: INTERNAL for Docker, EXTERNAL for host
-      - KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
-      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://127.0.0.1:9092
-      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
-      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
-      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
-
+      KAFKA_NODE_ID: 0
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      # Dual listeners
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://127.0.0.1:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Auto-create topics is OFF — kafka-init creates all topics
+      # explicitly with correct retention and compaction settings.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # Log settings
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
     volumes:
       - kafka_data:/var/lib/kafka/data
     networks:
-      - anazai-network
+      - anizai-network
+    healthcheck:
+      test:
+        - CMD
+        - /opt/kafka/bin/kafka-topics.sh
+        - --bootstrap-server
+        - localhost:9092
+        - --list
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
 
-  # Web UI (connects via INTERNAL listener)
+  # ----------------------------------------------------------
+  # 2. KAFKA UI — Topic & message inspection (Section 8.2)
+  # ----------------------------------------------------------
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: anazai-kafka-ui
+    container_name: anizai-kafka-ui
     ports:
       - "8080:8080"
     environment:
-      - KAFKA_CLUSTERS_0_NAME=Anazai-Cluster
-      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
+      KAFKA_CLUSTERS_0_NAME: Anizai-Cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     networks:
-      - anazai-network
-  # ==========================================
-  # 2. PROCESSING ENGINE (Spark) - UNCOMMENT LATER
-  # ==========================================
-  # spark-master:
-  #   image: bitnami/spark:3.5.0
-  #   container_name: anazai-spark-master
-  #   environment:
-  #     - SPARK_MODE=master
-  #   ports:
-  #     - "8090:8080"
-  #     - "7077:7077"
-  #   networks:
-  #     - anazai-network
+      - anizai-network
 
-  # spark-worker:
-  #   image: bitnami/spark:3.5.0
-  #   container_name: anazai-spark-worker
-  #   environment:
-  #     - SPARK_MODE=worker
-  #     - SPARK_MASTER_URL=spark://spark-master:7077
+  # ----------------------------------------------------------
+  # 3. KAFKA INIT — Topic creation (Section 3.1, 3.3)
+  # ----------------------------------------------------------
+  # One-shot service: runs after Kafka is healthy, creates all
+  # topics with correct retention (Bronze=7d, Silver/Gold=3d)
+  # and compaction for structured_metrics topics (Section 3.3).
+  # Exits with code 0 on success; restart: on-failure for retries.
+  # ----------------------------------------------------------
+  kafka-init:
+    image: apache/kafka:3.7.0
+    container_name: anizai-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - anizai-network
+    restart: on-failure
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        KAFKA=/opt/kafka/bin/kafka-topics.sh
+        BS=kafka:29092
+
+        echo "=== Creating Bronze topics (7-day retention) ==="
+        BRONZE_RETENTION=604800000
+        for TOPIC in \
+          ingest.bronze.polymarket \
+          ingest.bronze.predictit \
+          ingest.bronze.telegram \
+          ingest.bronze.reddit \
+          ingest.bronze.hackernews \
+          ingest.bronze.newsapi \
+          ingest.bronze.arxiv \
+          ingest.bronze.fred \
+          ingest.bronze.googletrends \
+          ingest.bronze.openweather \
+          ingest.bronze.opensky
+        do
+          $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
+            --topic "$$TOPIC" \
+            --partitions 3 \
+            --replication-factor 1 \
+            --config retention.ms=$$BRONZE_RETENTION \
+            --config cleanup.policy=delete
+          echo "  [OK] $$TOPIC"
+        done
+
+        echo "=== Creating Silver topics (3-day retention) ==="
+        SILVER_RETENTION=259200000
+        for TOPIC in \
+          process.silver.social_pulse \
+          process.silver.global_news
+        do
+          $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
+            --topic "$$TOPIC" \
+            --partitions 3 \
+            --replication-factor 1 \
+            --config retention.ms=$$SILVER_RETENTION \
+            --config cleanup.policy=delete
+          echo "  [OK] $$TOPIC"
+        done
+
+        echo "=== Creating Silver structured_metrics (compaction + 3-day delete) ==="
+        $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
+          --topic process.silver.structured_metrics \
+          --partitions 3 \
+          --replication-factor 1 \
+          --config cleanup.policy=compact,delete \
+          --config retention.ms=$$SILVER_RETENTION \
+          --config min.cleanable.dirty.ratio=0.1
+        echo "  [OK] process.silver.structured_metrics"
+
+        echo "=== Creating Gold topics (3-day retention) ==="
+        GOLD_RETENTION=259200000
+        for TOPIC in \
+          serve.gold.social_pulse \
+          serve.gold.global_news
+        do
+          $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
+            --topic "$$TOPIC" \
+            --partitions 3 \
+            --replication-factor 1 \
+            --config retention.ms=$$GOLD_RETENTION \
+            --config cleanup.policy=delete
+          echo "  [OK] $$TOPIC"
+        done
+
+        echo "=== Creating Gold structured_metrics (compaction + 3-day delete) ==="
+        $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
+          --topic serve.gold.structured_metrics \
+          --partitions 3 \
+          --replication-factor 1 \
+          --config cleanup.policy=compact,delete \
+          --config retention.ms=$$GOLD_RETENTION \
+          --config min.cleanable.dirty.ratio=0.1
+        echo "  [OK] serve.gold.structured_metrics"
+
+        echo "=== Creating System topics ==="
+        # ingestion_triggers: RAG agent → on-demand requests (7-day)
+        $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
+          --topic ingestion_triggers \
+          --partitions 1 \
+          --replication-factor 1 \
+          --config retention.ms=604800000 \
+          --config cleanup.policy=delete
+        echo "  [OK] ingestion_triggers"
+
+        # dead-letter-queue: 30-day retention for operator inspection
+        $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
+          --topic dead-letter-queue \
+          --partitions 3 \
+          --replication-factor 1 \
+          --config retention.ms=2592000000 \
+          --config cleanup.policy=delete
+        echo "  [OK] dead-letter-queue"
+
+        echo "=== All topics created successfully ==="
+        $$KAFKA --bootstrap-server $$BS --list
+
+  # ----------------------------------------------------------
+  # 4. FLINK JOBMANAGER — Cluster coordinator (Section 8.2)
+  # ----------------------------------------------------------
+  # Manages the Flink cluster: schedules jobs, tracks task slots,
+  # coordinates checkpoints (Section 4.3).
+  # Web UI on port 8081 for job monitoring and checkpoint status.
+  # ----------------------------------------------------------
+  flink-jobmanager:
+    image: apache/flink:1.19-java11
+    container_name: anizai-flink-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081" # Flink Web UI
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        jobmanager.memory.process.size: 1600m
+        # Exactly-once semantics for Silver and Gold jobs (Section 4.3)
+        execution.checkpointing.mode: EXACTLY_ONCE
+        # Checkpoint every 60 seconds (Section 4.3)
+        execution.checkpointing.interval: 60000
+        execution.checkpointing.min-pause: 10000
+        execution.checkpointing.timeout: 120000
+        state.backend: hashmap
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        state.savepoints.dir: file:///opt/flink/savepoints
+        # Restart strategy: fixed-delay for transient failures
+        restart-strategy: fixed-delay
+        restart-strategy.fixed-delay.attempts: 5
+        restart-strategy.fixed-delay.delay: 10s
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+      - flink_checkpoints:/opt/flink/savepoints
+    networks:
+      - anizai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # 5. FLINK TASKMANAGER — Worker node (Section 8.2)
+  # ----------------------------------------------------------
+  # Runs the actual Flink operators. 4 task slots:
+  #   - 2 slots for the Silver Job
+  #   - 2 slots for the Gold Job
+  # Scale task managers horizontally in GCP (Section 7.1).
+  # ----------------------------------------------------------
+  flink-taskmanager:
+    image: apache/flink:1.19-java11
+    container_name: anizai-flink-taskmanager
+    command: taskmanager
+    depends_on:
+      flink-jobmanager:
+        condition: service_healthy
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        taskmanager.memory.process.size: 2048m
+        taskmanager.numberOfTaskSlots: 4
+        # Checkpoint config must mirror JobManager (Section 4.3)
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.interval: 60000
+        state.backend: hashmap
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+    volumes:
+      - flink_checkpoints:/opt/flink/checkpoints
+    networks:
+      - anizai-network
+
+  # ----------------------------------------------------------
+  # 6. POSTGRESQL — Multi-Vault storage engine (Section 8.2)
+  # ----------------------------------------------------------
+  # timescaledb-ha image ships with both TimescaleDB and pgvector
+  # pre-installed — no custom Dockerfile needed.
+  # init.sql is mounted to /docker-entrypoint-initdb.d/ and runs
+  # automatically on first container creation (extensions + DDL).
+  # ----------------------------------------------------------
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    container_name: anizai-postgres
+    ports:
+      - "5432:5432" # Host access for psql / pgAdmin during development
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-anizai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-anizai}
+      # timescaledb-ha runs as user 'postgres' with home /home/postgres.
+      # Mounting to /home/postgres/pgdata (not /var/lib/postgresql/data)
+      # is the standard fix for the Windows Docker Desktop permission error —
+      # the named volume is owned by the correct uid inside the WSL2 VM.
+      PGDATA: /home/postgres/pgdata/data
+    volumes:
+      - postgres_data:/home/postgres/pgdata
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    networks:
+      - anizai-network
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-anizai} -d ${POSTGRES_DB:-anizai}
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ----------------------------------------------------------
+  # PRODUCERS — 11 independent containers (Section 8.2)
+  # ----------------------------------------------------------
+  # Uncomment each producer as its vertical slice is implemented.
+  # Each producer gets its own lightweight Python container.
+  # All producers share anizai-network and load .env via env_file.
+  # ----------------------------------------------------------
+
+  # Sprint 1 — Polymarket (Section B.8)
+  # polymarket-producer:
+  #   build:
+  #     context: ..
+  #     dockerfile: ingestion/Dockerfile.polymarket
+  #   container_name: anizai-producer-polymarket
+  #   env_file: ../.env
   #   depends_on:
-  #     - spark-master
+  #     kafka:
+  #       condition: service_healthy
+  #     kafka-init:
+  #       condition: service_completed_successfully
   #   networks:
-  #     - anazai-network
+  #     - anizai-network
+  #   restart: unless-stopped
 
-  # ==========================================
-  # 3. ORCHESTRATION (Airflow) - UNCOMMENT LAST
-  # ==========================================
-  # airflow-webserver:
-  #   image: apache/airflow:2.7.1
-  #   container_name: anazai-airflow
-  #   command: webserver
-  #   ports:
-  #     - "8081:8080"
-  #   environment:
-  #     - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-  #     - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-  #     - AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=true
-  #     - AIRFLOW__CORE__LOAD_EXAMPLES=false
-  #   volumes:
-  #     - ../orchestration/dags:/opt/airflow/dags
+  # Sprint 2 — FRED (Section B.3)
+  # fred-producer:
+  #   build:
+  #     context: ..
+  #     dockerfile: ingestion/Dockerfile.fred
+  #   container_name: anizai-producer-fred
+  #   env_file: ../.env
   #   depends_on:
-  #     - postgres
+  #     kafka:
+  #       condition: service_healthy
+  #     kafka-init:
+  #       condition: service_completed_successfully
   #   networks:
-  #     - anazai-network
+  #     - anizai-network
+  #   restart: unless-stopped
 
-  # postgres:
-  #   image: postgres:13
-  #   container_name: anazai-postgres
-  #   environment:
-  #     - POSTGRES_USER=airflow
-  #     - POSTGRES_PASSWORD=airflow
-  #     - POSTGRES_DB=airflow
+  # Sprint 3 — NewsAPI (Section B.4)
+  # newsapi-producer:
+  #   build:
+  #     context: ..
+  #     dockerfile: ingestion/Dockerfile.newsapi
+  #   container_name: anizai-producer-newsapi
+  #   env_file: ../.env
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #     kafka-init:
+  #       condition: service_completed_successfully
   #   networks:
-  #     - anazai-network
+  #     - anizai-network
+  #   restart: unless-stopped
 
+  # Sprint 4+ — PredictIt, Telegram, Reddit, HackerNews,
+  #             ArXiv, GoogleTrends, OpenWeather, OpenSky
+  # (Add here as each vertical slice is completed)
+
+
+# ==========================================================
+# VOLUMES — mandatory for data persistence (Section 8.3)
+# ==========================================================
 volumes:
   kafka_data:
+    driver: local
+  postgres_data:
+    driver: local
+  flink_checkpoints:
+    driver: local
 
 
+# ==========================================================
+# NETWORK — unified bridge network (Section 8.3)
+# ==========================================================
 networks:
-  anazai-network:
+  anizai-network:
     driver: bridge
