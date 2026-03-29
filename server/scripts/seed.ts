@@ -166,6 +166,38 @@ async function seed() {
             updatedAt: Timestamp.now(),
         });
         console.log(`✅ Created session result for: ${session.id}`);
+
+        // Add Sentiment Data to subcollection
+        const sentimentRef = db.collection('sessions').doc(session.id).collection('sentimentTimeSeries');
+        const sentiments = [
+            {
+                ts: Timestamp.fromDate(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)),
+                expertSentiment: 0.60,
+                expertUpper: 0.68,
+                expertLower: 0.52,
+                publicSentiment: 0.70,
+            },
+            { 
+                ts: Timestamp.now(), 
+                expertSentiment: 0.65, 
+                expertUpper: 0.72,
+                expertLower: 0.58,
+                publicSentiment: 0.75 
+            },
+        ];
+        
+        for (const s of sentiments) {
+            await sentimentRef.add({
+                ts: s.ts,
+                date: s.ts.toDate().toISOString(),
+                expertSentiment: s.expertSentiment,
+                expertUpper: s.expertUpper,
+                expertLower: s.expertLower,
+                publicSentiment: s.publicSentiment,
+                createdAt: Timestamp.now(),
+            });
+        }
+        console.log(`   📉 Added sentiment timeseries to ${session.id}`);
     }
 
     // 4. Create trending forecasts

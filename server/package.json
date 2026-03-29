@@ -16,7 +16,8 @@
         "test:watch": "vitest",
         "dev:emu": "FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 FIRESTORE_EMULATOR_HOST=localhost:8080 npm run dev",
         "emu:token": "tsx scripts/emulator-get-id-token.ts",
-        "emu:test:me": "TOKEN=$(npm run --silent emu:token) && curl -v http://localhost:3000/me -H \"Authorization: Bearer $TOKEN\""
+        "emu:test:me": "TOKEN=$(npm run --silent emu:token) && curl -v http://localhost:3000/me -H \"Authorization: Bearer $TOKEN\"",
+        "test:session-result": "FIREBASE_AUTH_EMULATOR_HOST=localhost:9099 FIRESTORE_EMULATOR_HOST=localhost:8080 tsx scripts/test-session-result.ts"
     },
     "keywords": [
         "anizai",

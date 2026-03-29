@@ -11,7 +11,7 @@ import type { AuthUser } from '../types/api.js';
  */
 export async function authMiddleware(
     req: Request,
-    res: Response,
+    _res: Response,
     next: NextFunction
 ): Promise<void> {
     try {
@@ -34,6 +34,8 @@ export async function authMiddleware(
         const user: AuthUser = {
             uid: decodedToken.uid,
             email: decodedToken.email,
+            name: decodedToken.name,
+            picture: decodedToken.picture,
         };
 
         req.user = user;

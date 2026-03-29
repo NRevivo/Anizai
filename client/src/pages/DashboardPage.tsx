@@ -1,55 +1,99 @@
+import { useMemo, useState } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { Dashboard } from '../components/Dashboard';
 import { ChatPanel } from '../components/ChatPanel';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { CreateForecastView } from '../components/CreateForecastView';
 import { TrendingContext } from '../components/CreateForecastContext';
-import {
-    mockSessions,
-    mockCurrentPrediction,
-    mockSentimentData,
-    mockTimelineEvents,
-    mockSuggestedActions,
-    mockChatMessages
-} from '../data/mockData';
-import type { ChatMessage } from '../types';
-import { useState } from 'react';
+import type {
+    ChatMessage,
+    Prediction,
+    PredictionSession,
+    SentimentDataPoint,
+    SuggestedAction,
+    TimelineEvent,
+} from '../types';
 
-interface DashboardPageProps {
-    onLogout?: () => void;
-    onSettings?: () => void;
+interface TrendingQuestionView {
+    id: string;
+    question: string;
+    probability: number;
+    trend: 'up' | 'down' | 'stable';
+    context: string;
 }
 
-export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
-    const [activeSessionId, setActiveSessionId] = useState('1');
-    const [messages] = useState<ChatMessage[]>(mockChatMessages);
+interface DashboardPageProps {
+    sessions: PredictionSession[];
+    activeSessionId: string | null;
+    prediction: Prediction | null;
+    sentimentData: SentimentDataPoint[];
+    timelineEvents: TimelineEvent[];
+    messages: ChatMessage[];
+    trendingForecasts: TrendingQuestionView[];
+    onSessionSelect: (sessionId: string) => void;
+    onCreateSession: (question: string) => Promise<void>;
+    onSendMessage: (message: string) => Promise<void>;
+    onDeleteSession: (sessionId: string) => Promise<void>;
+    userDisplayName?: string | null;
+    userPlan?: 'free' | 'premium';
+    onLogout?: () => void;
+    onSettings?: () => void;
+    isLoading?: boolean;
+}
+
+export function DashboardPage({
+    sessions,
+    activeSessionId,
+    prediction,
+    sentimentData,
+    timelineEvents,
+    messages,
+    trendingForecasts,
+    onSessionSelect,
+    onCreateSession,
+    onSendMessage,
+    onDeleteSession,
+    userDisplayName,
+    userPlan = 'free',
+    onLogout,
+    onSettings,
+    isLoading = false,
+}: DashboardPageProps) {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+    const [isDeletingSession, setIsDeletingSession] = useState(false);
     const [currentView, setCurrentView] = useState<'dashboard' | 'new-forecast'>('dashboard');
+
+    const suggestedActions = useMemo<SuggestedAction[]>(
+        () => [
+            { id: 'drivers', label: 'Uncertainty drivers' },
+            { id: 'historical', label: 'Similar historical events' },
+            { id: 'track', label: 'Track this forecast' },
+        ],
+        []
+    );
 
     const handleNewPrediction = () => {
         setCurrentView('new-forecast');
-        setIsSidebarOpen(false); // Close sidebar on mobile
-        setIsChatOpen(false); // Ensure chat is closed
+        setIsSidebarOpen(false);
+        setIsChatOpen(false);
     };
 
     const handleSessionSelect = (sessionId: string) => {
-        setActiveSessionId(sessionId);
+        onSessionSelect(sessionId);
         setCurrentView('dashboard');
         setIsSidebarOpen(false);
     };
 
-    const handleSubmitForecast = (question: string) => {
-        console.log('New forecast question:', question);
-        // TODO: Create new forecast session with this question
-        // For now, just return to dashboard
+    const handleSubmitForecast = async (question: string) => {
+        await onCreateSession(question);
         setCurrentView('dashboard');
     };
 
     const handleSendMessage = (message: string) => {
-        console.log('Send message:', message);
+        void onSendMessage(message);
     };
 
     const handleActionClick = (actionId: string) => {
@@ -61,14 +105,19 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
         setDeleteConfirmOpen(true);
     };
 
-    const confirmDelete = () => {
-        if (sessionToDelete) {
-            console.log('Deleting session:', sessionToDelete);
-            // TODO: Implement actual delete logic
-            // e.g., remove from sessions array, update state, call API
+    const confirmDelete = async () => {
+        if (!sessionToDelete) {
+            return;
         }
-        setDeleteConfirmOpen(false);
-        setSessionToDelete(null);
+
+        try {
+            setIsDeletingSession(true);
+            await onDeleteSession(sessionToDelete);
+            setDeleteConfirmOpen(false);
+            setSessionToDelete(null);
+        } finally {
+            setIsDeletingSession(false);
+        }
     };
 
     const cancelDelete = () => {
@@ -76,20 +125,37 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
         setSessionToDelete(null);
     };
 
-    // Unified 3-column layout rendering logic
     const renderCenterPanel = () => {
         if (currentView === 'new-forecast') {
+            return <CreateForecastView onSubmit={handleSubmitForecast} />;
+        }
+
+        if (isLoading) {
             return (
-                <CreateForecastView
-                    onSubmit={handleSubmitForecast}
-                />
+                <div className="h-full flex items-center justify-center text-gray-500">
+                    Loading forecasts...
+                </div>
             );
         }
+
+        if (!prediction) {
+            return (
+                <div className="h-full flex items-center justify-center p-8">
+                    <div className="max-w-md rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center">
+                        <h2 className="text-lg font-semibold text-gray-900">No forecasts yet</h2>
+                        <p className="mt-2 text-sm text-gray-500">
+                            Create your first forecast question to start a new session.
+                        </p>
+                    </div>
+                </div>
+            );
+        }
+
         return (
             <Dashboard
-                prediction={mockCurrentPrediction}
-                sentimentData={mockSentimentData}
-                timelineEvents={mockTimelineEvents}
+                prediction={prediction}
+                sentimentData={sentimentData}
+                timelineEvents={timelineEvents}
             />
         );
     };
@@ -98,42 +164,33 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
         if (currentView === 'new-forecast') {
             return (
                 <TrendingContext
+                    forecasts={trendingForecasts}
                     onAnalyze={(question) => {
-                        console.log('Analyze trend:', question);
-                        // In a real app, this would pre-fill the input
+                        void handleSubmitForecast(question);
                     }}
                 />
             );
         }
+
         return (
             <ChatPanel
                 messages={messages}
                 onSendMessage={handleSendMessage}
-                suggestedActions={mockSuggestedActions}
-                onActionClick={handleActionClick}
+                suggestedActions={suggestedActions}
+                currentQuestion={prediction?.question}
+                currentAnswer={prediction?.explanation}
                 onNewPrediction={() => {
-                    // This prop is required by ChatPanel but maybe not used or needed here?
-                    // Just passing a dummy or the actual handler if relevant.
-                    // ChatPanel definition has onNewPrediction: (question: string) => void;
-                    // But handleNewPrediction in DashboardPage is () => void;
-                    // Let's check ChatPanel usage.
-                    // Actually ChatPanel line 14: onNewPrediction: (question: string) => void;
-                    // It seems it might used to start a new prediction from chat?
-                    // For now I will pass a function that logs or calls handleNewPrediction ignoring arg?
-                    console.log("New prediction from chat");
                     handleNewPrediction();
                 }}
+                onActionClick={handleActionClick}
             />
         );
     };
 
-    // Show Dashboard
     return (
         <div className="w-screen h-screen overflow-hidden">
-            {/* Mobile Sticky Header - Only on small screens */}
             <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white border-b border-gray-200 shadow-sm">
                 <div className="flex items-center justify-between px-4 py-3">
-                    {/* Hamburger Menu Button */}
                     <button
                         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
                         className={`p-2 rounded-lg hover:bg-gray-100 transition-colors ${isChatOpen || isSidebarOpen ? 'opacity-50' : 'opacity-100'}`}
@@ -143,18 +200,15 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
                         </svg>
                     </button>
 
-                    {/* Logo */}
                     <div className="flex items-center gap-2">
                         <img src="/logo-brain.png" alt="Anizai" className="h-7" />
                         <span className="text-xl font-bold text-gray-900">Anizai</span>
                     </div>
 
-                    {/* Placeholder for symmetry */}
                     <div className="w-10"></div>
                 </div>
             </div>
 
-            {/* Floating Chat Button - Shows only on non-desktop screens */}
             {currentView !== 'new-forecast' && (
                 <button
                     onClick={() => setIsChatOpen(!isChatOpen)}
@@ -166,12 +220,13 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
                 </button>
             )}
 
-            {/* Desktop 3-Column Grid */}
             <div className="hidden xl:grid xl:grid-cols-[280px_minmax(0,1fr)_360px] h-full w-full">
                 <div className="h-full overflow-hidden">
                     <Sidebar
-                        activeSessionId={activeSessionId}
-                        sessions={mockSessions}
+                        activeSessionId={activeSessionId ?? ''}
+                        sessions={sessions}
+                        userDisplayName={userDisplayName}
+                        userPlan={userPlan}
                         onSessionSelect={handleSessionSelect}
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
@@ -187,12 +242,13 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
                 </div>
             </div>
 
-            {/* Tablet 2-Column Grid */}
             <div className="hidden lg:grid xl:hidden lg:grid-cols-[280px_minmax(0,1fr)] h-full w-full">
                 <div className="h-full overflow-hidden">
                     <Sidebar
-                        activeSessionId={activeSessionId}
-                        sessions={mockSessions}
+                        activeSessionId={activeSessionId ?? ''}
+                        sessions={sessions}
+                        userDisplayName={userDisplayName}
+                        userPlan={userPlan}
                         onSessionSelect={handleSessionSelect}
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
@@ -205,21 +261,19 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
                         {renderCenterPanel()}
                         {currentView === 'new-forecast' && (
                             <div className="border-t border-gray-200">
-                                <TrendingContext onAnalyze={(q) => console.log(q)} />
+                                <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q)} />
                             </div>
                         )}
                     </div>
 
-                    {/* Floating Chat Panel for Tablet */}
                     <div className={`fixed inset-y-0 right-0 w-96 z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                         <ChatPanel
                             messages={messages}
-                            suggestedActions={mockSuggestedActions}
-                            currentQuestion={mockCurrentPrediction.question}
-                            currentAnswer={mockCurrentPrediction.explanation}
+                            suggestedActions={suggestedActions}
+                            currentQuestion={prediction?.question}
+                            currentAnswer={prediction?.explanation}
                             onSendMessage={handleSendMessage}
                             onNewPrediction={() => {
-                                console.log("New prediction from chat");
                                 handleNewPrediction();
                             }}
                             onActionClick={handleActionClick}
@@ -231,21 +285,22 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
                 </div>
             </div>
 
-            {/* Mobile Single Column */}
             <div className="lg:hidden h-full w-full flex flex-col">
                 <div className="flex-1 overflow-y-auto pt-16">
                     {renderCenterPanel()}
                     {currentView === 'new-forecast' && (
                         <div className="border-t border-gray-200">
-                            <TrendingContext onAnalyze={(q) => console.log(q)} />
+                            <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q)} />
                         </div>
                     )}
                 </div>
 
                 <div className={`fixed inset-y-0 left-0 w-80 z-40 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                     <Sidebar
-                        activeSessionId={activeSessionId}
-                        sessions={mockSessions}
+                        activeSessionId={activeSessionId ?? ''}
+                        sessions={sessions}
+                        userDisplayName={userDisplayName}
+                        userPlan={userPlan}
                         onSessionSelect={handleSessionSelect}
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
@@ -256,12 +311,11 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
                 <div className={`fixed inset-y-0 right-0 w-96 z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                     <ChatPanel
                         messages={messages}
-                        suggestedActions={mockSuggestedActions}
-                        currentQuestion={mockCurrentPrediction.question}
-                        currentAnswer={mockCurrentPrediction.explanation}
+                        suggestedActions={suggestedActions}
+                        currentQuestion={prediction?.question}
+                        currentAnswer={prediction?.explanation}
                         onSendMessage={handleSendMessage}
                         onNewPrediction={() => {
-                            console.log("New prediction from chat");
                             handleNewPrediction();
                         }}
                         onActionClick={handleActionClick}
@@ -275,15 +329,24 @@ export function DashboardPage({ onLogout, onSettings }: DashboardPageProps) {
                 )}
             </div>
 
-            {/* Delete Confirmation Dialog */}
             <ConfirmDialog
                 isOpen={deleteConfirmOpen}
                 title="Delete Forecast"
                 message="Are you sure you want to delete this forecast? This action cannot be undone."
                 confirmText="Delete"
                 cancelText="Cancel"
-                onConfirm={confirmDelete}
-                onCancel={cancelDelete}
+                onConfirm={() => {
+                    if (isDeletingSession) {
+                        return;
+                    }
+                    void confirmDelete();
+                }}
+                onCancel={() => {
+                    if (isDeletingSession) {
+                        return;
+                    }
+                    cancelDelete();
+                }}
             />
         </div>
     );

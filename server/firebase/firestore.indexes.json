@@ -61,15 +61,59 @@
       ]
     },
     {
-      "collectionGroup": "trendingForecasts",
-      "queryScope": "COLLECTION",
+      "collectionGroup": "evidence",
+      "queryScope": "COLLECTION_GROUP",
       "fields": [
         {
-          "fieldPath": "popularityScore",
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
           "order": "DESCENDING"
         }
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "evidence",
+      "fieldPath": "createdAt",
+      "indexes": [
+        {
+          "order": "ASCENDING"
+        },
+        {
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "evidence",
+      "fieldPath": "impact",
+      "indexes": [
+        {
+          "order": "ASCENDING"
+        },
+        {
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "evidence",
+      "fieldPath": "type",
+      "indexes": [
+        {
+          "order": "ASCENDING"
+        },
+        {
+          "order": "DESCENDING"
+        },
+        {
+          "arrayConfig": "CONTAINS"
+        }
+      ]
+    }
+  ]
 }
