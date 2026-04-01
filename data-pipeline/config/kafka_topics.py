@@ -94,14 +94,17 @@ DEAD_LETTER_QUEUE  = "dead-letter-queue"
 
 BRONZE_TO_SILVER_ROUTING = {
     # Social Pulse family
-    BRONZE_TELEGRAM:     SILVER_SOCIAL_PULSE,
     BRONZE_REDDIT:       SILVER_SOCIAL_PULSE,
     BRONZE_HACKERNEWS:   SILVER_SOCIAL_PULSE,
     BRONZE_POLYMARKET:   SILVER_SOCIAL_PULSE,    # comments stream
 
-    # Global News family
+    # Global News family — NewsAPI, ArXiv, and Telegram.
+    # Telegram is treated as a micro-article (direct signal), not social discourse.
+    # Silver store: knowledge_vault. Vector target: knowledge_vectors (C.5).
+    # See Part 1.5 Vector Persistence Map in task_plan.md.
     BRONZE_NEWSAPI:      SILVER_GLOBAL_NEWS,
     BRONZE_ARXIV:        SILVER_GLOBAL_NEWS,
+    BRONZE_TELEGRAM:     SILVER_GLOBAL_NEWS,
 
     # Structured Metrics family
     BRONZE_FRED:         SILVER_STRUCTURED_METRICS,
