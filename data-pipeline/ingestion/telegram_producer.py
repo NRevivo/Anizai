@@ -100,8 +100,8 @@ CHANNELS: list[dict[str, str]] = [
     {"username": "abualiexpress",   "title": "Abu Ali Express"},
     {"username": "yediotnews25",  "title": "100Field News"},
     {"username": "Faytuks_Network", "title": "Faytuks Network"},
-    {"username": "clashreport",     "title": "Clash Report"},
-    {"username": "financialjuice",  "title": "FinancialJuice"},
+    {"username": "ClashReport",     "title": "Clash Report"},
+    {"username": "FinancialJuice",  "title": "FinancialJuice"},
     {"username": "disclosetv",      "title": "Disclose.tv"},
     {"username": "intelslava",      "title": "Intel Slava Z"},
 ]
