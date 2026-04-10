@@ -77,23 +77,18 @@ OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
 POLYMARKET_API_KEY = os.getenv("POLYMARKET_API_KEY", "")
 POLYMARKET_API_SECRET = os.getenv("POLYMARKET_API_SECRET", "")
 
-# --- PredictIt (Section B.9) ---
-# Public REST API — no key required. Base URL for flexibility.
-PREDICTIT_API_BASE_URL = os.getenv(
-    "PREDICTIT_API_BASE_URL",
-    "https://www.predictit.org/api"
-)
+# --- PredictIt — API permanently shut down (CFTC 2022-2024) ---
+# Constant retained so existing imports in test archives do not break.
+# No producer or pipeline is active. Value is irrelevant at runtime.
+PREDICTIT_API_BASE_URL = "https://www.predictit.org/api"  # shut down
 
 # --- Telegram (Section A.1) ---
 # MTProto streaming via Telethon. Requires Telegram developer credentials.
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 
-# --- Reddit (Section A.2) ---
-# PRAW streaming. Requires Reddit app credentials.
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")
-REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "Anizai/1.0")
+# --- Reddit — API pre-approval required (Nov 2025 policy). All code removed. ---
+# REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT removed.
 
 # --- Hacker News (Section B.2) ---
 # Algolia public API — no key required.

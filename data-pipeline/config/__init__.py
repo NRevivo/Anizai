@@ -6,8 +6,9 @@ References: Section 3.1 (Topic Hierarchy), Section 2.1 (Producer Matrix).
 """
 
 from .kafka_topics import (
-    # Bronze
-    BRONZE_POLYMARKET, BRONZE_PREDICTIT, BRONZE_TELEGRAM, BRONZE_REDDIT,
+    # Bronze (BRONZE_PREDICTIT omitted — API permanently shut down CFTC 2022-2024)
+    # (BRONZE_REDDIT omitted — API pre-approval required Nov 2025. All code removed.)
+    BRONZE_POLYMARKET, BRONZE_TELEGRAM,
     BRONZE_HACKERNEWS, BRONZE_NEWSAPI, BRONZE_ARXIV, BRONZE_FRED,
     BRONZE_GOOGLETRENDS, BRONZE_OPENWEATHER, BRONZE_OPENSKY,
     ALL_BRONZE_TOPICS,
@@ -39,12 +40,10 @@ from .settings import (
     # Source credentials
     POLYMARKET_API_KEY,
     POLYMARKET_API_SECRET,
-    PREDICTIT_API_BASE_URL,
+    # PREDICTIT_API_BASE_URL omitted — API permanently shut down (CFTC 2022-2024)
     TELEGRAM_API_ID,
     TELEGRAM_API_HASH,
-    REDDIT_CLIENT_ID,
-    REDDIT_CLIENT_SECRET,
-    REDDIT_USER_AGENT,
+    # REDDIT credentials removed — API pre-approval required (Nov 2025 policy)
     HACKERNEWS_API_BASE_URL,
     NEWS_API_KEY,
     ARXIV_MAX_RESULTS,

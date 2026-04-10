@@ -21,9 +21,12 @@ References:
 # ==========================================================
 
 BRONZE_POLYMARKET  = "ingest.bronze.polymarket"
-BRONZE_PREDICTIT   = "ingest.bronze.predictit"
+# PREDICTIT — API permanently shut down (CFTC 2022-2024). Constant kept
+# as historical reference only. No producer or pipeline implemented.
+# BRONZE_PREDICTIT = "ingest.bronze.predictit"
 BRONZE_TELEGRAM    = "ingest.bronze.telegram"
-BRONZE_REDDIT      = "ingest.bronze.reddit"
+# REDDIT — API access pre-approval required (Nov 2025 policy). All code removed.
+# BRONZE_REDDIT = "ingest.bronze.reddit"
 BRONZE_HACKERNEWS  = "ingest.bronze.hackernews"
 BRONZE_NEWSAPI     = "ingest.bronze.newsapi"
 BRONZE_ARXIV       = "ingest.bronze.arxiv"
@@ -35,9 +38,9 @@ BRONZE_OPENSKY     = "ingest.bronze.opensky"
 # Convenience tuple — used by Flink Silver Job to subscribe to all Bronze topics at once.
 ALL_BRONZE_TOPICS = (
     BRONZE_POLYMARKET,
-    BRONZE_PREDICTIT,
+    # BRONZE_PREDICTIT omitted — API permanently shut down (CFTC 2022-2024)
+    # BRONZE_REDDIT omitted — API pre-approval required (Nov 2025 policy). All code removed.
     BRONZE_TELEGRAM,
-    BRONZE_REDDIT,
     BRONZE_HACKERNEWS,
     BRONZE_NEWSAPI,
     BRONZE_ARXIV,
@@ -53,13 +56,13 @@ ALL_BRONZE_TOPICS = (
 # Retention: 3 days, purged after persistence to PostgreSQL (Section 3.3)
 # ==========================================================
 
-# Social Pulse — Telegram, Reddit, HackerNews, Polymarket comments
+# Social Pulse — Telegram, HackerNews, Polymarket comments
 SILVER_SOCIAL_PULSE       = "process.silver.social_pulse"
 
 # Global News — NewsAPI, ArXiv
 SILVER_GLOBAL_NEWS        = "process.silver.global_news"
 
-# Structured Metrics — FRED, Polymarket prices, PredictIt, OpenWeather, OpenSky
+# Structured Metrics — FRED, Polymarket prices, OpenWeather, OpenSky
 # Note: compaction enabled on this topic so the latest value of each ticker
 # (e.g., WTI Crude Oil) is always available for replay (Section 3.3).
 SILVER_STRUCTURED_METRICS = "process.silver.structured_metrics"
@@ -94,7 +97,7 @@ DEAD_LETTER_QUEUE  = "dead-letter-queue"
 
 BRONZE_TO_SILVER_ROUTING = {
     # Social Pulse family
-    BRONZE_REDDIT:       SILVER_SOCIAL_PULSE,
+    # BRONZE_REDDIT omitted — API pre-approval required (Nov 2025 policy). All code removed.
     BRONZE_HACKERNEWS:   SILVER_SOCIAL_PULSE,
     BRONZE_POLYMARKET:   SILVER_SOCIAL_PULSE,    # comments stream
 
@@ -107,8 +110,8 @@ BRONZE_TO_SILVER_ROUTING = {
     BRONZE_TELEGRAM:     SILVER_GLOBAL_NEWS,
 
     # Structured Metrics family
+    # BRONZE_PREDICTIT omitted — API permanently shut down (CFTC 2022-2024)
     BRONZE_FRED:         SILVER_STRUCTURED_METRICS,
-    BRONZE_PREDICTIT:    SILVER_STRUCTURED_METRICS,
     BRONZE_GOOGLETRENDS: SILVER_STRUCTURED_METRICS,
     BRONZE_OPENWEATHER:  SILVER_STRUCTURED_METRICS,
     BRONZE_OPENSKY:      SILVER_STRUCTURED_METRICS,
