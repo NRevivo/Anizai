@@ -6,11 +6,11 @@ This is the Silver-layer raw archive — all original comments are stored here
 so the Gold Layer Pulse Analyst can drill down to source material when needed
 (Section B.8 has_raw_source=True / social_id reference).
 
-Four platform patterns stored in `platform_data` JSONB (Section C.3):
-    Reddit:     {post_id, subreddit, post_body, upvote_ratio, full_comment_archive}
+Three platform patterns stored in `platform_data` JSONB (Section C.3):
     Polymarket: {market_id, question, raw_comments, content_hash, bronze_ref}
     Telegram:   {message_id, message_text, channel_source, extracted_links}
     HackerNews: {story_id, title, url, points, author, published_at, top_comments}
+Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy).
 
 Deduplication strategy: the Silver Job calls exists_by_content_hash() before
 calling insert(). The social_vault table has no UNIQUE constraint (it is an
@@ -45,7 +45,8 @@ from utils.db import get_cursor
 logger = logging.getLogger(__name__)
 
 # Valid source_name values — enforced by CHECK constraint in init.sql
-VALID_SOURCES = frozenset({"reddit", "polymarket", "telegram", "hackernews"})
+# Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy)
+VALID_SOURCES = frozenset({"polymarket", "telegram", "hackernews"})
 
 
 # ==========================================================
@@ -143,7 +144,7 @@ def exists_by_content_hash(content_hash: str) -> bool:
     which is supported by jsonb_ops GIN indexes (idx_sv_platform_data):
         WHERE platform_data @> '{"content_hash": "..."}'
 
-    Note: Telegram, Reddit, and HackerNews use document_hash in knowledge_vault
+    Note: Telegram and HackerNews use document_hash in knowledge_vault
     (via persistence/knowledge_vault.py), not this function.
 
     Args:
@@ -160,6 +161,35 @@ def exists_by_content_hash(content_hash: str) -> bool:
     with get_cursor() as cur:
         cur.execute(sql, (content_hash,))
         return cur.fetchone() is not None
+
+
+def fetch_social_id_by_content_hash(content_hash: str) -> Optional[str]:
+    """
+    Return the social_id of an already-archived batch identified by content_hash.
+
+    Why needed for silver_data_ref wiring (Gap 1, Sprint 11):
+    When exists_by_content_hash() returns True the Flink Gold function skips
+    sv_archive() — but still needs the social_id so it can write the correct
+    silver_data_ref into the Gold vector. This function retrieves that UUID
+    from the already-stored row without re-archiving.
+
+    Uses the same GIN index path as exists_by_content_hash() (idx_sv_platform_data).
+
+    Args:
+        content_hash: 64-char SHA-256 hex digest from hash_social_batch().
+
+    Returns:
+        social_id UUID string if found, or None if no matching row exists.
+    """
+    sql = """
+        SELECT social_id::text FROM social_vault
+        WHERE platform_data @> jsonb_build_object('content_hash', %s::text)
+        LIMIT 1;
+    """
+    with get_cursor() as cur:
+        cur.execute(sql, (content_hash,))
+        row = cur.fetchone()
+    return row["social_id"] if row else None
 
 
 # ==========================================================

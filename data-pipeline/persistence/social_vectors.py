@@ -5,8 +5,8 @@ Persists AI-enriched Gold Social Pulse records into the `social_vectors`
 PostgreSQL table, which carries an independent HNSW index for sub-second
 semantic similarity search by The Pulse Analyst agent (Section 6.2).
 
-Sources written here: Polymarket (market_consensus), Reddit (reddit_post_summary),
-HackerNews (hackernews_story_summary).
+Sources written here: Polymarket (market_consensus), HackerNews (hackernews_story_summary).
+Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy).
 
 Why independent from knowledge_vectors: mixing heterogeneous object types
 (news/research vs. community discourse) in a shared HNSW index degrades
@@ -52,7 +52,8 @@ logger = logging.getLogger(__name__)
 EMBEDDING_DIM = 1536
 
 # Valid source_platform values — enforced by CHECK constraint in init.sql
-VALID_PLATFORMS = frozenset({"reddit", "polymarket", "hackernews"})
+# Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy)
+VALID_PLATFORMS = frozenset({"polymarket", "hackernews"})
 
 
 # ==========================================================
@@ -175,7 +176,7 @@ def exists_by_canonical_event(
 
     Args:
         canonical_event_id: The shared event key across Bronze → Silver → Gold.
-        source_platform:    Optional filter — 'polymarket', 'reddit', 'hackernews'.
+        source_platform:    Optional filter — 'polymarket', 'hackernews'.
                             If None, checks across all platforms.
 
     Returns:
@@ -422,12 +423,11 @@ def _default_entry_type(source_platform: str) -> str:
 
     Matches the Section C.6 Platform Extensions table:
         polymarket  → 'market_consensus'
-        reddit      → 'reddit_post_summary'
         hackernews  → 'hackernews_story_summary'
+    Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy).
     """
     return {
         "polymarket":  "market_consensus",
-        "reddit":      "reddit_post_summary",
         "hackernews":  "hackernews_story_summary",
     }.get(source_platform, source_platform)
 
