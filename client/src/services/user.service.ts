@@ -8,6 +8,7 @@ export interface UserProfile {
     displayName: string | null;
     plan: UserPlan;
     planExpiresAt: string | null;
+    cancelAtPeriodEnd: boolean;
     monthlyForecastsUsed: number;
     usageMonth: string;
     lastLoginAt: string;

@@ -265,11 +265,19 @@ function App() {
   }, [loadDashboardData]);
 
   const handleGoToLogin = () => {
-    setAppState('login');
+    if (userProfile) {
+      setAppState('dashboard');
+    } else {
+      setAppState('login');
+    }
   };
 
   const handleGoToSignup = () => {
-    setAppState('signup');
+    if (userProfile) {
+      setAppState('dashboard');
+    } else {
+      setAppState('signup');
+    }
   };
 
   const handleBackToLanding = () => {
@@ -358,9 +366,7 @@ function App() {
     setAppState('landing');
   };
 
-  const handleSettings = () => {
-    console.log('Open settings');
-  };
+
 
   const handleSessionSelect = async (sessionId: string) => {
     if (sessionId === activeSessionId) {
@@ -570,6 +576,7 @@ function App() {
         trendingForecasts={trendingItems}
         userDisplayName={userProfile?.displayName}
         userPlan={userProfile?.plan}
+        userProfile={userProfile}
         onSessionSelect={(sessionId) => {
           void handleSessionSelect(sessionId);
         }}
@@ -577,8 +584,9 @@ function App() {
         onSendMessage={handleSendMessage}
         onDeleteSession={handleDeleteSession}
         onLogout={handleLogout}
-        onSettings={handleSettings}
+        onGoHome={handleBackToLanding}
         isLoading={isDashboardLoading}
+        onPlanChange={setUserProfile}
       />
     </>
   );
