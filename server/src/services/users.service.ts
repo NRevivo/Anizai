@@ -17,6 +17,7 @@ export interface User {
     admin: boolean;
     plan: 'free' | 'premium';
     planExpiresAt: string | null;
+    cancelAtPeriodEnd: boolean;
     monthlyForecastsUsed: number;
     usageMonth: string;
     lastLoginAt: string;
@@ -30,6 +31,7 @@ export interface UserPublic {
     displayName: string | null;
     plan: 'free' | 'premium';
     planExpiresAt: string | null;
+    cancelAtPeriodEnd: boolean;
     monthlyForecastsUsed: number;
     usageMonth: string;
     lastLoginAt: string;
@@ -47,6 +49,7 @@ function toPublicUser(user: User): UserPublic {
         displayName: user.displayName,
         plan: user.plan,
         planExpiresAt: user.planExpiresAt,
+        cancelAtPeriodEnd: user.cancelAtPeriodEnd,
         monthlyForecastsUsed: user.monthlyForecastsUsed,
         usageMonth: user.usageMonth,
         lastLoginAt: user.lastLoginAt,

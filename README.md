@@ -1,184 +1,209 @@
-# Anizai - AI-Powered Event Forecasting
+# Anizai
+
+AI-powered forecasting platform with a React client, an Express API, and an experimental data pipeline for event/news ingestion.
 
 ![Anizai Hero](docs/images/landing-hero.png)
 
-Anizai is a sophisticated AI-powered forecasting platform that provides transparent, evidence-based predictions for future events. Built with React 19, TypeScript, and modern web technologies, Anizai delivers a professional SaaS experience for users seeking data-driven insights.
+## Overview
 
-## 🌟 Features
+Anizai is organized as a monorepo with three main parts:
 
-### Professional Dashboard
-- **Real-time Probability Tracking**: Dynamic circular gauge showing forecast confidence
-- **Multi-metric Analysis**: Confidence scores, evidence volume, and consensus indicators
-- **Live Evidence Feed**: News-style timeline of events impacting predictions
-- **Market Comparison**: Side-by-side analysis with prediction market consensus
-- **Sentiment Analysis**: Expert vs. public sentiment trends over time
+- `client/`: React + TypeScript web app (dashboard, sessions, trending, auth flows)
+- `server/`: Express + TypeScript backend API with Firebase-authenticated endpoints
+- `data-pipeline/`: Python ingestion and streaming infrastructure (Kafka-first, Spark/Delta planned)
 
-### Intelligent Chat Interface
-- **AI Assistant**: Interactive chat for follow-up questions and clarifications
-- **Suggested Actions**: Context-aware action recommendations
-- **Evidence Exploration**: Deep dive into specific data points
+## Tech Stack
 
-### Responsive Design
-- **Desktop-First**: Optimized 3-column layout for professional workstations
-- **Tablet-Friendly**: Adaptive grid that maintains usability on medium screens
-- **Mobile-Ready**: Touch-optimized interface with slide-out panels
+### Client
 
-## 📸 Screenshots
+- React 19
+- TypeScript
+- Vite
+- Tailwind CSS
+- Firebase Web SDK
+- Recharts
 
-### Landing Page
-![How It Works](docs/images/how-it-works.png)
+### Server
 
-### Plan Selection
-![Plan Selection](docs/images/plan-selection.png)
+- Node.js (>= 20)
+- TypeScript
+- Express
+- Firebase Admin SDK
+- Zod
+- Pino
+- Vitest
 
-### Dashboard Views
+### Data Pipeline
 
-#### Desktop
-![Dashboard Overview](docs/images/dashboard-desktop.png)
+- Python
+- Kafka (`kafka-python`)
+- Spark + Delta (`pyspark`, `delta-spark`)
+- OpenAI + LangChain
+- ChromaDB
 
+## Repository Structure
 
-
-#### Mobile
-![Mobile View](docs/images/dashboard-mobile.png)
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/anizai.git
-cd anizai
+```text
+.
+├── client/            # Frontend (Vite + React + TS)
+├── server/            # Backend API (Express + TS)
+├── data-pipeline/     # Ingestion/streaming pipeline (Python)
+├── docs/images/       # README and product images
+└── README.md
 ```
 
-2. Install dependencies:
+## Prerequisites
+
+- Node.js 20+
+- npm
+- Python 3.10+ (for `data-pipeline`)
+- Docker + Docker Compose (optional, for Kafka infra)
+
+## Quick Start
+
+### 1. Clone
+
+```bash
+git clone <your-repo-url>
+cd Anizai
+```
+
+### 2. Client Setup
+
 ```bash
 cd client
 npm install
-```
-
-3. Start the development server:
-```bash
+cp .env.example .env
 npm run dev
 ```
 
-4. Open your browser to `http://localhost:5173`
+Client runs at `http://localhost:5173`.
 
-## 🛠️ Tech Stack
+### 3. Server Setup
 
-### Frontend
-- **React 19**: Latest React with concurrent features
-- **TypeScript**: Type-safe development
-- **Vite**: Lightning-fast build tool
-- **Tailwind CSS**: Utility-first styling
-- **shadcn/ui**: High-quality component library
-- **Recharts**: Data visualization
+In a new terminal:
 
-### Design System
-- **Color Palette**: Teal, Blue, Purple gradients
-- **Typography**: System fonts with careful hierarchy
-- **Spacing**: Consistent 4px/8px grid
-- **Components**: Reusable, accessible UI elements
-
-## 📁 Project Structure
-
-```
-client/
-├── src/
-│   ├── components/
-│   │   ├── auth/           # Authentication components
-│   │   ├── cards/          # Dashboard card components
-│   │   ├── landing/        # Landing page sections
-│   │   ├── plans/          # Pricing components
-│   │   ├── ui/             # Reusable UI components
-│   │   ├── ChatPanel.tsx   # Chat interface
-│   │   ├── Dashboard.tsx   # Main dashboard
-│   │   └── Sidebar.tsx     # Navigation sidebar
-│   ├── pages/
-│   │   ├── DashboardPage.tsx
-│   │   ├── LandingPage.tsx
-│   │   └── PlanSelection.tsx
-│   ├── data/
-│   │   └── mockData.ts     # Mock data for development
-│   ├── lib/
-│   │   └── utils.ts        # Utility functions
-│   ├── types/
-│   │   └── index.ts        # TypeScript type definitions
-│   └── App.tsx             # Root component
-├── public/
-│   ├── logo-brain.png
-│   └── logo-with-text.png
-└── tailwind.config.js
+```bash
+cd server
+npm install
+cp .env.example .env
+npm run dev
 ```
 
-## 🎨 Design Philosophy
+Server runs at `http://localhost:3000`.
 
-Anizai follows a **professional, data-driven aesthetic**:
+## Environment Variables
 
-- **Clean & Minimal**: No unnecessary decorations or flashy elements
-- **Information Dense**: Maximum insight per screen space
-- **Analytical Tone**: Serious tool for serious forecasting
-- **Accessible**: WCAG 2.1 AA compliant color contrasts
-- **Consistent**: Unified design language across all views
+### Client (`client/.env`)
 
-## 🔐 Authentication
+Copy from `client/.env.example`:
 
-Currently implements **mock Google OAuth** for development. Production implementation will include:
-- Google OAuth 2.0
-- Secure session management
-- Role-based access control
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_API_BASE_URL` (default: `/api`)
 
-## 📊 Data Flow
+### Server (`server/.env`)
 
-1. **User Input**: Question submission via "New Forecast"
-2. **AI Processing**: Multi-model analysis (simulated)
-3. **Evidence Gathering**: Real-time data ingestion (simulated)
-4. **Probability Calculation**: Confidence-weighted synthesis
-5. **Continuous Updates**: Live feed of new evidence
-6. **User Interaction**: Chat-based exploration
+Copy from `server/.env.example`:
 
-## 🧪 Development
+- `PORT` (default: `3000`)
+- `NODE_ENV` (`development`, `production`, `test`)
+- `FIREBASE_PROJECT_ID`
+- Optional emulator vars:
+  - `FIREBASE_AUTH_EMULATOR_HOST`
+  - `FIRESTORE_EMULATOR_HOST`
 
-### Available Scripts
+## API Endpoints (Current)
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
+Public:
 
-### Code Style
-- ESLint with TypeScript rules
-- Prettier for formatting
-- Conventional Commits
+- `GET /`
+- `GET /health`
+- `GET /trending`
 
-## 🗺️ Roadmap
+Protected (Firebase ID token required):
 
-- [ ] Backend API integration
-- [ ] Real AI model integration
-- [ ] User authentication (Google OAuth)
-- [ ] Database persistence
-- [ ] Real-time WebSocket updates
-- [ ] Export functionality (PDF, CSV)
-- [ ] Advanced filtering and search
-- [ ] Collaborative forecasting
-- [ ] API for third-party integrations
+- `GET /me`
+- `PATCH /me/plan`
+- `GET /sessions`
+- `GET /sessions/:id`
+- `POST /sessions`
+- `POST /sessions/:id/messages`
+- `DELETE /sessions/:id`
 
-## 📝 License
+## Development Commands
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Client
 
-## 👥 Contributing
+```bash
+cd client
+npm run dev
+npm run build
+npm run lint
+npm run preview
+```
 
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+### Server
 
-## 📧 Contact
+```bash
+cd server
+npm run dev
+npm run build
+npm start
+npm run lint
+npm run test
+```
 
-For questions or feedback, reach out to [your-email@example.com](mailto:your-email@example.com)
+Emulator helpers:
 
----
+```bash
+cd server
+npm run dev:emu
+npm run emu:token
+npm run emu:test:me
+npm run test:session-result
+```
 
-Built with ❤️ using React, TypeScript, and modern web technologies.
+## Data Pipeline (Experimental)
+
+Install dependencies:
+
+```bash
+cd data-pipeline
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Start Kafka infrastructure:
+
+```bash
+cd data-pipeline/infrastructure
+docker compose up -d
+```
+
+Run the news producer:
+
+```bash
+cd data-pipeline
+python ingestion/news_producer.py
+```
+
+## Screenshots
+
+![How It Works](docs/images/how-it-works.png)
+![Plan Selection](docs/images/plan-selection.png)
+![Dashboard Desktop](docs/images/dashboard-desktop.png)
+![Dashboard Mobile](docs/images/dashboard-mobile.png)
+
+## Status
+
+Current repository includes an active frontend, backend, and early-stage ingestion pipeline. Some pipeline/orchestration components are scaffolded and still under active development.
+
+## License
+
+MIT

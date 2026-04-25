@@ -5,6 +5,8 @@ import { ChatPanel } from '../components/ChatPanel';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { CreateForecastView } from '../components/CreateForecastView';
 import { TrendingContext } from '../components/CreateForecastContext';
+import { SettingsModal } from '../components/SettingsModal';
+import type { UserProfile } from '../services/user.service';
 import type {
     ChatMessage,
     Prediction,
@@ -37,8 +39,10 @@ interface DashboardPageProps {
     userDisplayName?: string | null;
     userPlan?: 'free' | 'premium';
     onLogout?: () => void;
-    onSettings?: () => void;
+    onGoHome?: () => void;
     isLoading?: boolean;
+    userProfile: UserProfile | null;
+    onPlanChange?: (updated: UserProfile) => void;
 }
 
 export function DashboardPage({
@@ -56,11 +60,14 @@ export function DashboardPage({
     userDisplayName,
     userPlan = 'free',
     onLogout,
-    onSettings,
+    onGoHome,
     isLoading = false,
+    userProfile,
+    onPlanChange,
 }: DashboardPageProps) {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
     const [isDeletingSession, setIsDeletingSession] = useState(false);
@@ -200,10 +207,10 @@ export function DashboardPage({
                         </svg>
                     </button>
 
-                    <div className="flex items-center gap-2">
+                    <button onClick={onGoHome} className="flex items-center gap-2 hover:opacity-80 transition-opacity focus:outline-none">
                         <img src="/logo-brain.png" alt="Anizai" className="h-7" />
                         <span className="text-xl font-bold text-gray-900">Anizai</span>
-                    </div>
+                    </button>
 
                     <div className="w-10"></div>
                 </div>
@@ -231,7 +238,8 @@ export function DashboardPage({
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
                         onLogout={onLogout}
-                        onSettings={onSettings}
+                        onSettings={() => setIsSettingsOpen(true)}
+                        onGoHome={onGoHome}
                     />
                 </div>
                 <div className="h-full overflow-hidden border-x border-gray-200 bg-slate-50 relative">
@@ -253,7 +261,8 @@ export function DashboardPage({
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
                         onLogout={onLogout}
-                        onSettings={onSettings}
+                        onSettings={() => setIsSettingsOpen(true)}
+                        onGoHome={onGoHome}
                     />
                 </div>
                 <div className="h-full overflow-hidden relative flex flex-col">
@@ -305,7 +314,8 @@ export function DashboardPage({
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
                         onLogout={onLogout}
-                        onSettings={onSettings}
+                        onSettings={() => setIsSettingsOpen(true)}
+                        onGoHome={onGoHome}
                     />
                 </div>
                 <div className={`fixed inset-y-0 right-0 w-96 z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
@@ -347,6 +357,14 @@ export function DashboardPage({
                     }
                     cancelDelete();
                 }}
+            />
+
+            <SettingsModal 
+                isOpen={isSettingsOpen} 
+                onClose={() => setIsSettingsOpen(false)} 
+                userProfile={userProfile}
+                onLogout={onLogout}
+                onPlanChange={onPlanChange}
             />
         </div>
     );
