@@ -16,7 +16,7 @@ export interface Session {
     userId: string;
     question: string;
     title: string | null;
-    status: 'draft' | 'running' | 'done' | 'failed';
+    status: 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'awaiting_clarification';
     latestProbability: number | null;
     latestConfidence: number | null;
     followEnabled: boolean;
@@ -24,6 +24,7 @@ export interface Session {
     canonicalKey: string | null;
     errorCode: string | null;
     errorMessage: string | null;
+    clarificationCandidates: unknown[] | null;
     createdAt: string;
     updatedAt: string;
     lastActivityAt: string;
