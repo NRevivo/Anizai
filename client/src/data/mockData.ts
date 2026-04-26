@@ -4,28 +4,28 @@ export const mockSessions: PredictionSession[] = [
     {
         id: '1',
         question: 'Will AI regulation pass in the EU by Q2 2026?',
-        probability: 72.3,
+        probability: 0.723,
         status: 'stable',
         lastUpdated: new Date('2026-01-06T10:30:00'),
     },
     {
         id: '2',
         question: 'Will Bitcoin reach $150k by end of 2026?',
-        probability: 45.8,
+        probability: 0.458,
         status: 'volatile',
         lastUpdated: new Date('2026-01-06T14:15:00'),
     },
     {
         id: '3',
         question: 'Will SpaceX successfully land on Mars in 2026?',
-        probability: 12.4,
+        probability: 0.124,
         status: 'stable',
         lastUpdated: new Date('2026-01-05T18:45:00'),
     },
     {
         id: '4',
         question: 'Will global inflation drop below 2% in 2026?',
-        probability: 38.9,
+        probability: 0.389,
         status: 'volatile',
         lastUpdated: new Date('2026-01-06T09:20:00'),
     },
@@ -34,22 +34,22 @@ export const mockSessions: PredictionSession[] = [
 export const mockCurrentPrediction: Prediction = {
     id: '1',
     question: 'Will AI regulation pass in the EU by Q2 2026?',
-    probability: 72.3,
-    confidenceIndex: 84,
+    probability: 0.723,
+    confidenceIndex: 0.84,
     status: 'stable',
     explanation: 'Committee discussions have accelerated significantly. While industry lobbying poses a delay risk, the political cost of inaction has risen, creating a favorable environment for comprehensive regulation by mid-2026.',
-    marketProbability: 68.5,
+    marketProbability: 0.685,
     createdAt: new Date('2026-01-04T12:00:00'),
     updatedAt: new Date('2026-01-06T10:30:00'),
 };
 
 export const mockSentimentData: SentimentDataPoint[] = [
-    { date: 'Dec 15', expertSentiment: 65, expertUpper: 70, expertLower: 60, publicSentiment: 42 },
-    { date: 'Dec 20', expertSentiment: 68, expertUpper: 74, expertLower: 62, publicSentiment: 48 },
-    { date: 'Dec 25', expertSentiment: 70, expertUpper: 75, expertLower: 65, publicSentiment: 52 },
-    { date: 'Dec 30', expertSentiment: 72, expertUpper: 78, expertLower: 66, publicSentiment: 55 },
-    { date: 'Jan 4', expertSentiment: 75, expertUpper: 82, expertLower: 68, publicSentiment: 58 },
-    { date: 'Jan 6', expertSentiment: 78, expertUpper: 85, expertLower: 71, publicSentiment: 62 },
+    { date: 'Dec 15', expertSentiment: 0.65, expertUpper: 0.70, expertLower: 0.60, publicSentiment: 0.42 },
+    { date: 'Dec 20', expertSentiment: 0.68, expertUpper: 0.74, expertLower: 0.62, publicSentiment: 0.48 },
+    { date: 'Dec 25', expertSentiment: 0.70, expertUpper: 0.75, expertLower: 0.65, publicSentiment: 0.52 },
+    { date: 'Dec 30', expertSentiment: 0.72, expertUpper: 0.78, expertLower: 0.66, publicSentiment: 0.55 },
+    { date: 'Jan 4',  expertSentiment: 0.75, expertUpper: 0.82, expertLower: 0.68, publicSentiment: 0.58 },
+    { date: 'Jan 6',  expertSentiment: 0.78, expertUpper: 0.85, expertLower: 0.71, publicSentiment: 0.62 },
 ];
 
 export const mockTimelineEvents: TimelineEvent[] = [

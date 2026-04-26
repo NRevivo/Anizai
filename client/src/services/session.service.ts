@@ -1,6 +1,6 @@
 import { apiRequest } from '../lib/api';
 
-export type SessionStatus = 'draft' | 'running' | 'done' | 'failed';
+export type SessionStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'awaiting_clarification';
 
 export interface SessionListItem {
     id: string;
@@ -15,6 +15,7 @@ export interface SessionListItem {
     canonicalKey: string | null;
     errorCode: string | null;
     errorMessage: string | null;
+    clarificationCandidates: unknown[] | null;
     createdAt: string;
     updatedAt: string;
     lastActivityAt: string;
