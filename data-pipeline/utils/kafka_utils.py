@@ -31,6 +31,7 @@ from kafka import KafkaConsumer, KafkaProducer
 from kafka.errors import KafkaError
 
 from config.settings import KAFKA_BOOTSTRAP_SERVERS
+from utils.logging_config import set_trace_id
 
 # ==========================================================
 # Version sentinel — embed in every Bronze message so issues
@@ -93,10 +94,12 @@ def build_envelope(payload: dict, source_name: str) -> dict:
     Returns:
         Complete envelope dict ready for NDJSON serialization.
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now      = datetime.now(timezone.utc).isoformat()
+    trace_id = str(uuid.uuid4())
+    set_trace_id(trace_id)   # bind trace_id to context so the first producer log line carries it (Section 7.2)
     return {
         "event_id":           str(uuid.uuid4()),
-        "trace_id":           str(uuid.uuid4()),
+        "trace_id":           trace_id,
         "producer_timestamp": now,
         "schema_version":     ENVELOPE_SCHEMA_VERSION,
         "source_name":        source_name,
@@ -217,7 +220,7 @@ def make_producer(
     return KafkaProducer(
         bootstrap_servers=bootstrap_servers,
         value_serializer=ndjson_serializer,
-        key_serializer=lambda k: k.encode("utf-8") if k else None,
+        key_serializer=lambda k: k.encode("utf-8") if isinstance(k, str) else k,
         acks=acks,
         retries=retries,
         request_timeout_ms=request_timeout_ms,

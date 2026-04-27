@@ -68,6 +68,8 @@ def _check_fields(obj: dict, required: dict[str, type | tuple]) -> list[str]:
     Args:
         obj:      The dict to inspect.
         required: Mapping of key → expected type (or tuple of types).
+                  Include type(None) in the tuple to mark a field as nullable.
+                  Example: (str, type(None)) accepts str or None.
 
     Returns:
         List of error strings (empty = all checks passed).
@@ -77,7 +79,10 @@ def _check_fields(obj: dict, required: dict[str, type | tuple]) -> list[str]:
         if key not in obj:
             errors.append(f"Missing required field: '{key}'")
         elif obj[key] is None:
-            errors.append(f"Field '{key}' must not be None")
+            # Allow None only when type(None) is explicitly included in the expected types.
+            nullable = isinstance(expected_type, tuple) and type(None) in expected_type
+            if not nullable:
+                errors.append(f"Field '{key}' must not be None")
         elif not isinstance(obj[key], expected_type):
             actual = type(obj[key]).__name__
             if isinstance(expected_type, tuple):
@@ -194,7 +199,7 @@ def validate_silver_structured_metric(obj: Any) -> ValidationResult:
     """
     Validate Silver Structured Metric schema (Section C.2).
 
-    Covers: Polymarket prices, PredictIt, FRED indicators,
+    Covers: Polymarket prices, FRED indicators,
             OpenWeather readings, OpenSky aircraft states.
     """
     if not isinstance(obj, dict):
@@ -287,13 +292,12 @@ def validate_silver_social(obj: Any) -> ValidationResult:
     """
     Validate Silver Social Discourse Store schema (Section C.3).
 
-    Covers four platform patterns:
-      - Reddit (post-centric):       post_body + full_comment_archive + upvote_ratio
+    Covers three platform patterns:
       - Polymarket (volume-centric): raw_comments grouped by market_id
       - Telegram (news-centric):     message_text + extracted_links + channel_source
       - HackerNews (story-centric):  title + url + points + top_comments
 
-    Why platform-specific branching: the four social patterns have
+    Why platform-specific branching: the three social patterns have
     structurally different storage logic (Section C.3 table), so
     validation must be aware of which pattern is being checked.
 
@@ -302,6 +306,7 @@ def validate_silver_social(obj: Any) -> ValidationResult:
     BRONZE_TO_SILVER_ROUTING and has a Gold representation in Section C.6.
     The validator does NOT need to be revisited during the HackerNews
     vertical slice (Phase 4).
+    Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy).
     """
     if not isinstance(obj, dict):
         return ValidationResult(False, ["Silver social object is not a dict"])
@@ -313,15 +318,7 @@ def validate_silver_social(obj: Any) -> ValidationResult:
 
     source = obj.get("source_name", "").lower()
 
-    if source == "reddit":
-        errors += _check_fields(obj, {
-            "post_id":              str,
-            "subreddit":            str,
-            "post_body":            str,
-            "upvote_ratio":         float,
-            "full_comment_archive": list,
-        })
-    elif source == "polymarket":
+    if source == "polymarket":
         errors += _check_fields(obj, {
             "market_id":    str,
             "raw_comments": list,
@@ -349,7 +346,7 @@ def validate_silver_social(obj: Any) -> ValidationResult:
     else:
         errors.append(
             f"Unknown social source_name '{source}'. "
-            "Expected one of: reddit, polymarket, telegram, hackernews"
+            "Expected one of: polymarket, telegram, hackernews"
         )
 
     return ValidationResult(not errors, errors)
@@ -365,12 +362,15 @@ def _validate_gold_common(obj: dict) -> list[str]:
     and Gold Social Pulse (C.6) schemas.
     """
     errors = _check_nested(obj, "metadata", {
-        "signal_id":        str,
+        "signal_id":          str,
         "canonical_event_id": str,
-        "source_platform":  str,
-        "published_at":     str,
-        "silver_data_ref":  str,
-        "raw_data_ref":     str,
+        "source_platform":    str,
+        "published_at":       str,
+        # silver_data_ref is nullable: set to None by the builder, then patched to
+        # social_vault.social_id by the caller after sv_archive() returns (T1, Sprint 11).
+        # raw_data_ref always holds the Bronze envelope UUID and is never None.
+        "silver_data_ref":    (str, type(None)),
+        "raw_data_ref":       str,
     })
 
     errors += _check_nested(obj, "content_vitals", {
@@ -431,8 +431,9 @@ def validate_gold_social_pulse(obj: Any) -> ValidationResult:
     """
     Validate Gold Social Pulse Schema (Section C.6).
 
-    Covers: Telegram, Reddit, HackerNews, Polymarket — after
+    Covers: Telegram, HackerNews, Polymarket — after
     Consensus Bundling and Cognitive Metadata enrichment.
+    Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy).
     """
     if not isinstance(obj, dict):
         return ValidationResult(False, ["Gold social pulse object is not a dict"])

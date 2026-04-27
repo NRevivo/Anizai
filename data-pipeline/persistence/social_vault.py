@@ -41,8 +41,10 @@ from typing import Optional
 from psycopg2.extras import Json, RealDictCursor
 
 from utils.db import get_cursor
+from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
+setup_logging()
 
 # Valid source_name values — enforced by CHECK constraint in init.sql
 # Reddit removed (Sprint 11 T4) — API pre-approval required (Nov 2025 policy)

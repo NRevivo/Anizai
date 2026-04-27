@@ -41,7 +41,10 @@ from config.settings import (
     POSTGRES_USER,
 )
 
+from utils.logging_config import setup_logging
+
 logger = logging.getLogger(__name__)
+setup_logging()
 
 # ==========================================================
 # Connection Pool (module-level singleton)

@@ -44,8 +44,10 @@ from pgvector.psycopg2 import register_vector
 from psycopg2.extras import Json, RealDictCursor
 
 from utils.db import get_connection, get_cursor
+from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
+setup_logging()
 
 # Embedding dimension must match the vector(N) declaration in init.sql
 # and the OpenAI model used by the Gold Job (text-embedding-3-small = 1536).
