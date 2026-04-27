@@ -1,0 +1,14 @@
+{
+  "_comment": "Realistic mock of a single FRED observation after normalisation by FREDProducer._build_raw_payload(). This dict is stored verbatim as raw_payload inside the Bronze envelope. Represents the FEDFUNDS (Federal Funds Effective Rate) series for 2026-03-01. value is a float (never the FRED sentinel '.'). Section 4.4 / Section C.1 / Section B.3.",
+  "series_id": "FEDFUNDS",
+  "observation_date": "2026-03-01",
+  "value": 4.33,
+  "realtime_start": "2026-03-29",
+  "realtime_end": "2026-03-29",
+  "category": "Macro",
+  "description": "Federal Funds Effective Rate",
+  "unit": "percent",
+  "release_priority": 5,
+  "seasonal_adjustment": "Not Seasonally Adjusted",
+  "fetch_mode": "pulse"
+}

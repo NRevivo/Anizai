@@ -1,0 +1,18 @@
+{
+  "_comment": "Mock GPT-4o Cognitive Metadata Extraction response for the Telegram message 'IRGC naval vessels enter Strait of Hormuz' (telegram_bronze_payload.json, channel @clashreport). Represents the JSON returned by choices[0].message.content from a call_openai_cognitive_metadata() invocation in process_telegram_gold_message(). Used by Gate 2 Gold tests to avoid live OpenAI API calls (Section 4.4 Mock-Driven Development). All fields conform to the _COGNITIVE_METADATA_SYSTEM_PROMPT schema in gold_job.py. No impact_boost — Impact Boost does not apply to Telegram (Section A.1). Silver store: knowledge_vault. Vector target: knowledge_vectors, entry_type='direct_message' (Section C.5).",
+  "executive_summary": "Iranian IRGC naval forces have deployed a multi-vessel formation — three frigates and four fast attack craft — into the Strait of Hormuz central shipping lane, prompting maritime authorities to reroute oil tanker traffic. The move represents an unusual show of force in one of the world's most critical oil chokepoints, through which approximately 20% of global petroleum liquids transit. The development carries immediate implications for energy market volatility and regional escalation risk.",
+  "key_findings": [
+    "IRGC multi-vessel formation (3 frigates, 4 fast attack craft) entered the Strait of Hormuz central shipping lane",
+    "Maritime authorities actively rerouting oil tanker traffic — operational disruption already underway",
+    "The Strait of Hormuz accounts for ~20% of global petroleum liquids transit; any closure scenario is a systemic energy shock",
+    "Situation described as developing — escalation trajectory remains uncertain"
+  ],
+  "impact_level": 4,
+  "urgency_level": 5,
+  "reliability_score": 0.78,
+  "sentiment_score": -0.7,
+  "extracted_entities": ["IRGC", "Iran", "Strait of Hormuz", "OPEC", "oil tankers", "maritime authorities"],
+  "topic_classification": "Geopolitics",
+  "fact_check_flag": true,
+  "geospatial_focus": "Persian Gulf / Strait of Hormuz"
+}

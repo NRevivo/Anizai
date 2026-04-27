@@ -1,0 +1,18 @@
+{
+  "_comment": "Mock GPT-4o response for Polymarket Consensus Bundling. Used by Gate 2 Gold tests (Section 4.4 / 4.2A). Represents the JSON that call_openai_consensus() parses from choices[0].message.content.",
+  "executive_summary": "Community consensus leans YES (67%) on a Fed rate cut before June 2026, driven by softening inflation data and a cooling labor market. However, sticky core PCE and hawkish Powell rhetoric sustain a meaningful NO cohort, keeping the market at elevated uncertainty.",
+  "key_findings": [
+    "Macro traders favour YES at 0.73, citing soft CPI and jobs data as primary catalysts",
+    "Core PCE remains sticky — the principal risk factor underpinning the NO thesis",
+    "T10Y2Y reversal back to positive cited as a contra-indicator against premature rate cuts"
+  ],
+  "impact_level": 3,
+  "urgency_level": 2,
+  "reliability_score": 0.72,
+  "sentiment_score": 0.15,
+  "extracted_entities": ["Federal Reserve", "Jerome Powell", "PCE", "T10Y2Y", "CPI"],
+  "topic_classification": "Monetary Policy",
+  "fact_check_flag": false,
+  "consensus_rating": 0.67,
+  "uncertainty_index": 0.28
+}

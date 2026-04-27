@@ -1,0 +1,19 @@
+{
+  "_comment": "Realistic mock of a single NewsAPI article after normalisation by NewsAPIProducer._build_raw_payload(). Stored verbatim as raw_payload inside the Bronze envelope. Source: Reuters (authority-whitelisted, source.id present). Category: business, fetch_mode: pulse. impact_boost=true because title contains 'crude oil' (Section B.4 Impact Boost rule). Section 4.4 / Section C.1 / Section B.4.",
+  "article_id": "https://www.reuters.com/markets/commodities/opec-extends-output-cuts-q3-2026-03-31",
+  "title": "OPEC agrees to extend crude oil output cuts through Q3 2026",
+  "description": "OPEC+ ministers agreed on Monday to maintain their current crude oil production cuts through the third quarter of 2026, supporting oil prices amid global demand uncertainty.",
+  "url": "https://www.reuters.com/markets/commodities/opec-extends-output-cuts-q3-2026-03-31",
+  "url_to_image": "https://www.reuters.com/resizer/opec-meeting.jpg",
+  "published_at": "2026-03-31T10:15:00Z",
+  "content": "VIENNA, March 31 (Reuters) - OPEC+ ministers agreed on Monday to maintain their current crude oil production cuts through the third quarter of 2026, keeping the alliance's collective reduction at 3.66 million barrels per day. [+1250 chars]",
+  "author": "Ahmad Ghaddar",
+  "source": {
+    "id": "reuters",
+    "name": "Reuters"
+  },
+  "category": "business",
+  "fetch_mode": "pulse",
+  "impact_boost": true,
+  "impact_boost_reason": "crude oil"
+}

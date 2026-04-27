@@ -1,0 +1,31 @@
+{
+  "_comment": "Expected Silver Structured Metric output after map_fred_observation_to_silver() processes the fred_observation.json mock. Used by Gate 2 tests to assert schema shape without re-running the transform. Conforms to Section C.2 — FRED metadata_extension row. Section 4.4.",
+  "schema_version": "2.0",
+  "layer": "Silver",
+  "entity_type": "Structured_Metric",
+  "core_identity": {
+    "metric_id": "PLACEHOLDER_UUID",
+    "canonical_event_id": "PLACEHOLDER_EVENT_ID",
+    "parent_id": "",
+    "source_name": "fred",
+    "external_reference_id": "FEDFUNDS"
+  },
+  "data_point": {
+    "current_value": 4.33,
+    "unit": "percent",
+    "status": "actual",
+    "timestamp_utc": "2026-03-01T00:00:00+00:00"
+  },
+  "momentum_block": {
+    "change_24h": 0.0,
+    "change_7d": 0.0,
+    "change_30d": 0.0,
+    "is_new_market": false
+  },
+  "metadata_extension": {
+    "series_id": "FEDFUNDS",
+    "observation_date": "2026-03-01",
+    "release_priority": 5,
+    "seasonal_adjustment": "Not Seasonally Adjusted"
+  }
+}

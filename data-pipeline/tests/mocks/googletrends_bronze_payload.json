@@ -1,0 +1,10 @@
+{
+  "_comment": "Realistic mock of a single Google Trends observation after normalisation by GoogleTrendsProducer._build_raw_payload(). This dict is stored verbatim as raw_payload inside the Bronze envelope. Represents a STATIC mode observation for keyword='Inflation' in the US geo, at trending rank 5 on 2026-04-02. interest_score is derived from rank-to-100 formula: max(0.0, 100.0 - (rank_index * 2.0)) = max(0.0, 100.0 - (4 * 2.0)) = 92.0. Section 4.4 / Section C.1 / Section B.5.",
+  "keyword": "Inflation",
+  "geo": "US",
+  "geo_name": "United States",
+  "interest_score": 92.0,
+  "mode": "static",
+  "fetch_timestamp": "2026-04-02T10:00:00+00:00",
+  "rank_in_trending": 5
+}

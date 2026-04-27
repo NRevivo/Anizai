@@ -1,0 +1,17 @@
+{
+  "_comment": "Mock GPT-4o Cognitive Metadata Extraction response for the OPEC crude oil article (newsapi_article.json). Represents the JSON returned by choices[0].message.content from a call_openai_cognitive_metadata() invocation. Used by Gate 2 Gold tests to avoid live OpenAI API calls (Section 4.4 Mock-Driven Development). All fields conform to the _COGNITIVE_METADATA_SYSTEM_PROMPT schema in gold_job.py.",
+  "executive_summary": "OPEC+ ministers agreed to extend their collective crude oil production cuts of 3.66 million barrels per day through Q3 2026, signaling continued supply discipline amid global demand uncertainty. The decision, reached in Vienna, is expected to support Brent crude prices and may exert upward pressure on global energy costs. This marks the third consecutive quarter of maintained cuts, reinforcing OPEC+'s commitment to price stability over market share.",
+  "key_findings": [
+    "OPEC+ collective production cut of 3.66 mb/d extended through Q3 2026",
+    "Decision signals supply discipline amid global demand uncertainty",
+    "Brent crude prices expected to find support from the maintained cut"
+  ],
+  "impact_level": 4,
+  "urgency_level": 3,
+  "reliability_score": 0.95,
+  "sentiment_score": 0.4,
+  "extracted_entities": ["OPEC+", "Vienna", "Brent crude", "Saudi Arabia", "Russia"],
+  "topic_classification": "Energy",
+  "fact_check_flag": false,
+  "geospatial_focus": "Middle East / Global energy markets"
+}
