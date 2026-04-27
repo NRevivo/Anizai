@@ -40,8 +40,10 @@ import websockets
 from config.kafka_topics import BRONZE_POLYMARKET
 from config.settings import POLYMARKET_API_KEY, POLYMARKET_API_SECRET
 from utils.kafka_utils import build_bronze_message, make_producer, timed_request
+from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
+setup_logging()
 
 # ==========================================================
 # Polymarket API Endpoints (Section B.8)

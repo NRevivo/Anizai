@@ -39,8 +39,10 @@ from typing import Optional
 from psycopg2.extras import Json, RealDictCursor
 
 from utils.db import get_cursor
+from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
+setup_logging()
 
 
 # ==========================================================

@@ -1,0 +1,34 @@
+{
+  "_comment": "Realistic mock of a single HackerNews story after construction by HackerNewsProducer._build_raw_payload(). Stored verbatim as raw_payload inside the Bronze envelope. story_type='story' (standard external link). top_comments contains 3 of the max-10 first-level comments fetched via the Algolia /items endpoint. HTML has been stripped from all text fields by _strip_html(). No impact_boost field — Impact Boost is not applicable to HackerNews (Section B.4). story_id is the Algolia objectID and the Kafka partition key (Section 4.1C). Silver store: social_vault (Story-Centric pattern). Vector target: social_vectors, entry_type='hackernews_story_summary' (Section C.6). Pulse mode (fetch_mode='pulse'). Section 4.4 / Section B.2 / Section C.1 / Section C.3.",
+  "story_id": "40185065",
+  "title": "Polymarket hits $1B in trading volume as prediction markets gain mainstream attention",
+  "url": "https://www.reuters.com/markets/prediction-markets-polymarket-1b-volume-2024-04-01/",
+  "author": "technologist42",
+  "points": 187,
+  "num_comments": 73,
+  "created_at": "2024-04-01T14:30:00.000Z",
+  "story_text": "",
+  "tags": ["story", "front_page", "author_technologist42", "story_40185065"],
+  "story_type": "story",
+  "top_comments": [
+    {
+      "comment_id": 40185200,
+      "author": "marketwatcher",
+      "text": "The growth is driven largely by election markets. I've been tracking the AI regulation contracts — they're surprisingly liquid given how niche the topic is.",
+      "created_at": "2024-04-01T14:45:00.000Z"
+    },
+    {
+      "comment_id": 40185201,
+      "author": "quantresearcher",
+      "text": "Prediction markets are the most honest signal we have for geopolitical risk. The Polymarket contracts on the Russia-Ukraine situation were pricing in the invasion weeks before mainstream media acknowledged it.",
+      "created_at": "2024-04-01T14:52:00.000Z"
+    },
+    {
+      "comment_id": 40185202,
+      "author": "geopoliticsnerd",
+      "text": "The regulatory risk in the US is real. CFTC has been watching these closely. Any offshore-only model is going to hit a ceiling once institutional capital starts flowing in seriously.",
+      "created_at": "2024-04-01T15:01:00.000Z"
+    }
+  ],
+  "fetch_mode": "pulse"
+}

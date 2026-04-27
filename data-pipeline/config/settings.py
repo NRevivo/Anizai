@@ -118,6 +118,8 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 
 # --- OpenSky (Section B.7) ---
-# REST API — optional auth for higher rate limits.
-OPENSKY_USERNAME = os.getenv("OPENSKY_USERNAME", "")
-OPENSKY_PASSWORD = os.getenv("OPENSKY_PASSWORD", "")
+# OAuth2 client credentials — replaced Basic Auth (March 2026).
+# Authenticated tier: 4,000 calls/day. Anonymous tier: ~100 calls/day.
+# Register at https://opensky-network.org/
+OPENSKY_CLIENT_ID = os.getenv("OPENSKY_CLIENT_ID", "")
+OPENSKY_CLIENT_SECRET = os.getenv("OPENSKY_CLIENT_SECRET", "")

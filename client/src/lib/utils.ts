@@ -5,8 +5,9 @@ export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs))
 }
 
+/** Accepts a 0–1 float and returns a display string like "74.3%" */
 export function formatProbability(probability: number): string {
-    return `${probability.toFixed(1)}%`;
+    return `${(probability * 100).toFixed(1)}%`;
 }
 
 export function formatDate(date: Date): string {

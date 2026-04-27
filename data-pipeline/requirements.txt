@@ -72,6 +72,11 @@ fredapi==0.5.2
 # PredictIt — public REST API; uses requests directly (Section B.9)
 # (no extra package)
 
+# Article scraping — post-Silver full-text enrichment layer (Sprint 15)
+# Fetches full article text from scrapable outlets (BBC, Guardian, ToI, JPost,
+# Ynetnews, i24news) to enrich knowledge_vault.full_text_raw for RAG quality.
+newspaper4k==0.9.5
+
 
 # ----------------------------------------------------------
 # Processing — Apache Flink / PyFlink (Section 4)

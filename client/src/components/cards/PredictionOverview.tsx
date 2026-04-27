@@ -10,25 +10,26 @@ interface PredictionOverviewProps {
 }
 
 function getConfidenceLabel(confidenceIndex: number): string {
-    if (confidenceIndex >= 75) return 'High confidence';
-    if (confidenceIndex >= 50) return 'Moderate confidence';
+    if (confidenceIndex >= 0.75) return 'High confidence';
+    if (confidenceIndex >= 0.5) return 'Moderate confidence';
     if (confidenceIndex > 0) return 'Low confidence';
     return 'Confidence unavailable';
 }
 
 function getProbabilityAnswer(probability: number): string {
-    if (probability >= 66) return 'Likely';
-    if (probability <= 34) return 'Unlikely';
+    if (probability >= 0.66) return 'Likely';
+    if (probability <= 0.34) return 'Unlikely';
     return 'Uncertain';
 }
 
 export function PredictionOverview({ probability, confidenceIndex, explanation, evidenceCount }: PredictionOverviewProps) {
     const radius = 70;
     const circumference = 2 * Math.PI * radius;
-    const strokeDashoffset = circumference - (probability / 100) * circumference;
+    const strokeDashoffset = circumference - probability * circumference;
     const uniqueGradientId = useId().replace(/:/g, '');
     const confidenceLabel = getConfidenceLabel(confidenceIndex);
     const probabilityAnswer = getProbabilityAnswer(probability);
+    const confidenceScore = Math.round(confidenceIndex * 100);
 
     return (
         <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm ring-1 ring-anizai-teal-500/10">
@@ -84,7 +85,7 @@ export function PredictionOverview({ probability, confidenceIndex, explanation, 
                                 {probabilityAnswer} at {formatProbability(probability)}
                             </p>
                             <p className="mt-2 text-sm text-gray-600 leading-relaxed break-words">
-                                Current estimate: {formatProbability(probability)} probability with {confidenceIndex}/100 confidence.
+                                Current estimate: {formatProbability(probability)} probability with {confidenceScore}/100 confidence.
                             </p>
                         </div>
 
@@ -95,7 +96,7 @@ export function PredictionOverview({ probability, confidenceIndex, explanation, 
                             </div>
                             <div className="p-3 bg-gray-50 rounded-md border border-gray-100">
                                 <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-1">Confidence</p>
-                                <p className="text-lg font-bold text-gray-900">{confidenceIndex}/100</p>
+                                <p className="text-lg font-bold text-gray-900">{confidenceScore}/100</p>
                             </div>
                             <div className="p-3 bg-gray-50 rounded-md border border-gray-100">
                                 <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-1">Evidence</p>

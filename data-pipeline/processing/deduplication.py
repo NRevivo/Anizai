@@ -116,23 +116,5 @@ def hash_social_batch(market_id: str, comments: list[dict]) -> str:
     return sha256_hash(f"{market_id}|{'|'.join(ids)}")
 
 
-# ==========================================================
-# Social Batch Deduplication — Reddit (Phase 4)
-# ==========================================================
-
-def hash_reddit_post(post_id: str, comment_ids: list[str]) -> str:
-    """
-    Compute a stable content hash for a Reddit post + its comment archive.
-
-    Follows the same pattern as hash_social_batch. Used by the Reddit
-    Silver branch (Phase 4) to detect re-fetched posts with new comments.
-
-    Args:
-        post_id:     Reddit post fullname (e.g., "t3_abc123").
-        comment_ids: List of comment fullnames in the archive.
-
-    Returns:
-        64-character SHA-256 hex string.
-    """
-    sorted_ids = sorted(str(cid) for cid in comment_ids)
-    return sha256_hash(f"{post_id}|{'|'.join(sorted_ids)}")
+# Reddit deduplication (hash_reddit_post) removed — Sprint 11 T4.
+# Reddit API pre-approval required (Nov 2025 policy). All code removed.

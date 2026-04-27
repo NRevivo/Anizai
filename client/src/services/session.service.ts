@@ -7,7 +7,15 @@ import {
     mockTimelineEvents,
 } from '../data/mockData';
 
-export type SessionStatus = 'draft' | 'running' | 'done' | 'failed';
+export type SessionStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'awaiting_clarification';
+
+export interface ClarificationCandidate {
+    id: string;                                  // canonical market id
+    label: string;                               // human-readable
+    source: 'polymarket' | 'kalshi';
+    description: string;                         // resolution criteria / longer context
+    matchConfidence: number;                     // 0-1
+}
 
 export interface SessionListItem {
     id: string;
@@ -22,6 +30,7 @@ export interface SessionListItem {
     canonicalKey: string | null;
     errorCode: string | null;
     errorMessage: string | null;
+    clarificationCandidates: ClarificationCandidate[] | null;
     createdAt: string;
     updatedAt: string;
     lastActivityAt: string;

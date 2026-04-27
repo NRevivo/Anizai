@@ -1,0 +1,30 @@
+{
+  "_comment": "Realistic mock of a Polymarket comment batch as emitted by _comment_poll_loop(). Stored verbatim as raw_payload inside the Bronze envelope. Section 4.4 / Section C.3 Polymarket pattern.",
+  "payload_type": "comment",
+  "market_id": "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
+  "question": "Will the Federal Reserve cut rates before June 2026?",
+  "raw_comments": [
+    {
+      "comment_id": "cm_001",
+      "author": "macro_trader_99",
+      "text": "Fed pivot incoming. Inflation data coming in soft, job market cooling. I'm at 0.73 YES.",
+      "timestamp": "2026-03-28T13:45:00+00:00",
+      "upvotes": 14
+    },
+    {
+      "comment_id": "cm_002",
+      "author": "rates_watcher",
+      "text": "Core PCE still sticky. Powell sounded hawkish at last presser. Staying NO at 0.33.",
+      "timestamp": "2026-03-28T14:01:22+00:00",
+      "upvotes": 8
+    },
+    {
+      "comment_id": "cm_003",
+      "author": "yield_curve_hawk",
+      "text": "T10Y2Y crossed back positive last week. Market is pricing in cuts too early.",
+      "timestamp": "2026-03-28T14:18:55+00:00",
+      "upvotes": 22
+    }
+  ],
+  "fetched_at": "2026-03-28T14:22:00+00:00"
+}

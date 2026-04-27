@@ -9,16 +9,17 @@ interface MarketComparisonProps {
 
 export function MarketComparison({ anizaiProbability, marketProbability }: MarketComparisonProps) {
     const hasMarketProbability = marketProbability != null;
-    const marketValue = marketProbability ?? 0;
+    const anizaiPct = anizaiProbability * 100;
+    const marketPct = hasMarketProbability ? marketProbability * 100 : 0;
     const data = [
         {
             name: 'Compare',
-            'Market Consensus': marketValue,
-            'Anizai Forecast': anizaiProbability,
+            'Market Consensus': marketPct,
+            'Anizai Forecast': anizaiPct,
         },
     ];
 
-    const difference = hasMarketProbability ? anizaiProbability - marketValue : 0;
+    const difference = hasMarketProbability ? anizaiPct - marketPct : 0;
     const isBullish = difference > 0;
 
     const insightTitle = !hasMarketProbability
@@ -93,14 +94,14 @@ export function MarketComparison({ anizaiProbability, marketProbability }: Marke
                                     fill="#0d9488"
                                     radius={[0, 4, 4, 0]}
                                     barSize={24}
-                                    label={{ position: 'right', fill: '#0d9488', fontSize: 11, fontWeight: 600, formatter: (val: number) => `${val}%` }}
+                                    label={{ position: 'right', fill: '#0d9488', fontSize: 11, fontWeight: 600, formatter: (val: number) => `${val.toFixed(1)}%` }}
                                 />
                                 <Bar
                                     dataKey="Market Consensus"
                                     fill="#9ca3af"
                                     radius={[0, 4, 4, 0]}
                                     barSize={24}
-                                    label={{ position: 'right', fill: '#6b7280', fontSize: 11, fontWeight: 500, formatter: (val: number) => `${val}%` }}
+                                    label={{ position: 'right', fill: '#6b7280', fontSize: 11, fontWeight: 500, formatter: (val: number) => `${val.toFixed(1)}%` }}
                                 />
                             </BarChart>
                         </ResponsiveContainer>

@@ -2,8 +2,8 @@
 export interface Prediction {
     id: string;
     question: string;
-    probability: number; // 0-100
-    confidenceIndex: number; // 0-100
+    probability: number; // 0-1 float
+    confidenceIndex: number; // 0-1 float
     status: 'stable' | 'volatile';
     explanation: string;
     marketProbability?: number;
@@ -28,10 +28,10 @@ export interface ChatMessage {
 
 export interface SentimentDataPoint {
     date: string;
-    expertSentiment: number; // -100 to 100
+    expertSentiment: number; // -1 to 1 float
     expertUpper?: number;
     expertLower?: number;
-    publicSentiment: number; // -100 to 100
+    publicSentiment: number; // -1 to 1 float
 }
 
 export interface TimelineEvent {

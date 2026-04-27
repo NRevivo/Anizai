@@ -45,7 +45,7 @@ export function TrendingContext({ onAnalyze, forecasts = [] }: TrendingContextPr
 
                             <div className="flex min-w-0 items-center gap-3 text-sm">
                                 <div className="flex items-center gap-1 font-mono font-medium text-gray-700">
-                                    {item.probability}%
+                                    {(item.probability * 100).toFixed(0)}%
                                     <span
                                         className={
                                             item.trend === 'up' ? 'text-green-500' :

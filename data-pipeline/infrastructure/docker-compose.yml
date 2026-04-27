@@ -157,14 +157,13 @@ services:
           echo "  [OK] $$TOPIC"
         done
 
-        echo "=== Creating Silver structured_metrics (compaction + 3-day delete) ==="
+        echo "=== Creating Silver structured_metrics (3-day delete) ==="
         $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
           --topic process.silver.structured_metrics \
           --partitions 3 \
           --replication-factor 1 \
-          --config cleanup.policy=compact,delete \
-          --config retention.ms=$$SILVER_RETENTION \
-          --config min.cleanable.dirty.ratio=0.1
+          --config cleanup.policy=delete \
+          --config retention.ms=$$SILVER_RETENTION
         echo "  [OK] process.silver.structured_metrics"
 
         echo "=== Creating Gold topics (3-day retention) ==="
@@ -182,14 +181,13 @@ services:
           echo "  [OK] $$TOPIC"
         done
 
-        echo "=== Creating Gold structured_metrics (compaction + 3-day delete) ==="
+        echo "=== Creating Gold structured_metrics (3-day delete) ==="
         $$KAFKA --bootstrap-server $$BS --create --if-not-exists \
           --topic serve.gold.structured_metrics \
           --partitions 3 \
           --replication-factor 1 \
-          --config cleanup.policy=compact,delete \
-          --config retention.ms=$$GOLD_RETENTION \
-          --config min.cleanable.dirty.ratio=0.1
+          --config cleanup.policy=delete \
+          --config retention.ms=$$GOLD_RETENTION
         echo "  [OK] serve.gold.structured_metrics"
 
         echo "=== Creating System topics ==="
@@ -220,11 +218,24 @@ services:
   # Manages the Flink cluster: schedules jobs, tracks task slots,
   # coordinates checkpoints (Section 4.3).
   # Web UI on port 8081 for job monitoring and checkpoint status.
+  #
+  # Custom image: apache/flink:1.19.1-java11 + Python 3.11 + PyFlink 1.19.1
+  # + Kafka SQL connector JAR + all project source code (see Dockerfile.flink).
+  # Rollback: replace the build block below with `image: apache/flink:1.19-java11`
   # ----------------------------------------------------------
   flink-jobmanager:
-    image: apache/flink:1.19-java11
+    build:
+      # Context is data-pipeline/ (parent of infrastructure/).
+      # .dockerignore at data-pipeline/.dockerignore prunes venv/, tests/, etc.
+      context: ..
+      dockerfile: infrastructure/Dockerfile.flink
+    image: anizai-flink:1.19.1   # named so `docker images` shows a readable tag
     container_name: anizai-flink-jobmanager
     command: jobmanager
+    # Injects OPENAI_API_KEY, POSTGRES_PASSWORD, and other runtime secrets.
+    # Phase 5 processing jobs (gold_job.py, translation.py) read these at
+    # job-submission time. Secrets are NOT baked into the image (Section 9.1).
+    env_file: .env
     ports:
       - "8081:8081" # Flink Web UI
     environment:
@@ -245,6 +256,21 @@ services:
         restart-strategy: fixed-delay
         restart-strategy.fixed-delay.attempts: 5
         restart-strategy.fixed-delay.delay: 10s
+        # Prometheus metrics reporter — Section 7.2
+        # metrics.reporters activates the named reporter(s). Without this line
+        # Flink ignores all metrics.reporter.* settings, even if the JAR is present.
+        # The JAR is copied to /opt/flink/plugins/metrics-prometheus/ in LAYER 4B
+        # of Dockerfile.flink — Flink's plugin classloader scans that path at startup.
+        metrics.reporters: prom
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+      # Override .env localhost values with Docker-internal hostnames (Section 8.2).
+      # env_file: .env sets KAFKA_BOOTSTRAP_SERVERS=localhost:9092 and POSTGRES_HOST=localhost
+      # — correct for host-side pytest runs but wrong inside Docker where services are
+      # reachable by their service names on anizai-network (same fix applied to
+      # airflow-scheduler at line ~487).
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      POSTGRES_HOST: postgres
     volumes:
       - flink_checkpoints:/opt/flink/checkpoints
       - flink_checkpoints:/opt/flink/savepoints
@@ -264,11 +290,22 @@ services:
   #   - 2 slots for the Silver Job
   #   - 2 slots for the Gold Job
   # Scale task managers horizontally in GCP (Section 7.1).
+  #
+  # Custom image: same anizai-flink:1.19.1 image as jobmanager.
+  # Both containers MUST use the same image so the Python operator bytecode
+  # compiled by the JobManager is identical to what the TaskManager executes.
+  # Rollback: replace the build block below with `image: apache/flink:1.19-java11`
   # ----------------------------------------------------------
   flink-taskmanager:
-    image: apache/flink:1.19-java11
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.flink
+    image: anizai-flink:1.19.1
     container_name: anizai-flink-taskmanager
     command: taskmanager
+    # Same env_file as jobmanager — TaskManager workers also need DB/OpenAI
+    # credentials when executing Python operator functions (Section 9.1).
+    env_file: .env
     depends_on:
       flink-jobmanager:
         condition: service_healthy
@@ -283,6 +320,18 @@ services:
         execution.checkpointing.interval: 60000
         state.backend: hashmap
         state.checkpoints.dir: file:///opt/flink/checkpoints
+        # Prometheus metrics reporter — mirrors JobManager config (Section 7.2)
+        # TaskManager is the primary metrics source: operator throughput and latency
+        # are recorded here (the JobManager reports cluster-level coordination metrics).
+        metrics.reporters: prom
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+      # Override .env localhost values with Docker-internal hostnames (Section 8.2).
+      # Mirrors the jobmanager override above — TaskManager workers run the Python
+      # UDF operators that write to Kafka DLQ and PostgreSQL vaults, so they need
+      # the same internal hostname corrections.
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      POSTGRES_HOST: postgres
     volumes:
       - flink_checkpoints:/opt/flink/checkpoints
     networks:
@@ -323,6 +372,276 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  # ----------------------------------------------------------
+  # 7. AIRFLOW POSTGRESQL — Metadata database (Section 2.3)
+  # ----------------------------------------------------------
+  # Dedicated postgres instance for Airflow's internal scheduler metadata.
+  # Why separate from the anizai postgres (Design Decision D1):
+  #   Airflow runs alembic schema migrations on startup. A shared instance
+  #   would risk interference with the anizai application DDL managed by
+  #   init.sql. Separation keeps the two databases fully independent.
+  # Password sourced from .env: AIRFLOW_POSTGRES_PASSWORD (Section 9.1).
+  # ----------------------------------------------------------
+  airflow-postgres:
+    image: postgres:16
+    container_name: anizai-airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:-airflow_localdev}
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    networks:
+      - anizai-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ----------------------------------------------------------
+  # 8. AIRFLOW INIT — One-shot DB migration + admin user (Section 2.3)
+  # ----------------------------------------------------------
+  # Runs airflow db migrate to create the Airflow metadata schema,
+  # then creates the admin user if it does not already exist.
+  # Exits with code 0 on success; restart: on-failure retries until
+  # airflow-postgres is ready.
+  # Uses the official base image (not the custom Dockerfile.airflow)
+  # because DB migration requires only core Airflow — no producer deps.
+  # Downstream services wait via condition: service_completed_successfully.
+  # ----------------------------------------------------------
+  airflow-init:
+    image: apache/airflow:2.9.3-python3.12
+    container_name: anizai-airflow-init
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD:-airflow_localdev}@airflow-postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_FERNET_KEY}
+    networks:
+      - anizai-network
+    restart: on-failure
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        echo "=== Airflow: running DB migration ==="
+        airflow db migrate
+        echo "=== Airflow: provisioning admin user ==="
+        if airflow users list 2>/dev/null | grep -q "${AIRFLOW_ADMIN_USERNAME:-admin}"; then
+          echo "    Admin user '${AIRFLOW_ADMIN_USERNAME:-admin}' already exists — skipping."
+        else
+          airflow users create \
+            --username "${AIRFLOW_ADMIN_USERNAME:-admin}" \
+            --firstname Admin \
+            --lastname User \
+            --role Admin \
+            --email admin@anizai.local \
+            --password "${AIRFLOW_ADMIN_PASSWORD:-admin_localdev}"
+          echo "    Admin user created successfully."
+        fi
+        echo "=== Airflow initialization complete ==="
+
+  # ----------------------------------------------------------
+  # 9. AIRFLOW SCHEDULER — DAG execution engine (Section 2.3)
+  # ----------------------------------------------------------
+  # Discovers and schedules DAGs from /opt/airflow/dags. Executes
+  # tasks as local subprocesses (LocalExecutor — Design Decision D4).
+  #
+  # Custom image: apache/airflow:2.9.3-python3.12 + producer deps
+  # (requests, kafka-python-ng, arxiv, pytrends — see Dockerfile.airflow).
+  #
+  # KAFKA_BOOTSTRAP_SERVERS override: overrides the .env value
+  #   (localhost:9092) with the Docker-internal address (kafka:29092).
+  #   Producer subprocesses launched by LocalExecutor run inside this
+  #   container and must reach Kafka over the bridge network (Section 8.2).
+  #
+  # PYTHONPATH: enables PythonOperator tasks to import producers via
+  #   `from ingestion.fred_producer import main` (Design Decision D3).
+  #
+  # Source code (Design Decision D2 — DEV mode):
+  #   data-pipeline/ is volume-mounted at /opt/airflow/data-pipeline.
+  #   Code changes apply on the next DAG run without an image rebuild.
+  #   For production: remove the volume mount and rebuild the image.
+  # ----------------------------------------------------------
+  airflow-scheduler:
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.airflow
+    image: anizai-airflow:2.9.3
+    container_name: anizai-airflow-scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD:-airflow_localdev}@airflow-postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      # DAGs start enabled — operator can pause via UI if needed (Section 2.3).
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+      # Global catchup=False: each DAG also sets this explicitly (belt-and-suspenders).
+      AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
+      # Override .env localhost values — producer subprocesses and persistence
+      # calls run inside this container and reach services over the Docker bridge.
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      POSTGRES_HOST: postgres
+      # PYTHONPATH: makes data-pipeline/ importable by PythonOperator tasks.
+      PYTHONPATH: /opt/airflow/data-pipeline
+    volumes:
+      # DAG files — orchestration/dags/ → Airflow's default DAG discovery folder.
+      - ../orchestration/dags:/opt/airflow/dags
+      # Source code DEV mount — overrides the COPY in Dockerfile.airflow for local dev.
+      - ../:/opt/airflow/data-pipeline
+      # Task execution logs — shared with webserver for UI log display.
+      - airflow_logs:/opt/airflow/logs
+    networks:
+      - anizai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$(hostname)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # 10. AIRFLOW WEBSERVER — DAG management UI (Section 2.3)
+  # ----------------------------------------------------------
+  # Serves the Airflow web interface on host port 8090.
+  # Why 8090 (not 8080): kafka-ui already occupies port 8080 (Section 8.2).
+  # Display-only: does not schedule or execute tasks — that is the
+  # scheduler's responsibility. Shares the log volume so task logs
+  # are visible in the UI without additional configuration.
+  # ----------------------------------------------------------
+  airflow-webserver:
+    # No build: block — reuses the anizai-airflow:2.9.3 image built by
+    # airflow-scheduler. Both services run identical code; building once
+    # avoids the BuildKit concurrent-tag race when both share the same
+    # image name (same fix as flink-taskmanager reusing the flink JM image).
+    image: anizai-airflow:2.9.3
+    container_name: anizai-airflow-webserver
+    command: webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-scheduler:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD:-airflow_localdev}@airflow-postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      # Show the full Airflow config in the UI — useful for dev debugging.
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+      PYTHONPATH: /opt/airflow/data-pipeline
+    ports:
+      - "8090:8080"
+    volumes:
+      - ../orchestration/dags:/opt/airflow/dags
+      - airflow_logs:/opt/airflow/logs
+    networks:
+      - anizai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # ----------------------------------------------------------
+  # 11. PROMETHEUS — Metrics collection (Section 7.2)
+  # ----------------------------------------------------------
+  # Scrapes Flink jobmanager and taskmanager Prometheus reporters
+  # on port 9249 every 15 seconds. Operator-level metrics exposed:
+  #   - numRecordsIn / numRecordsOut (throughput per operator)
+  #   - latency (processing latency histogram)
+  #   - checkpoint duration + lag (pipeline health)
+  #   - JVM memory / GC (backpressure detection)
+  # Config file is volume-mounted (not baked into image) so scrape targets
+  # can be updated without an image rebuild.
+  # ----------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: anizai-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"  # allows POST /-/reload to hot-reload config
+    depends_on:
+      flink-taskmanager:
+        condition: service_started
+    networks:
+      - anizai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ----------------------------------------------------------
+  # 12. GRAFANA — Metrics visualization (Section 7.2)
+  # ----------------------------------------------------------
+  # Connects to Prometheus as a datasource (auto-provisioned via
+  # infrastructure/grafana/provisioning/datasources/).
+  # Pre-built dashboard is loaded from
+  # infrastructure/grafana/dashboards/ via provisioning config,
+  # so the pipeline dashboard is available immediately on first login
+  # without any manual UI setup.
+  # Port 3000 chosen: no conflict with kafka-ui (8080), Flink (8081),
+  # Airflow (8090), Prometheus (9090).
+  # Admin credentials: GRAFANA_ADMIN_PASSWORD from .env (Section 9.1).
+  # ----------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: anizai-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin_localdev}
+      # Disable sign-up — this is an internal observability tool (Section 9.1)
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Provisioning dirs: datasources + dashboards loaded at startup
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - anizai-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # ----------------------------------------------------------
   # PRODUCERS — 11 independent containers (Section 8.2)
@@ -394,6 +713,24 @@ volumes:
   postgres_data:
     driver: local
   flink_checkpoints:
+    driver: local
+  # Airflow metadata DB — dedicated volume for the airflow-postgres container.
+  # Separate from postgres_data to prevent any cross-contamination with the
+  # anizai application database (Design Decision D1, Section 8.3).
+  airflow_postgres_data:
+    driver: local
+  # Airflow task execution logs — shared between airflow-scheduler and
+  # airflow-webserver so that the UI can display log output without a
+  # remote log backend (acceptable for local development, Section 7.2).
+  airflow_logs:
+    driver: local
+  # Prometheus time-series data — retains 15 days of metrics (Section 7.2).
+  prometheus_data:
+    driver: local
+  # Grafana configuration and dashboard state (Section 7.2).
+  # Pre-built dashboards are provisioned read-only from the host mount;
+  # this volume holds Grafana's own DB (annotations, user prefs, etc.).
+  grafana_data:
     driver: local
 
 

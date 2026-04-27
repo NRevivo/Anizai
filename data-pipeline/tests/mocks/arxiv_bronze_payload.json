@@ -1,0 +1,21 @@
+{
+  "_comment": "Realistic mock of a single ArXiv paper after normalisation by ArXivProducer._build_raw_payload(). Stored verbatim as raw_payload inside the Bronze envelope. Source: arXiv public Atom XML feed (no API key, no authority whitelist). Category query: cs.AI, fetch_mode: pulse. No impact_boost field — Impact Boost does not apply to academic papers (Section B.1). Abstract mapped to full_text_raw and inverted_pyramid_lead by map_arxiv_paper_to_silver() (Section C.3). Section 4.4 / Section C.1 / Section B.1.",
+  "arxiv_id": "2409.14891v1",
+  "url": "https://arxiv.org/abs/2409.14891",
+  "pdf_url": "https://arxiv.org/pdf/2409.14891",
+  "title": "Regulatory Uncertainty and Market Volatility: The Impact of AI Governance Frameworks on Algorithmic Trading Strategies",
+  "abstract": "We examine how evolving AI regulation and policy uncertainty affect market volatility and the behavior of algorithmic trading systems in equity and derivatives markets. Using a panel dataset spanning 14 jurisdictions over 2019-2024, we find that periods of high regulatory uncertainty — defined as elevated frequency of AI governance announcements without enacted legislation — are associated with a statistically significant 18-23% increase in intraday volatility across AI-exposed sectors. We further show that institutional trading algorithms undergo measurable strategy shifts during these periods, reducing exposure to high-AI-intensity stocks. Our findings suggest that regulatory intervention timelines and communication clarity are first-order determinants of market stability in AI-driven financial ecosystems. We discuss policy implications for central banks and securities regulators seeking to minimize market disruption during AI governance transitions.",
+  "authors": [
+    "Noa Ben-David",
+    "Kwame Asante",
+    "Ingrid Solberg",
+    "Marcus Delacroix"
+  ],
+  "published": "2024-09-23T14:08:31Z",
+  "updated": "2024-09-25T09:22:14Z",
+  "categories": ["cs.AI", "econ.GN", "q-fin.ST"],
+  "primary_category": "cs.AI",
+  "query_category": "cs.AI",
+  "fetch_mode": "pulse",
+  "search_query": "cat:cs.AI AND (ti:regulation OR abs:regulation OR ti:policy OR abs:policy OR ti:\"market impact\" OR abs:\"market impact\" OR ti:outbreak OR abs:outbreak OR ti:intervention OR abs:intervention OR ti:trend OR abs:trend)"
+}

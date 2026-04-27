@@ -1,6 +1,6 @@
 # Environments
 .env
-.env.example
+
 
 venv/
 
@@ -22,4 +22,14 @@ logs/
 .idea/
 .vscode/
 
+# docs files
+/docs/agentic_hub_implementation.md
+/docs/agentic_hub_spec.md
+/docs/agentic_hub_spec_patch.md
+/docs/anizai_handoff_consolidated.md
+
 /task_plan.md
+/task_plan_archive.md
+/task_plan_implementation.md
+/pytest.ini
+

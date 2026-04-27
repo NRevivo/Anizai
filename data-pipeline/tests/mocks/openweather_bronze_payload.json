@@ -1,0 +1,17 @@
+{
+  "_comment": "Realistic mock of a single OpenWeather observation after normalisation by OpenWeatherProducer._build_raw_payload(). Represents a STATIC mode observation for the Taipei hotspot (strategic_tag='taiwan_semiconductor') on 2026-04-02. wind_speed_ms is raw m/s from OWM wind.speed — Silver Job converts to knots via x1.94384. weather_id=502 (heavy intensity rain) maps to condition_severity=4 via CONDITION_ID_TO_SEVERITY, triggering Natural_Disaster_Alert and Tech_Supply_Risk in the Gold Job. Section 4.4 / Section C.1 / Section B.6.",
+  "hotspot_name": "Taipei",
+  "lat": 25.033,
+  "lon": 121.5654,
+  "strategic_tag": "taiwan_semiconductor",
+  "temperature_celsius": 22.4,
+  "wind_speed_ms": 8.7,
+  "pressure_hpa": 1008.0,
+  "humidity_pct": 91.0,
+  "weather_id": 502,
+  "weather_main": "Rain",
+  "weather_description": "heavy intensity rain",
+  "official_alerts": [],
+  "fetch_timestamp": "2026-04-02T10:00:00+00:00",
+  "mode": "static"
+}

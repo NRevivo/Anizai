@@ -1,0 +1,18 @@
+{
+  "_comment": "Mock GPT-4o Cognitive Metadata Extraction response for the ArXiv paper 'Regulatory Uncertainty and Market Volatility' (arxiv_bronze_payload.json, arxiv_id 2409.14891v1). Represents the JSON returned by choices[0].message.content from a call_openai_cognitive_metadata() invocation in process_arxiv_gold_message(). Used by Gate 2 Gold tests to avoid live OpenAI API calls (Section 4.4 Mock-Driven Development). All fields conform to the _COGNITIVE_METADATA_SYSTEM_PROMPT schema in gold_job.py. No impact_boost — academic papers are not breaking-news sources (Section B.1).",
+  "executive_summary": "A cross-jurisdictional panel study (14 jurisdictions, 2019-2024) finds that high regulatory uncertainty around AI governance — measured as elevated frequency of AI policy announcements without enacted legislation — is associated with an 18-23% increase in intraday volatility in AI-exposed equity and derivatives sectors. Institutional trading algorithms demonstrably reduce high-AI-intensity stock exposure during these periods, suggesting that regulatory communication clarity is a first-order determinant of market stability in AI-driven financial ecosystems.",
+  "key_findings": [
+    "Periods of high AI regulatory uncertainty linked to 18-23% increase in intraday volatility across AI-exposed sectors",
+    "Institutional trading algorithms measurably shift strategy during regulatory uncertainty, reducing AI-intensive stock exposure",
+    "Regulatory communication clarity and intervention timelines are first-order determinants of market stability",
+    "Effect documented across 14 jurisdictions over 2019-2024 using panel data methodology"
+  ],
+  "impact_level": 3,
+  "urgency_level": 1,
+  "reliability_score": 0.87,
+  "sentiment_score": -0.2,
+  "extracted_entities": ["OPEC", "AI governance", "SEC", "algorithmic trading", "Brent crude", "equity markets", "derivatives markets", "central banks"],
+  "topic_classification": "AI Regulation / Financial Markets",
+  "fact_check_flag": false,
+  "geospatial_focus": "Global (14-jurisdiction panel: EU, US, UK, Asia-Pacific)"
+}

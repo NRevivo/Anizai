@@ -1,0 +1,52 @@
+# ==========================================================
+# Anizai Data Pipeline — Docker Build Context Exclusions
+# ==========================================================
+# Build context root: data-pipeline/
+# This file keeps the build context lean and prevents credentials
+# or large irrelevant directories from entering any Docker image.
+# ==========================================================
+
+# Virtual environment — large, OS-specific, not needed in containers
+venv/
+
+# Python bytecode — container regenerates for its own Python version
+__pycache__/
+*.pyc
+*.pyo
+
+# Credentials — secrets are injected at runtime via env_file, never baked in
+.env
+.env.example
+
+# Telegram session files — sensitive auth state
+*.session
+*.session-journal
+
+# Tests run against the container from the host, not inside the image
+tests/
+.pytest_cache/
+
+# Infrastructure config lives here but is not needed inside the Flink image
+# (Dockerfile.flink itself is referenced by path, not COPY'd into the image)
+infrastructure/
+
+# Ingestion code — producers run in separate containers, not Flink
+ingestion/
+
+# Orchestration code — Airflow, not needed in Flink image
+orchestration/
+
+# Local data and log files
+data/
+logs/
+
+# Documentation
+*.md
+
+# IDE metadata
+.idea/
+.vscode/
+
+# Git history — not needed in runtime image
+.git/
+.gitignore

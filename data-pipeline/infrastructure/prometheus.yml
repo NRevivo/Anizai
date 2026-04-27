@@ -1,0 +1,72 @@
+# ==========================================================
+# Anizai Data Pipeline — Prometheus Scrape Configuration
+# ==========================================================
+# Section 7.2: Pipeline Observability — The Monitoring Contract
+#
+# Prometheus scrapes Flink's native PrometheusReporter on port 9249.
+# The reporter is enabled via FLINK_PROPERTIES in docker-compose.yml.
+#
+# Metrics exposed per target:
+#   - flink_taskmanager_*: operator throughput (numRecordsIn/Out),
+#     processing latency histogram, memory, GC
+#   - flink_jobmanager_*: cluster coordination metrics,
+#     checkpoint trigger counts, job state
+#
+# Scrape interval: 15s — low enough for real-time panels, high enough
+# to avoid overhead on a single-node dev stack.
+#
+# To reload config without restarting Prometheus:
+#   curl -s -XPOST http://localhost:9090/-/reload
+# ==========================================================
+
+global:
+  scrape_interval: 15s       # Default: 1m. 15s gives near-real-time Grafana panels.
+  evaluation_interval: 15s   # How often to evaluate alerting rules (none defined yet).
+  scrape_timeout: 10s        # Abort a scrape if it takes longer than this.
+
+  # External labels are attached to all time series and alerts.
+  # Useful when federating multiple Prometheus instances (e.g., per GCP region).
+  external_labels:
+    environment: "local-dev"
+    pipeline: "anizai"
+
+# ==========================================================
+# Scrape Configurations
+# ==========================================================
+scrape_configs:
+
+  # ----------------------------------------------------------
+  # Prometheus self-monitoring
+  # Scrapes Prometheus's own /metrics endpoint for health tracking.
+  # ----------------------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ----------------------------------------------------------
+  # Flink JobManager — cluster coordination metrics
+  # Exposes: job state, checkpoint triggers, number of task slots,
+  #          JVM heap usage, GC counts.
+  # Port 9249: PrometheusReporter configured via FLINK_PROPERTIES.
+  # ----------------------------------------------------------
+  - job_name: "flink-jobmanager"
+    static_configs:
+      - targets: ["flink-jobmanager:9249"]
+        labels:
+          flink_role: "jobmanager"
+    metrics_path: "/"
+
+  # ----------------------------------------------------------
+  # Flink TaskManager — operator throughput + latency
+  # Exposes: numRecordsIn/Out per operator (Silver/Gold transforms),
+  #          latency histograms, checkpoint duration/lag,
+  #          JVM memory and GC (backpressure detection).
+  # Port 9249: PrometheusReporter configured via FLINK_PROPERTIES.
+  # This is the primary scrape target for Grafana pipeline panels.
+  # ----------------------------------------------------------
+  - job_name: "flink-taskmanager"
+    static_configs:
+      - targets: ["flink-taskmanager:9249"]
+        labels:
+          flink_role: "taskmanager"
+    metrics_path: "/"

@@ -1,0 +1,24 @@
+{
+  "_comment": "Mock GPT-4o Consensus Bundle response for a HackerNews story about Polymarket hitting $1B trading volume. Built by call_hackernews_consensus() using build_hackernews_consensus_prompt() (title + top_comments). Matches the _CONSENSUS_SYSTEM_PROMPT 11-field schema. Used by Gate 2 gold tests (test_hackernews_gate2_gold.py) to verify build_hackernews_gold_social_pulse() assembles the correct C.6 Gold Social Pulse. Section 4.4 / Section 4.2A / Section C.6 / Section B.2.",
+  "executive_summary": "HackerNews community broadly views Polymarket's $1B volume milestone as a validation of prediction markets as a credible information aggregation mechanism. Commenters highlight AI regulation contracts and geopolitical risk markets as breakout categories, while noting significant regulatory headwinds from the CFTC as the primary constraint on institutional adoption.",
+  "key_findings": [
+    "Prediction markets priced in Russia-Ukraine invasion weeks before mainstream media, demonstrating superior information aggregation over traditional news channels.",
+    "AI regulation contracts showing unexpected liquidity despite niche topic, suggesting institutional interest in regulatory risk pricing.",
+    "CFTC regulatory risk is the primary ceiling for US-based institutional capital inflows into offshore prediction markets."
+  ],
+  "impact_level": 4,
+  "urgency_level": 3,
+  "reliability_score": 0.82,
+  "sentiment_score": 0.55,
+  "extracted_entities": [
+    "Polymarket",
+    "CFTC",
+    "Federal Reserve",
+    "Russia-Ukraine",
+    "United States"
+  ],
+  "topic_classification": "Geopolitics",
+  "fact_check_flag": false,
+  "consensus_rating": 0.74,
+  "uncertainty_index": 0.28
+}

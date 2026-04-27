@@ -73,8 +73,10 @@ from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
 from config.kafka_topics import BRONZE_TELEGRAM
 from config.settings import BASE_DIR, TELEGRAM_API_HASH, TELEGRAM_API_ID
 from utils.kafka_utils import build_bronze_message, make_producer
+from utils.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
+setup_logging()
 
 
 # ==========================================================

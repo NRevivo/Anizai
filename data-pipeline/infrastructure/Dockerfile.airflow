@@ -1,0 +1,96 @@
+# ==========================================================
+# Anizai Data Pipeline — Apache Airflow Image
+# ==========================================================
+# Orchestrates scheduled REST-polling producers via DAGs:
+#   FRED          daily          06:00 UTC
+#   ArXiv         daily          07:00 UTC
+#   GoogleTrends  daily          08:00 UTC
+#   NewsAPI       every 20 min
+#   HackerNews    every 20 min
+#   OpenWeather   every 10 min
+#   OpenSky       every  1 min
+#
+# NOT managed here (streaming / always-on):
+#   Polymarket   — WebSocket daemon (ingestion/polymarket_producer.py)
+#   Telegram     — MTProto daemon  (ingestion/telegram_producer.py)
+#
+# References:
+#   - Section 2.3:  Ingestion Orchestration Logic — Scheduled Pollers
+#   - Section 8.2:  Core Services in the Docker Stack
+#   - Section 9.1:  Environment parity — same Python version and dep pins
+#                   as local development venv (requirements.txt)
+#
+# Build context: data-pipeline/
+#   docker-compose sets context: .. (relative to infrastructure/).
+#   Build context root is therefore data-pipeline/.
+#
+# === Base Image ===
+# apache/airflow:2.9.3-python3.12
+#   - Python 3.12 matches local dev venv (see requirements.txt header).
+#   - Why NOT 3.11: the PyFlink 1.19 Python cap is a Flink-cluster constraint
+#     only; Airflow has no PyFlink dependency, so 3.12 is safe and consistent.
+#   - Pre-installed: apache-airflow[postgres]==2.9.3, sqlalchemy, psycopg2,
+#     flask-appbuilder, and the full Airflow dependency tree.
+#   - [postgres] extra required for LocalExecutor with PostgreSQL metadata DB.
+#
+# === Executor ===
+# LocalExecutor — tasks run as subprocesses of the airflow-scheduler container.
+# No Celery workers or Redis needed for a single-machine development setup.
+# See docker-compose.yml AIRFLOW__CORE__EXECUTOR=LocalExecutor.
+#
+# === Source Code Strategy (Design Decision D2) ===
+# DEV:  docker-compose mounts data-pipeline/ as a volume at runtime:
+#         volumes:
+#           - ../:/opt/airflow/data-pipeline
+#       The COPY step below is effectively shadowed by the volume mount.
+#       Code changes take effect without rebuilding the image.
+#
+# PROD: Remove the volume mount from docker-compose. Before building,
+#       update data-pipeline/.dockerignore to add:
+#         !ingestion/
+#         !config/
+#         !utils/
+#       Then rebuild: docker compose -f infrastructure/docker-compose.yml build airflow-scheduler
+#       The COPY step bakes the source tree into the image.
+#
+# === Environment Variables ===
+# API keys and DB credentials are injected at runtime via docker-compose
+# env_file: .env (Section 9.1). config/settings.py reads os.environ —
+# load_dotenv() falls through gracefully if .env is absent inside the container.
+# Required Airflow-specific variables (add to .env):
+#   AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+#   AIRFLOW__CORE__EXECUTOR=LocalExecutor
+#   AIRFLOW__CORE__FERNET_KEY
+#   AIRFLOW_ADMIN_USERNAME
+#   AIRFLOW_ADMIN_PASSWORD
+# ==========================================================
+
+FROM apache/airflow:2.9.3-python3.12
+
+# ----------------------------------------------------------
+# Install producer-specific dependencies
+# ----------------------------------------------------------
+# Copies requirements-airflow.txt from the data-pipeline/ build context root.
+# This file is NOT excluded by .dockerignore (only infrastructure/ and *.md
+# are excluded — requirements-airflow.txt matches neither rule).
+#
+# Why not install from the full requirements.txt:
+#   The full requirements.txt includes PyFlink, openai, websockets, telethon,
+#   and pytest — none of which are needed or safe to install in an Airflow
+#   container. requirements-airflow.txt is the minimal producer-only subset.
+#
+# pip install is run as the 'airflow' user (default in the base image).
+# --no-cache-dir keeps the image layer lean.
+COPY --chown=airflow:root requirements-airflow.txt /tmp/requirements-airflow.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-airflow.txt
+
+# ----------------------------------------------------------
+# Production: bake source code into the image
+# ----------------------------------------------------------
+# In local development this path is overridden by the docker-compose volume
+# mount (see D2 comment above). In production, this COPY makes the image
+# self-contained — no volume mount required at deployment time.
+#
+# The COPY will include whatever is not excluded by .dockerignore.
+# For production builds, ensure .dockerignore allows: ingestion/, config/, utils/
+COPY --chown=airflow:root . /opt/airflow/data-pipeline/

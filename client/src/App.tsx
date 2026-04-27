@@ -58,21 +58,18 @@ interface TrendingQuestionView {
   context: string;
 }
 
-function normalizePercent(val: number | null | undefined): number {
-  if (val == null) return 0;
-  if (Math.abs(val) <= 1 && val !== 0) return val * 100;
-  return val;
-}
-
 function mapSessionStatus(status: SessionStatus, confidence: number | null): 'stable' | 'volatile' {
   if (status === 'failed') {
     return 'volatile';
   }
-  if (status === 'running') {
+  if (status === 'queued' || status === 'claimed' || status === 'running') {
     return 'volatile';
   }
-  const normalizedConfidence = normalizePercent(confidence);
-  if (normalizedConfidence !== 0 && normalizedConfidence < 40) {
+  if (status === 'awaiting_clarification') {
+    return 'volatile';
+  }
+  // confidence is a 0–1 float; treat < 0.4 as volatile
+  if (confidence !== null && confidence !== 0 && confidence < 0.4) {
     return 'volatile';
   }
   return 'stable';
@@ -82,7 +79,8 @@ function toSidebarSession(session: SessionListItem): PredictionSession {
   return {
     id: session.id,
     question: session.title ?? session.question,
-    probability: normalizePercent(session.latestProbability),
+    // Pass 0–1 float directly — display conversion happens in formatProbability
+    probability: session.latestProbability ?? 0,
     status: mapSessionStatus(session.status, session.latestConfidence),
     lastUpdated: new Date(session.lastActivityAt || session.updatedAt || session.createdAt),
   };
@@ -93,6 +91,7 @@ function toPrediction(detail: SessionDetail | null): Prediction | null {
     return null;
   }
 
+  // All values are stored as 0–1 floats from the backend
   const probability = detail.result?.finalProbability ?? detail.session.latestProbability ?? 0;
   const confidence = detail.result?.confidence ?? detail.session.latestConfidence ?? 0;
   const explanation =
@@ -104,11 +103,11 @@ function toPrediction(detail: SessionDetail | null): Prediction | null {
   return {
     id: detail.session.id,
     question: detail.session.question,
-    probability: normalizePercent(probability),
-    confidenceIndex: normalizePercent(confidence),
+    probability,
+    confidenceIndex: confidence,
     status: mapSessionStatus(detail.session.status, detail.session.latestConfidence),
     explanation,
-    marketProbability: detail.result?.marketProbability != null ? normalizePercent(detail.result.marketProbability) : undefined,
+    marketProbability: detail.result?.marketProbability ?? undefined,
     createdAt: new Date(detail.session.createdAt),
     updatedAt: new Date(detail.session.updatedAt),
   };
@@ -119,12 +118,13 @@ function toSentimentPoints(detail: SessionDetail | null): SentimentDataPoint[] {
     return [];
   }
 
+  // expertSentiment and publicSentiment are stored as 0–1 floats
   return detail.sentimentTimeSeries.map((point) => ({
     date: point.date || new Date(point.ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    expertSentiment: normalizePercent(point.expertSentiment),
-    expertUpper: point.expertUpper != null ? normalizePercent(point.expertUpper) : undefined,
-    expertLower: point.expertLower != null ? normalizePercent(point.expertLower) : undefined,
-    publicSentiment: normalizePercent(point.publicSentiment),
+    expertSentiment: point.expertSentiment,
+    expertUpper: point.expertUpper ?? undefined,
+    expertLower: point.expertLower ?? undefined,
+    publicSentiment: point.publicSentiment,
   }));
 }
 
@@ -163,16 +163,12 @@ function toChatMessages(detail: SessionDetail | null): ChatMessage[] {
 
 function toTrendingView(items: TrendingForecast[]): TrendingQuestionView[] {
   return items.map((item) => {
-    let probability = item.probability ?? 0.5;
-    probability = normalizePercent(probability);
-    
-    // Handle the case where probability was missing or 0
-    if (probability === 0 && item.probability == null) {
-      probability = 50;
-    }
+    // probability from backend is a 0–1 float; default to 0.5 if missing
+    const probability = item.probability ?? 0.5;
 
+    // Trend thresholds in 0–1 space: >0.6 up, <0.4 down
     const trend: 'up' | 'down' | 'stable' =
-      probability >= 60 ? 'up' : probability <= 40 ? 'down' : 'stable';
+      probability >= 0.6 ? 'up' : probability <= 0.4 ? 'down' : 'stable';
 
     return {
       id: item.id,
