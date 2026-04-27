@@ -22,4 +22,9 @@ logs/
 .idea/
 .vscode/
 
+/docs
 /task_plan.md
+/task_plan_archive.md
+/task_plan_implementation.md
+/pytest.ini
+/ingestion/reddit_producer.py
