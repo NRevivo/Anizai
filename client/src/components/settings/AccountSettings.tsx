@@ -7,7 +7,7 @@ interface AccountSettingsProps {
 }
 
 function formatDate(iso: string | null | undefined): string {
-    if (!iso) return '—';
+    if (!iso) return 'Not available';
     return new Date(iso).toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
@@ -16,7 +16,7 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 export function AccountSettings({ userProfile, onLogout }: AccountSettingsProps) {
-    const email = auth.currentUser?.email ?? userProfile?.email ?? '—';
+    const email = auth.currentUser?.email ?? userProfile?.email ?? 'Not available';
     const createdAt = userProfile?.createdAt;
     const plan = userProfile?.plan ?? 'free';
 
@@ -24,17 +24,17 @@ export function AccountSettings({ userProfile, onLogout }: AccountSettingsProps)
         <div className="space-y-8">
             <div>
                 <h2 className="text-xl font-semibold text-gray-900">Account</h2>
-                <p className="mt-1 text-sm text-gray-500">Your account information and details.</p>
+                <p className="mt-1 text-sm text-gray-500">Review account details and sign out.</p>
             </div>
 
             {/* Info card */}
             <div className="border border-gray-200 rounded-xl overflow-hidden">
                 <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Account Details</p>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Account details</p>
                 </div>
                 <dl className="divide-y divide-gray-100">
                     <Row label="Email" value={email} />
-                    <Row label="Account Created" value={formatDate(createdAt)} />
+                    <Row label="Created" value={formatDate(createdAt)} />
                     <Row
                         label="Plan"
                         value={
@@ -49,7 +49,7 @@ export function AccountSettings({ userProfile, onLogout }: AccountSettingsProps)
             {/* Danger zone */}
             <div className="border border-red-100 rounded-xl overflow-hidden">
                 <div className="bg-red-50 px-5 py-3 border-b border-red-100">
-                    <p className="text-xs font-semibold text-red-400 uppercase tracking-wider">Session</p>
+                    <p className="text-xs font-semibold text-red-400 uppercase tracking-wider">Sign out</p>
                 </div>
                 <div className="px-5 py-4 flex items-center justify-between">
                     <div>
@@ -60,7 +60,7 @@ export function AccountSettings({ userProfile, onLogout }: AccountSettingsProps)
                         onClick={onLogout}
                         className="px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 transition-colors"
                     >
-                        Sign Out
+                        Sign out
                     </button>
                 </div>
             </div>

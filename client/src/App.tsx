@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
 
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
@@ -15,10 +14,9 @@ import { BlogPage } from './pages/BlogPage';
 import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { CookiesPage } from './pages/CookiesPage';
-import { auth, googleProvider } from './lib/firebase';
-import { ApiAuthError } from './lib/api';
+import { StateMessage } from './components/ui/StateMessage';
 import {
-  fetchCurrentUser,
+  getDemoUserProfile,
   updateUserPlan,
   type UserPlan,
   type UserProfile,
@@ -101,7 +99,7 @@ function toPrediction(detail: SessionDetail | null): Prediction | null {
     detail.result?.detailedExplanation ??
     detail.result?.bottomLineAnswer ??
     detail.result?.summaryMarkdown ??
-    'Analysis in progress.';
+    'Forecast is still being prepared.';
 
   return {
     id: detail.session.id,
@@ -181,7 +179,7 @@ function toTrendingView(items: TrendingForecast[]): TrendingQuestionView[] {
       question: item.question ?? item.title ?? 'Untitled forecast',
       probability,
       trend,
-      context: `Popularity score: ${item.popularityScore}`,
+      context: `Popularity: ${item.popularityScore}`,
     };
   });
 }
@@ -204,71 +202,45 @@ function App() {
     setActiveSessionDetail(detail);
   }, []);
 
-  const loadDashboardData = useCallback(async (preferredSessionId?: string | null) => {
+  useEffect(() => {
+    setIsHydratingAuth(false);
+  }, []);
+
+  const enterDemoDashboard = useCallback(async () => {
+    setAuthError(null);
     setIsDashboardLoading(true);
 
     try {
-      const [profile, sessionsData, trendingData] = await Promise.all([
-        fetchCurrentUser(),
+      const [sessionsData, trendingData] = await Promise.all([
         fetchSessions(),
         fetchTrendingForecasts(20),
       ]);
 
-      setUserProfile(profile);
+      setUserProfile(getDemoUserProfile());
       setSessions(sessionsData);
       setTrending(trendingData);
 
-      const nextSessionId =
-        preferredSessionId && sessionsData.some((session) => session.id === preferredSessionId)
-          ? preferredSessionId
-          : sessionsData[0]?.id ?? null;
-
+      const nextSessionId = sessionsData[0]?.id ?? null;
       if (nextSessionId) {
         await loadSession(nextSessionId);
       } else {
         setActiveSessionId(null);
         setActiveSessionDetail(null);
       }
+
+      setAppState('dashboard');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not open the dashboard.');
     } finally {
       setIsDashboardLoading(false);
     }
   }, [loadSession]);
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUserProfile(null);
-        setSessions([]);
-        setTrending([]);
-        setActiveSessionId(null);
-        setActiveSessionDetail(null);
-        setAppState('landing');
-        setIsHydratingAuth(false);
-        return;
-      }
-
-      try {
-        setAuthError(null);
-        await loadDashboardData();
-        setAppState('dashboard');
-      } catch (error) {
-        if (error instanceof ApiAuthError) {
-          await signOut(auth);
-        }
-        setAuthError(error instanceof Error ? error.message : 'Failed to initialize session');
-      } finally {
-        setIsHydratingAuth(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [loadDashboardData]);
-
   const handleGoToLogin = () => {
     if (userProfile) {
       setAppState('dashboard');
     } else {
-      setAppState('login');
+      void enterDemoDashboard();
     }
   };
 
@@ -285,55 +257,25 @@ function App() {
   };
 
   const handleGoogleAuth = async () => {
-    try {
-      setAuthError(null);
-      await signInWithPopup(auth, googleProvider);
-      await loadDashboardData();
-      setAppState('dashboard');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Google sign-in failed');
-    }
+    await enterDemoDashboard();
   };
 
-  const handleEmailAuth = async (email: string, password?: string) => {
+  const handleEmailAuth = async (_email: string, password?: string) => {
     if (!password) {
       setAuthError('Password is required for email sign-in.');
       return;
     }
-    try {
-      setAuthError(null);
-      await signInWithEmailAndPassword(auth, email, password);
-      await loadDashboardData();
-      setAppState('dashboard');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Email sign-in failed');
-    }
+    await enterDemoDashboard();
   };
 
   const handleCreateAccount = async (payload: { name: string; email: string; password: string }) => {
-    try {
-      setAuthError(null);
-      const userCredential = await createUserWithEmailAndPassword(auth, payload.email, payload.password);
-      if (userCredential.user) {
-        await updateProfile(userCredential.user, { displayName: payload.name });
-        await userCredential.user.getIdToken(true);
-      }
-      await loadDashboardData();
-      setAppState('plan-selection');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Email sign-up failed');
-    }
+    setUserProfile({ ...getDemoUserProfile(), displayName: payload.name, email: payload.email });
+    setAppState('plan-selection');
   };
 
   const handleGoogleSignup = async () => {
-    try {
-      setAuthError(null);
-      await signInWithPopup(auth, googleProvider);
-      await loadDashboardData();
-      setAppState('plan-selection');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Google sign-up failed');
-    }
+    setUserProfile(getDemoUserProfile());
+    setAppState('plan-selection');
   };
 
   const handleSelectPlan = async (plan: UserPlan) => {
@@ -343,7 +285,7 @@ function App() {
       setUserProfile(updatedProfile);
       setAppState('dashboard');
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to update membership');
+      setAuthError(error instanceof Error ? error.message : 'Could not update your plan.');
     }
   };
 
@@ -362,7 +304,11 @@ function App() {
 
   const handleLogout = async () => {
     setAuthError(null);
-    await signOut(auth);
+    setUserProfile(null);
+    setSessions([]);
+    setTrending([]);
+    setActiveSessionId(null);
+    setActiveSessionDetail(null);
     setAppState('landing');
   };
 
@@ -378,7 +324,7 @@ function App() {
       setIsDashboardLoading(true);
       await loadSession(sessionId);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to load session');
+      setAuthError(error instanceof Error ? error.message : 'Could not load this forecast.');
     } finally {
       setIsDashboardLoading(false);
     }
@@ -393,7 +339,9 @@ function App() {
       setSessions(sessionsData);
       await loadSession(created.id);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to create session');
+      const message = error instanceof Error ? error.message : 'Could not create the forecast.';
+      setAuthError(message);
+      throw error instanceof Error ? error : new Error(message);
     } finally {
       setIsDashboardLoading(false);
     }
@@ -402,7 +350,7 @@ function App() {
   const handleSendMessage = async (message: string) => {
     const sessionId = activeSessionId;
     if (!sessionId) {
-      setAuthError('No active session selected.');
+      setAuthError('Select a forecast before sending a follow-up.');
       return;
     }
 
@@ -419,7 +367,7 @@ function App() {
       });
       await loadSession(sessionId);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to save message');
+      setAuthError(error instanceof Error ? error.message : 'Could not save your follow-up.');
     }
   };
 
@@ -446,7 +394,7 @@ function App() {
         setActiveSessionDetail(null);
       }
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to delete session');
+      setAuthError(error instanceof Error ? error.message : 'Could not delete the forecast.');
     } finally {
       setIsDashboardLoading(false);
     }
@@ -461,8 +409,15 @@ function App() {
 
   if (isHydratingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-gray-600">
-        Initializing authentication...
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-sm">
+          <StateMessage
+            variant="loading"
+            align="center"
+            title="Preparing workspace"
+            description="Checking your session and loading forecasts."
+          />
+        </div>
       </div>
     );
   }
@@ -481,8 +436,9 @@ function App() {
     return (
       <>
         {authError ? (
-          <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700 shadow">
-            {authError}
+          <div className="fixed top-4 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow">
+            <p className="font-semibold text-red-800">Action failed</p>
+            <p className="mt-0.5">{authError}</p>
           </div>
         ) : null}
         <LoginPage
@@ -499,8 +455,9 @@ function App() {
     return (
       <>
         {authError ? (
-          <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700 shadow">
-            {authError}
+          <div className="fixed top-4 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow">
+            <p className="font-semibold text-red-800">Action failed</p>
+            <p className="mt-0.5">{authError}</p>
           </div>
         ) : null}
         <SignupPage
@@ -562,8 +519,9 @@ function App() {
   return (
     <>
       {authError ? (
-        <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700 shadow">
-          {authError}
+        <div className="fixed top-4 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow">
+          <p className="font-semibold text-red-800">Action failed</p>
+          <p className="mt-0.5">{authError}</p>
         </div>
       ) : null}
       <DashboardPage

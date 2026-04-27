@@ -33,12 +33,12 @@ export function ProfileSettings({ userProfile }: ProfileSettingsProps) {
         try {
             if (displayName !== auth.currentUser.displayName) {
                 await updateProfile(auth.currentUser, { displayName });
-                setMessage({ type: 'success', text: 'Display name updated successfully.' });
+                setMessage({ type: 'success', text: 'Display name updated.' });
             } else {
-                setMessage({ type: 'success', text: 'No changes to save.' });
+                setMessage({ type: 'success', text: 'No profile changes to save.' });
             }
         } catch (err: any) {
-            setMessage({ type: 'error', text: err.message ?? 'Failed to update profile.' });
+            setMessage({ type: 'error', text: err.message ?? 'Could not update your profile.' });
         } finally {
             setIsSaving(false);
         }
@@ -48,7 +48,7 @@ export function ProfileSettings({ userProfile }: ProfileSettingsProps) {
         <div className="space-y-8">
             <div>
                 <h2 className="text-xl font-semibold text-gray-900">Profile</h2>
-                <p className="mt-1 text-sm text-gray-500">Manage your public profile information.</p>
+                <p className="mt-1 text-sm text-gray-500">Update the profile details shown in Anizai.</p>
             </div>
 
             {/* Avatar */}
@@ -71,20 +71,20 @@ export function ProfileSettings({ userProfile }: ProfileSettingsProps) {
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Display Name
+                        Display name
                     </label>
                     <input
                         type="text"
                         value={displayName}
                         onChange={e => setDisplayName(e.target.value)}
                         className="w-full h-10 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-anizai-blue-500 focus:border-transparent transition-shadow"
-                        placeholder="Enter your name"
+                        placeholder="Your name"
                     />
                 </div>
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                        Email Address
+                        Email address
                     </label>
                     <input
                         type="email"
@@ -111,10 +111,10 @@ export function ProfileSettings({ userProfile }: ProfileSettingsProps) {
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                                 </svg>
-                                Saving…
+                                Saving...
                             </>
                         ) : (
-                            'Save Changes'
+                            'Save changes'
                         )}
                     </button>
                 </div>

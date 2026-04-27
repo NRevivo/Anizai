@@ -46,7 +46,7 @@ export function PreferenceSettings() {
             <div className="flex items-start justify-between">
                 <div>
                     <h2 className="text-xl font-semibold text-gray-900">Preferences</h2>
-                    <p className="mt-1 text-sm text-gray-500">Customize your Anizai experience.</p>
+                    <p className="mt-1 text-sm text-gray-500">Set workspace display preferences.</p>
                 </div>
                 {saved && (
                     <span className="inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 border border-green-200 rounded-full px-2.5 py-1 animate-fade-in">
@@ -80,7 +80,7 @@ export function PreferenceSettings() {
                         </button>
                     ))}
                 </div>
-                <p className="text-xs text-gray-400">Dark mode appearance is saved but not yet applied to the UI.</p>
+                <p className="text-xs text-gray-400">Theme selection is saved, but dark mode is not applied yet.</p>
             </section>
 
             {/* Toggles */}
@@ -88,14 +88,14 @@ export function PreferenceSettings() {
                 <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Dashboard</h3>
                 <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
                     <ToggleRow
-                        label="Compact dashboard view"
-                        description="Reduce padding and card sizes for a denser layout."
+                        label="Compact dashboard"
+                        description="Use tighter spacing in dashboard views when available."
                         checked={prefs.compactMode}
                         onChange={() => toggle('compactMode')}
                     />
                     <ToggleRow
-                        label="Show forecasting explanations"
-                        description="Display detailed AI reasoning alongside each probability."
+                        label="Show forecast rationale"
+                        description="Display supporting rationale alongside each probability."
                         checked={prefs.showExplanations}
                         onChange={() => toggle('showExplanations')}
                     />

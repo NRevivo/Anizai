@@ -9,18 +9,18 @@ interface NotificationToggle {
 const NOTIFICATIONS: NotificationToggle[] = [
     {
         id: 'email_tracked',
-        label: 'Email alerts for tracked forecasts',
-        description: 'Get notified when a forecast you are tracking has new analysis.',
+        label: 'Tracked forecast alerts',
+        description: 'Email me when a tracked forecast has new evidence or rationale.',
     },
     {
         id: 'probability_change',
-        label: 'Probability-change alerts',
-        description: 'Receive alerts when a prediction probability shifts significantly.',
+        label: 'Probability shift alerts',
+        description: 'Notify me when a forecast probability changes significantly.',
     },
     {
         id: 'trending_events',
-        label: 'Trending event alerts',
-        description: 'Be notified when a new trending event matches your interests.',
+        label: 'Trending forecast alerts',
+        description: 'Notify me when a trending forecast matches my interests.',
     },
 ];
 
@@ -30,7 +30,7 @@ export function NotificationSettings(_: NotificationSettingsProps) {
         <div className="space-y-8">
             <div>
                 <h2 className="text-xl font-semibold text-gray-900">Notifications</h2>
-                <p className="mt-1 text-sm text-gray-500">Control how and when Anizai notifies you.</p>
+                <p className="mt-1 text-sm text-gray-500">Review notification options for forecasts and evidence.</p>
             </div>
 
             <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
@@ -59,7 +59,7 @@ export function NotificationSettings(_: NotificationSettingsProps) {
             </div>
 
             <p className="text-xs text-gray-400">
-                Notification preferences will be stored per-user in Firestore once this feature launches.
+                Notification preferences are not active yet.
             </p>
         </div>
     );

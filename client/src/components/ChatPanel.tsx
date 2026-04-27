@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ChatMessage, SuggestedAction } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { StateMessage } from './ui/StateMessage';
 import { formatRelativeTime } from '../lib/utils';
 import ReactMarkdown from 'react-markdown';
 
@@ -31,36 +32,47 @@ export function ChatPanel({
     };
 
     return (
-        <div className="w-full h-full bg-white border-l border-gray-200 flex flex-col overflow-hidden">
-            {/* Chat Messages - Scrollable */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                {messages.map((message) => (
-                    <div
-                        key={message.id}
-                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
-                        <div
-                            className={`max-w-[85%] rounded-lg px-4 py-3 ${message.role === 'user'
-                                ? 'bg-slate-100 text-gray-900'
-                                : 'bg-white text-gray-900 border border-gray-100 shadow-sm'
-                                }`}
-                        >
-                            <div className={`text-sm prose prose-sm max-w-none ${message.role === 'user' ? '' : 'prose-slate'}`}>
-                                <ReactMarkdown>{message.content}</ReactMarkdown>
-                            </div>
-                            <p className="text-[10px] mt-1.5 text-gray-400">
-                                {formatRelativeTime(message.timestamp)}
-                            </p>
-                        </div>
-                    </div>
-                ))}
+        <div className="w-full h-full max-w-full bg-white border-l border-gray-200 flex flex-col overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-white">
+                <h2 className="text-sm font-semibold text-gray-900">Follow-up</h2>
+                <p className="mt-0.5 text-xs text-gray-500">Ask about drivers, assumptions, or evidence.</p>
             </div>
 
-            {/* Suggested Actions */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
+                {messages.length === 0 ? (
+                    <StateMessage
+                        compact
+                        title="No follow-ups yet"
+                        description="Ask a question about the forecast, evidence, or key assumptions."
+                    />
+                ) : (
+                    messages.map((message) => (
+                        <div
+                            key={message.id}
+                            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        >
+                            <div
+                                className={`max-w-[92%] min-w-0 rounded-lg px-3.5 py-2.5 ${message.role === 'user'
+                                    ? 'bg-slate-100 text-gray-900'
+                                    : 'bg-white text-gray-900 border border-gray-100 shadow-sm'
+                                    }`}
+                            >
+                                <div className={`text-sm prose prose-sm max-w-none break-words [&_*]:break-words ${message.role === 'user' ? '' : 'prose-slate'}`}>
+                                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                                </div>
+                                <p className="text-[10px] mt-1.5 text-gray-400">
+                                    {formatRelativeTime(message.timestamp)}
+                                </p>
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+
             {suggestedActions.length > 0 && (
-                <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
+                <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                        Next Steps
+                        Suggested follow-ups
                     </p>
                     <div className="flex flex-wrap gap-2">
                         {suggestedActions.map((action) => (
@@ -69,7 +81,7 @@ export function ChatPanel({
                                 variant="outline"
                                 size="sm"
                                 onClick={() => onActionClick(action.id)}
-                                className="text-xs hover:border-anizai-teal-400 hover:text-anizai-teal-600"
+                                className="h-auto min-h-8 max-w-full whitespace-normal text-xs hover:border-anizai-teal-400 hover:text-anizai-teal-600"
                             >
                                 {action.label}
                             </Button>
@@ -78,19 +90,19 @@ export function ChatPanel({
                 </div>
             )}
 
-            <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-white">
-                <div className="flex gap-2">
+            <div className="p-3 border-t border-gray-100 flex-shrink-0 bg-white">
+                <div className="flex min-w-0 gap-2">
                     <Input
-                        placeholder="Ask a follow-up (drivers, risks, what could change)..."
+                        placeholder="Ask a follow-up..."
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        className="bg-gray-50 border-gray-200 focus:bg-white focus:border-anizai-teal-500 focus:ring-1 focus:ring-anizai-teal-500 transition-all text-sm"
+                        className="min-w-0 bg-gray-50 border-gray-200 focus:bg-white focus:border-anizai-teal-500 focus:ring-1 focus:ring-anizai-teal-500 transition-all text-sm"
                     />
                     <Button
                         onClick={handleSend}
                         disabled={!inputValue.trim()}
-                        className="bg-anizai-teal-600 hover:bg-anizai-teal-700 text-white border-0 shadow-sm"
+                        className="h-10 w-10 shrink-0 bg-anizai-teal-600 hover:bg-anizai-teal-700 text-white border-0 shadow-sm"
                     >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { updateUserPlan } from '../../services/user.service';
 import type { UserProfile, UserPlan } from '../../services/user.service';
+import { StateMessage } from '../ui/StateMessage';
 
 // ─── Card Validation Helpers ──────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ function validateCard(card: CardData): FormErrors {
         errors.name = 'Enter the cardholder name as it appears on the card.';
     }
     if (numberClean.length < 13 || numberClean.length > 19) {
-        errors.number = 'Card number must be 13–19 digits.';
+        errors.number = 'Card number must be 13-19 digits.';
     } else if (!luhnCheck(numberClean)) {
         errors.number = 'Card number is invalid. Please check and try again.';
     }
@@ -88,7 +89,7 @@ function validateCard(card: CardData): FormErrors {
     // CVV
     const cvvClean = card.cvv.replace(/\D/g, '');
     if (cvvClean.length < 3 || cvvClean.length > 4) {
-        errors.cvv = 'CVV must be 3–4 digits.';
+        errors.cvv = 'CVV must be 3-4 digits.';
     }
 
     return errors;
@@ -221,7 +222,7 @@ function PaymentForm({ onSuccess, onCancel, isProcessing }: PaymentFormProps) {
             </div>
 
             {/* Expiry + CVV */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date</label>
                     <input
@@ -265,11 +266,11 @@ function PaymentForm({ onSuccess, onCancel, isProcessing }: PaymentFormProps) {
             </div>
 
             {/* Buttons */}
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
                 <button
                     type="submit"
                     disabled={isProcessing}
-                    className="flex-1 flex items-center justify-center gap-2 h-11 px-5 text-sm font-semibold text-white bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 rounded-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-anizai-blue-500 focus:ring-offset-2 disabled:opacity-60 transition-opacity"
+                    className="flex-1 flex items-center justify-center gap-2 min-h-11 px-5 text-sm font-semibold text-white bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 rounded-lg hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-anizai-blue-500 focus:ring-offset-2 disabled:opacity-60 transition-opacity"
                 >
                     {isProcessing ? (
                         <>
@@ -277,14 +278,14 @@ function PaymentForm({ onSuccess, onCancel, isProcessing }: PaymentFormProps) {
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                             </svg>
-                            Processing payment…
+                            Processing payment...
                         </>
                     ) : (
                         <>
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                 <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                             </svg>
-                            Upgrade to Premium — $19/mo
+                            Upgrade to Premium - $19/mo
                         </>
                     )}
                 </button>
@@ -319,16 +320,15 @@ function CancelConfirm({ onConfirm, onDismiss, isProcessing }: CancelConfirmProp
                 <div>
                     <p className="text-sm font-semibold text-amber-800">Cancel Premium subscription?</p>
                     <p className="text-sm text-amber-700 mt-1">
-                        You'll be downgraded to the Free plan immediately and lose access to unlimited forecasts.
-                        This action cannot be undone.
+                        You will move to the Free plan immediately. Existing forecasts are preserved.
                     </p>
                 </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <button
                     onClick={onConfirm}
                     disabled={isProcessing}
-                    className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors"
+                    className="flex min-h-10 items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors"
                 >
                     {isProcessing ? (
                         <>
@@ -336,16 +336,16 @@ function CancelConfirm({ onConfirm, onDismiss, isProcessing }: CancelConfirmProp
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                             </svg>
-                            Cancelling…
+                            Cancelling...
                         </>
                     ) : (
-                        'Yes, cancel subscription'
+                        'Cancel subscription'
                     )}
                 </button>
                 <button
                     onClick={onDismiss}
                     disabled={isProcessing}
-                    className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 disabled:opacity-50 transition-colors"
+                    className="min-h-10 px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 disabled:opacity-50 transition-colors"
                 >
                     Keep Premium
                 </button>
@@ -372,15 +372,15 @@ interface SubscriptionSettingsProps {
 const PLAN_FEATURES: Record<UserPlan, string[]> = {
     free: [
         '3 forecasts per month',
-        'Basic probability analysis',
-        'Public trending forecasts',
+        'Standard probability estimates',
+        'Trending forecast references',
         'Standard support',
     ],
     premium: [
         'Unlimited forecasts',
-        'Advanced multi-source analysis',
-        'Priority AI processing',
-        'Forecast tracking & alerts',
+        'Multi-source evidence analysis',
+        'Priority forecast processing',
+        'Forecast tracking and alerts',
         'Priority support',
         'Early access to new features',
     ],
@@ -417,14 +417,14 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
             setView('overview');
             showAlert({
                 type: 'success',
-                title: 'Welcome to Premium! 🎉',
-                message: 'Your subscription is active. Enjoy unlimited forecasts and all premium features.',
+                title: 'Premium is active',
+                message: 'Your plan now includes unlimited forecasts and Premium features.',
             });
         } catch (err: any) {
             showAlert({
                 type: 'error',
-                title: 'Payment failed',
-                message: err.message ?? 'An unexpected error occurred. Please try again.',
+                title: 'Payment not completed',
+                message: err.message ?? 'Payment could not be completed. Please try again.',
             });
         } finally {
             setIsProcessing(false);
@@ -442,14 +442,14 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
             setView('overview');
             showAlert({
                 type: 'success',
-                title: 'Subscription cancelled',
-                message: 'You have been downgraded to the Free plan. Your data and forecasts are preserved.',
+                title: 'Subscription canceled',
+                message: 'You are now on the Free plan. Your forecasts were preserved.',
             });
         } catch (err: any) {
             showAlert({
                 type: 'error',
-                title: 'Cancellation failed',
-                message: err.message ?? 'Could not cancel your subscription. Please try again.',
+                title: 'Cancellation not completed',
+                message: err.message ?? 'Could not cancel the subscription. Please try again.',
             });
         } finally {
             setIsProcessing(false);
@@ -467,13 +467,13 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
             showAlert({
                 type: 'success',
                 title: 'Subscription reactivated',
-                message: 'Your Premium access has been fully restored and will renew automatically.',
+                message: 'Premium access has been restored and will renew automatically.',
             });
         } catch (err: any) {
             showAlert({
                 type: 'error',
-                title: 'Reactivation failed',
-                message: err.message ?? 'Please try again.',
+                title: 'Reactivation not completed',
+                message: err.message ?? 'Could not reactivate the subscription. Please try again.',
             });
         } finally {
             setIsProcessing(false);
@@ -481,12 +481,12 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
     }, [isProcessing, onPlanChange]);
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
             {/* Header */}
-            <div className="flex items-start justify-between">
-                <div>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div className="min-w-0">
                     <h2 className="text-xl font-semibold text-gray-900">Subscription</h2>
-                    <p className="mt-1 text-sm text-gray-500">Manage your plan and billing.</p>
+                    <p className="mt-1 text-sm text-gray-500">Review plan limits and billing status.</p>
                 </div>
                 <PlanBadge plan={currentPlan} />
             </div>
@@ -507,7 +507,7 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     )}
-                    <div>
+                    <div className="min-w-0">
                         <p className={`text-sm font-semibold ${alert.type === 'success' ? 'text-green-800' : 'text-red-800'}`}>
                             {alert.title}
                         </p>
@@ -529,10 +529,10 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
             {/* Plan cards — always visible */}
             {view === 'overview' && (
                 <>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Free plan */}
-                        <div className={`rounded-xl border-2 p-5 transition-all ${!isPremium ? 'border-anizai-blue-400 bg-anizai-blue-50' : 'border-gray-200 bg-white'}`}>
-                            <div className="flex items-center justify-between mb-1">
+                        <div className={`rounded-xl border-2 p-4 sm:p-5 transition-all ${!isPremium ? 'border-anizai-blue-400 bg-anizai-blue-50' : 'border-gray-200 bg-white'}`}>
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                                 <h3 className="font-semibold text-gray-900">Free</h3>
                                 {!isPremium && (
                                     <span className="text-xs font-semibold text-anizai-blue-600 bg-anizai-blue-100 px-2 py-0.5 rounded-full">Current</span>
@@ -552,7 +552,7 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                         </div>
 
                         {/* Premium plan */}
-                        <div className={`rounded-xl border-2 p-5 relative overflow-hidden transition-all ${isActive ? 'border-anizai-blue-500 bg-gradient-to-br from-anizai-blue-50 to-anizai-purple-50' : isCanceled ? 'border-amber-400 bg-amber-50' : 'border-gray-200 bg-white'}`}>
+                        <div className={`rounded-xl border-2 p-4 sm:p-5 relative overflow-hidden transition-all ${isActive ? 'border-anizai-blue-500 bg-gradient-to-br from-anizai-blue-50 to-anizai-purple-50' : isCanceled ? 'border-amber-400 bg-amber-50' : 'border-gray-200 bg-white'}`}>
                             {isActive && (
                                 <div className="absolute top-0 right-0 bg-gradient-to-l from-anizai-teal-500 to-anizai-blue-500 text-white text-xs font-bold px-3 py-1 rounded-bl-lg">
                                     Active
@@ -563,7 +563,7 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                                     Canceled
                                 </div>
                             )}
-                            <div className="flex items-center justify-between mb-1">
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                                 <h3 className="font-semibold text-gray-900">Premium</h3>
                                 {!isPremium && (
                                     <span className="text-xs font-semibold text-anizai-purple-600 bg-anizai-purple-100 px-2 py-0.5 rounded-full">Recommended</span>
@@ -571,7 +571,7 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                             </div>
                             <div className="mb-4">
                                 <p className="text-2xl font-bold text-gray-900">$19<span className="text-sm font-normal text-gray-400">/mo</span></p>
-                                <p className="text-xs text-gray-500 mt-1">{isCanceled ? 'Valid until' : 'Next billing'}: {formattedExpiresAt}</p>
+                                <p className="text-xs text-gray-500 mt-1">{isCanceled ? 'Access through' : 'Next billing'}: {formattedExpiresAt}</p>
                             </div>
                             <ul className="space-y-2">
                                 {PLAN_FEATURES.premium.map(f => (
@@ -588,9 +588,9 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
 
                     {/* Usage meter */}
                     {!isPremium && (
-                        <div className="border border-gray-200 rounded-xl p-5 space-y-3">
-                            <div className="flex items-center justify-between text-sm">
-                                <span className="font-medium text-gray-700">Monthly Forecasts Used</span>
+                        <div className="border border-gray-200 rounded-xl p-4 sm:p-5 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                                <span className="font-medium text-gray-700">Monthly forecasts used</span>
                                 <span className="font-bold text-gray-900">
                                     {userProfile?.monthlyForecastsUsed ?? 0}
                                     <span className="text-gray-400 font-normal"> / 3</span>
@@ -608,9 +608,12 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                                 />
                             </div>
                             {(userProfile?.monthlyForecastsUsed ?? 0) >= 3 && (
-                                <p className="text-xs text-red-600 font-medium">
-                                    You've reached your monthly limit. Upgrade to Premium for unlimited forecasts.
-                                </p>
+                                <StateMessage
+                                    compact
+                                    variant="warning"
+                                    title="Free forecast limit reached"
+                                    description="Upgrade to Premium for unlimited forecasts, or wait for the monthly limit to reset."
+                                />
                             )}
                         </div>
                     )}
@@ -629,7 +632,7 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                     ) : isCanceled ? (
                         <div className="pt-3 border-t border-gray-100">
                             <div className="bg-amber-100/50 border border-amber-200 rounded-lg p-3 text-center mb-3">
-                                <p className="text-sm font-semibold text-amber-800">Subscription Canceled</p>
+                                <p className="text-sm font-semibold text-amber-800">Subscription canceled</p>
                                 <p className="text-xs text-amber-700 mt-1">
                                     Your Premium access will remain valid until <span className="font-bold">{formattedExpiresAt}</span>.
                                 </p>
@@ -639,12 +642,12 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                                 disabled={isProcessing}
                                 className="w-full h-11 flex items-center justify-center text-sm font-semibold text-white rounded-lg bg-anizai-blue-600 hover:bg-anizai-blue-700 focus:outline-none focus:ring-2 focus:ring-anizai-blue-500 focus:ring-offset-2 transition-colors shadow-sm disabled:opacity-60"
                             >
-                                {isProcessing ? 'Reactivating...' : 'Reactivate Subscription'}
+                                {isProcessing ? 'Reactivating...' : 'Reactivate subscription'}
                             </button>
                         </div>
                     ) : (
-                        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                            <p className="text-sm text-gray-500">Want to downgrade?</p>
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2 border-t border-gray-100">
+                            <p className="text-sm text-gray-500">Need to change plans?</p>
                             <button
                                 onClick={() => { setAlert(null); setView('cancel-confirm'); }}
                                 className="text-sm font-medium text-red-500 hover:text-red-700 underline transition-colors"
@@ -669,12 +672,12 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                             </svg>
                         </button>
-                        <h3 className="font-semibold text-gray-900">Payment Details</h3>
+                        <h3 className="font-semibold text-gray-900">Payment details</h3>
                     </div>
-                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between">
-                        <div>
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="min-w-0">
                             <p className="text-sm font-semibold text-gray-900">Anizai Premium</p>
-                            <p className="text-xs text-gray-500 mt-0.5">Billed monthly • Next billing: {formattedExpiresAt}</p>
+                            <p className="text-xs text-gray-500 mt-0.5 break-words">Billed monthly. Next billing: {formattedExpiresAt}</p>
                         </div>
                         <p className="text-lg font-bold text-gray-900">$19<span className="text-sm font-normal text-gray-400">/mo</span></p>
                     </div>
@@ -699,7 +702,7 @@ export function SubscriptionSettings({ userProfile, onPlanChange }: Subscription
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                             </svg>
                         </button>
-                        <h3 className="font-semibold text-gray-900">Cancel Subscription</h3>
+                        <h3 className="font-semibold text-gray-900">Cancel subscription</h3>
                     </div>
                     <CancelConfirm
                         onConfirm={handleCancel}
