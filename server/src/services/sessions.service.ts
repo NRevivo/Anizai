@@ -11,6 +11,14 @@ import * as usersService from './users.service.js';
 // Types
 // ─────────────────────────────────────────────────────────────
 
+export interface ClarificationCandidate {
+    id: string;                                  // canonical market id
+    label: string;                               // human-readable
+    source: 'polymarket' | 'kalshi';
+    description: string;                         // resolution criteria / longer context
+    matchConfidence: number;                     // 0-1
+}
+
 export interface Session {
     id: string;
     userId: string;
@@ -24,7 +32,7 @@ export interface Session {
     canonicalKey: string | null;
     errorCode: string | null;
     errorMessage: string | null;
-    clarificationCandidates: unknown[] | null;
+    clarificationCandidates: ClarificationCandidate[] | null;
     createdAt: string;
     updatedAt: string;
     lastActivityAt: string;

@@ -108,5 +108,12 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if false;
     }
+
+    // FORECAST QUERIES (server-only — Admin SDK bypasses rules)
+    // The agentic hub watches this collection via Firestore listener and claims pending docs.
+    // Clients must never read or write — they go through POST /sessions, which writes via Admin SDK.
+    match /forecastQueries/{queryId} {
+      allow read, write: if false;
+    }
   }
 }

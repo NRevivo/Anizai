@@ -1,9 +1,10 @@
 import type {
     Session, SessionMessage, PredictionPoint,
-    Evidence, SentimentDataPoint, SessionResult,
+    Evidence, SentimentDataPoint, SessionResult, ClarificationCandidate,
     CreateSessionInput, CreateMessageInput
 } from '../services/sessions.service.js';
 import { batch, collectionRef, now, toISOString } from '../services/firebase.service.js';
+import { randomUUID } from 'node:crypto';
 
 function isFailedPrecondition(error: unknown): boolean {
     if (!error || typeof error !== 'object') {
@@ -28,7 +29,7 @@ function mapSessionDoc(doc: FirebaseFirestore.QueryDocumentSnapshot): Session {
         canonicalKey: data.canonicalKey ?? null,
         errorCode: data.errorCode ?? null,
         errorMessage: data.errorMessage ?? null,
-        clarificationCandidates: data.clarificationCandidates ?? null,
+        clarificationCandidates: (data.clarificationCandidates ?? null) as ClarificationCandidate[] | null,
         createdAt: toISOString(data.createdAt) ?? '',
         updatedAt: toISOString(data.updatedAt) ?? '',
         lastActivityAt: toISOString(data.lastActivityAt) ?? '',
@@ -119,7 +120,7 @@ export const sessionRepository = {
             canonicalKey: data.canonicalKey ?? null,
             errorCode: data.errorCode ?? null,
             errorMessage: data.errorMessage ?? null,
-            clarificationCandidates: data.clarificationCandidates ?? null,
+            clarificationCandidates: (data.clarificationCandidates ?? null) as ClarificationCandidate[] | null,
             createdAt: toISOString(data.createdAt) ?? '',
             updatedAt: toISOString(data.updatedAt) ?? '',
             lastActivityAt: toISOString(data.lastActivityAt) ?? '',
@@ -332,20 +333,14 @@ export const sessionRepository = {
         };
 
         const forecastQueryData = {
+            queryId: randomUUID(),
             sessionId: sessionRef.id,
             userId,
-            query: input.question,
+            question: input.question,
             status: 'pending' as const,
-            resultRef: {
-                collection: collectionRef('sessionResults').id,
-                id: null as string | null,
-            },
-            metadata: {
-                source: 'sessions-api',
-                version: 1,
-            },
             createdAt,
-            updatedAt: createdAt,
+            claimedAt: null,
+            claimedBy: null,
         };
 
         writeBatch.set(sessionRef, sessionData);
