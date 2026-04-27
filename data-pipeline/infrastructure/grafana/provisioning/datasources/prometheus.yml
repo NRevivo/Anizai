@@ -1,0 +1,27 @@
+# ==========================================================
+# Grafana Datasource Provisioning — Prometheus
+# ==========================================================
+# Section 7.2: Pipeline Observability
+#
+# Auto-configures Prometheus as the default datasource at
+# container startup. No manual UI setup required.
+#
+# Why provisioning (not manual): ensures the datasource is
+# always present in a fresh container — critical for dev
+# environment reproducibility (Section 9.1 environment parity).
+# ==========================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Uses Docker service name — resolves over anizai-network bridge
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false   # Prevent accidental UI modification
+    jsonData:
+      # Match Prometheus scrape interval so Grafana auto-configures min step
+      timeInterval: "15s"
+      httpMethod: POST  # More efficient for large label-set queries

@@ -1,0 +1,27 @@
+# ==========================================================
+# Grafana Dashboard Provisioning — Folder Config
+# ==========================================================
+# Section 7.2: Pipeline Observability
+#
+# Tells Grafana where to find pre-built dashboard JSON files.
+# Dashboard JSON is loaded from the volume-mounted path at
+# startup — appears immediately without any UI interaction.
+#
+# Path /var/lib/grafana/dashboards is mapped in docker-compose.yml:
+#   ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+# ==========================================================
+
+apiVersion: 1
+
+providers:
+  - name: "Anizai Pipeline"
+    orgId: 1
+    folder: "Anizai"
+    folderUid: "anizai-pipeline"
+    type: file
+    disableDeletion: true    # Prevent dashboard deletion via UI
+    editable: true           # Allow panel edits in dev (changes won't persist across restarts)
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
