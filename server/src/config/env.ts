@@ -7,6 +7,10 @@ dotenv.config();
 const envSchema = z.object({
     PORT: z.coerce.number().default(3000),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+    ALLOW_DEMO_ROUTES: z
+        .enum(['true', 'false'])
+        .optional()
+        .transform((value) => value === 'true'),
 
     // Firebase Project ID (required for ADC initialization)
     FIREBASE_PROJECT_ID: z.string().min(1),
