@@ -1,6 +1,6 @@
 import { auth } from './firebase';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 interface ApiSuccessResponse<T> {
     data: T;
@@ -70,6 +70,12 @@ async function buildHeaders(requireAuth: boolean): Promise<HeadersInit> {
     return headers;
 }
 
+function buildApiUrl(path: string): string {
+    const base = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return `${base}${normalizedPath}`;
+}
+
 export async function apiRequest<T>(
     path: string,
     options: ApiRequestOptions = {}
@@ -81,7 +87,7 @@ export async function apiRequest<T>(
         signal,
     } = options;
 
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(buildApiUrl(path), {
         method,
         headers: await buildHeaders(requireAuth),
         body: body === undefined ? undefined : JSON.stringify(body),
