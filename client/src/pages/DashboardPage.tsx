@@ -98,12 +98,8 @@ export function DashboardPage({
     const [currentView, setCurrentView] = useState<'dashboard' | 'new-forecast'>('dashboard');
 
     const suggestedActions = useMemo<SuggestedAction[]>(
-        () => [
-            { id: 'drivers', label: 'What drives uncertainty?', prompt: 'What drives uncertainty in this forecast?' },
-            { id: 'historical', label: 'Find similar events', prompt: 'Find similar historical events for this forecast.' },
-            { id: 'track', label: 'How should I track this?', prompt: 'How should I track this forecast over time?' },
-        ],
-        []
+        () => (prediction?.suggestedActions ?? []).slice(0, 3),
+        [prediction]
     );
 
     useEffect(() => {
@@ -166,8 +162,12 @@ export function DashboardPage({
         }
     };
 
-    const handleActionClick = (actionId: string) => {
-        console.log('Action clicked:', actionId);
+    const handleActionClick = (action: SuggestedAction) => {
+        if (!action.prompt) {
+            return;
+        }
+
+        void onSendMessage(action.prompt);
     };
 
     const handleDeleteSession = (sessionId: string) => {
