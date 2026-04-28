@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui
 import { StateMessage } from '../ui/StateMessage';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { SentimentDataPoint } from '../../types';
+import { formatProbability } from '../../lib/utils';
 
 interface SentimentAnalysisProps {
     data: SentimentDataPoint[];
@@ -9,6 +10,11 @@ interface SentimentAnalysisProps {
 
 export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
     const latestPoint = data[data.length - 1];
+    const chartData = data.map((point) => ({
+        ...point,
+        expertSentimentPct: point.expertSentiment * 100,
+        publicSentimentPct: point.publicSentiment * 100,
+    }));
 
     const CustomTooltip = ({ active, payload }: any) => {
         if (active && payload && payload.length) {
@@ -17,7 +23,7 @@ export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
                     <p className="text-sm font-medium text-gray-900 mb-2">{payload[0].payload.date}</p>
                     {payload.map((entry: any, index: number) => (
                         <p key={index} className="text-sm" style={{ color: entry.color }}>
-                            {entry.name}: {entry.value}%
+                            {entry.name}: {entry.value.toFixed(1)}%
                         </p>
                     ))}
                 </div>
@@ -37,7 +43,7 @@ export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
                     <>
                         <div className="h-[170px] sm:h-[190px] w-full overflow-hidden">
                         <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={data} margin={{ top: 14, right: 5, left: 0, bottom: 5 }}>
+                            <AreaChart data={chartData} margin={{ top: 14, right: 5, left: 0, bottom: 5 }}>
                                 <defs>
                                     <linearGradient id="expertGradient" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.2} />
@@ -67,7 +73,7 @@ export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '16px' }} />
                                 <Area
                                     type="monotone"
-                                    dataKey="expertSentiment"
+                                    dataKey="expertSentimentPct"
                                     stroke="#0d9488"
                                     strokeWidth={2}
                                     fill="url(#expertGradient)"
@@ -75,7 +81,7 @@ export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
                                 />
                                 <Area
                                     type="monotone"
-                                    dataKey="publicSentiment"
+                                    dataKey="publicSentimentPct"
                                     stroke="#9333ea"
                                     strokeWidth={2}
                                     fill="url(#publicGradient)"
@@ -91,11 +97,15 @@ export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
                             <div className="flex shrink-0 gap-4">
                                 <div className="text-left sm:text-right">
                                     <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Expert</p>
-                                    <span className="text-lg font-bold text-anizai-teal-600">{latestPoint?.expertSentiment}%</span>
+                                    <span className="text-lg font-bold text-anizai-teal-600">
+                                        {latestPoint ? formatProbability(latestPoint.expertSentiment) : 'N/A'}
+                                    </span>
                                 </div>
                                 <div className="text-left sm:text-right">
                                     <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Public</p>
-                                    <span className="text-lg font-bold text-anizai-purple-600">{latestPoint?.publicSentiment}%</span>
+                                    <span className="text-lg font-bold text-anizai-purple-600">
+                                        {latestPoint ? formatProbability(latestPoint.publicSentiment) : 'N/A'}
+                                    </span>
                                 </div>
                             </div>
                         </div>

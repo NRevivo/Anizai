@@ -21,7 +21,7 @@ export async function fetchTrendingForecasts(limit = 20): Promise<TrendingForeca
             id: session.id,
             question: session.question,
             popularityScore: Math.round(session.probability * 100),
-            probability: session.probability / 100,
+            probability: session.probability,
             createdAt: session.lastUpdated.toISOString(),
             updatedAt: session.lastUpdated.toISOString(),
         }));

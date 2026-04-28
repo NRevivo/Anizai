@@ -139,7 +139,7 @@ let demoSessions: SessionListItem[] = mockSessions.map((session) => ({
     question: session.question,
     title: session.question,
     status: 'done',
-    latestProbability: session.probability / 100,
+    latestProbability: session.probability,
     latestConfidence: 0.84,
     followEnabled: true,
     isFollowing: false,
@@ -168,7 +168,7 @@ const demoMessagesBySessionId = new Map<string, SessionMessage[]>(
 
 function buildDemoSessionDetail(sessionId: string): SessionDetail {
     const session = demoSessions.find((item) => item.id === sessionId) ?? demoSessions[0];
-    const probability = session.latestProbability ?? mockCurrentPrediction.probability / 100;
+    const probability = session.latestProbability ?? mockCurrentPrediction.probability;
 
     return {
         session,
@@ -209,9 +209,7 @@ function buildDemoSessionDetail(sessionId: string): SessionDetail {
             evidenceVolumeLabel: 'High',
             bottomLineAnswer: mockCurrentPrediction.explanation,
             detailedExplanation: mockCurrentPrediction.explanation,
-            marketProbability: mockCurrentPrediction.marketProbability
-                ? mockCurrentPrediction.marketProbability / 100
-                : null,
+            marketProbability: mockCurrentPrediction.marketProbability ?? null,
             marketComparisonInsight: 'Demo market data is close to the model estimate.',
             sentimentAnalysisInsight: 'Expert sentiment is moving ahead of public sentiment.',
             evidenceFeedSummary: 'Demo evidence is assembled from local data.',
@@ -220,10 +218,10 @@ function buildDemoSessionDetail(sessionId: string): SessionDetail {
             id: `${session.id}-sentiment-${index + 1}`,
             ts: new Date(2026, 0, index + 1).toISOString(),
             date: point.date,
-            expertSentiment: point.expertSentiment / 100,
-            expertUpper: point.expertUpper ? point.expertUpper / 100 : null,
-            expertLower: point.expertLower ? point.expertLower / 100 : null,
-            publicSentiment: point.publicSentiment / 100,
+            expertSentiment: point.expertSentiment,
+            expertUpper: point.expertUpper ?? null,
+            expertLower: point.expertLower ?? null,
+            publicSentiment: point.publicSentiment,
             createdAt: nowIso(),
         })),
     };

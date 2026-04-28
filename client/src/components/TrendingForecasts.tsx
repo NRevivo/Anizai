@@ -15,28 +15,28 @@ export function TrendingForecasts({ onSelectForecast }: TrendingForecastsProps) 
         {
             id: '1',
             question: 'Will the EU implement comprehensive AI regulation before Q3 2026?',
-            probability: 72,
+            probability: 0.72,
             trend: 'up',
             badge: 'Trending'
         },
         {
             id: '2',
             question: 'Probability of Bitcoin exceeding $150k before end of 2026',
-            probability: 46,
+            probability: 0.46,
             trend: 'down',
             badge: 'High volatility'
         },
         {
             id: '3',
             question: 'Likelihood of SpaceX completing a crewed Mars landing in 2026',
-            probability: 12,
+            probability: 0.12,
             trend: 'stable',
             badge: 'Popular'
         },
         {
             id: '4',
             question: 'Will global inflation rates stabilize below 2% within 2026?',
-            probability: 39,
+            probability: 0.39,
             trend: 'up',
             badge: 'New'
         }
@@ -75,7 +75,7 @@ export function TrendingForecasts({ onSelectForecast }: TrendingForecastsProps) 
                                 <div className="flex items-center justify-between text-sm">
                                     <div className="flex items-center gap-3">
                                         <div className="flex items-center gap-1.5 font-semibold text-gray-900">
-                                            <span>{forecast.probability}%</span>
+                                            <span>{(forecast.probability * 100).toFixed(0)}%</span>
                                             <span className={trendInfo.color}>{trendInfo.icon}</span>
                                         </div>
                                         {forecast.badge === 'High volatility' && (

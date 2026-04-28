@@ -28,10 +28,10 @@ export interface ChatMessage {
 
 export interface SentimentDataPoint {
     date: string;
-    expertSentiment: number; // -1 to 1 float
+    expertSentiment: number; // 0-1 float
     expertUpper?: number;
     expertLower?: number;
-    publicSentiment: number; // -1 to 1 float
+    publicSentiment: number; // 0-1 float
 }
 
 export interface TimelineEvent {
