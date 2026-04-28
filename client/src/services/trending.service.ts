@@ -20,8 +20,8 @@ export async function fetchTrendingForecasts(limit = 20): Promise<TrendingForeca
         return mockSessions.slice(0, limit).map((session) => ({
             id: session.id,
             question: session.question,
-            popularityScore: Math.round(session.probability * 100),
-            probability: session.probability,
+            popularityScore: Math.round((session.probability ?? 0.5) * 100),
+            probability: session.probability ?? undefined,
             createdAt: session.lastUpdated.toISOString(),
             updatedAt: session.lastUpdated.toISOString(),
         }));

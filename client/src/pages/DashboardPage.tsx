@@ -10,8 +10,10 @@ import { SettingsModal } from '../components/SettingsModal';
 import type { UserProfile } from '../services/user.service';
 import type {
     ChatMessage,
+    ClarificationCandidate,
     Prediction,
     PredictionSession,
+    SessionStatus,
     SentimentDataPoint,
     SuggestedAction,
     TimelineEvent,
@@ -28,6 +30,13 @@ interface TrendingQuestionView {
 interface DashboardPageProps {
     sessions: PredictionSession[];
     activeSessionId: string | null;
+    activeSessionState: {
+        id: string;
+        question: string;
+        status: SessionStatus;
+        errorMessage: string | null;
+        clarificationCandidates: ClarificationCandidate[] | null;
+    } | null;
     prediction: Prediction | null;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
@@ -49,6 +58,7 @@ interface DashboardPageProps {
 export function DashboardPage({
     sessions,
     activeSessionId,
+    activeSessionState,
     prediction,
     sentimentData,
     timelineEvents,
@@ -143,6 +153,73 @@ export function DashboardPage({
         setSessionToDelete(null);
     };
 
+    const renderStatusPanel = () => {
+        if (!activeSessionState) {
+            return null;
+        }
+
+        if (activeSessionState.status === 'queued') {
+            return (
+                <StateMessage
+                    variant="loading"
+                    align="center"
+                    title="Forecast queued"
+                    description="Your request was accepted and is waiting to be picked up for analysis."
+                />
+            );
+        }
+
+        if (activeSessionState.status === 'claimed') {
+            return (
+                <StateMessage
+                    variant="loading"
+                    align="center"
+                    title="Analysis is starting"
+                    description="The forecasting pipeline has claimed this session and is preparing the first pass."
+                />
+            );
+        }
+
+        if (activeSessionState.status === 'running') {
+            return (
+                <StateMessage
+                    variant="loading"
+                    align="center"
+                    title="Analysis in progress"
+                    description="We are gathering evidence and updating the forecast now."
+                />
+            );
+        }
+
+        if (activeSessionState.status === 'failed') {
+            return (
+                <StateMessage
+                    variant="error"
+                    align="center"
+                    title="Forecast could not be completed"
+                    description={activeSessionState.errorMessage ?? 'This session ended with an error before a final result was produced.'}
+                />
+            );
+        }
+
+        if (activeSessionState.status === 'awaiting_clarification') {
+            const candidateCount = activeSessionState.clarificationCandidates?.length ?? 0;
+
+            return (
+                <StateMessage
+                    variant="warning"
+                    align="center"
+                    title="Clarification needed"
+                    description={candidateCount > 0
+                        ? `This forecast needs clarification before analysis can continue. ${candidateCount} candidate market${candidateCount === 1 ? '' : 's'} were identified.`
+                        : 'This forecast needs clarification before analysis can continue.'}
+                />
+            );
+        }
+
+        return null;
+    };
+
     const renderCenterPanel = () => {
         if (currentView === 'new-forecast') {
             return <CreateForecastView onSubmit={handleSubmitForecast} />;
@@ -158,6 +235,24 @@ export function DashboardPage({
                             title="Loading workspace"
                             description="Refreshing forecasts, evidence, and follow-ups."
                         />
+                    </div>
+                </div>
+            );
+        }
+
+        if (activeSessionState && activeSessionState.status !== 'done') {
+            const statusPanel = renderStatusPanel();
+
+            return (
+                <div className="h-full flex items-center justify-center p-4 sm:p-8 overflow-x-hidden">
+                    <div className="w-full max-w-2xl space-y-4">
+                        <div className="rounded-lg border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Active forecast</p>
+                            <h1 className="mt-2 text-lg sm:text-xl font-semibold text-gray-900 break-words">
+                                {activeSessionState.question}
+                            </h1>
+                        </div>
+                        {statusPanel}
                     </div>
                 </div>
             );

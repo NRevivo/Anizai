@@ -23,6 +23,7 @@ import {
 } from './services/user.service';
 import {
   addSessionMessage,
+  type ClarificationCandidate,
   createSession,
   deleteSession,
   fetchSessionDetail,
@@ -74,14 +75,17 @@ function mapSessionStatus(status: SessionStatus, confidence: number | null): 'st
   }
   return 'stable';
 }
+void mapSessionStatus;
 
 function toSidebarSession(session: SessionListItem): PredictionSession {
   return {
     id: session.id,
     question: session.title ?? session.question,
     // Pass 0–1 float directly — display conversion happens in formatProbability
-    probability: session.latestProbability ?? 0,
-    status: mapSessionStatus(session.status, session.latestConfidence),
+    probability: session.latestProbability,
+    status: session.status,
+    errorMessage: session.errorMessage,
+    clarificationCandidates: session.clarificationCandidates,
     lastUpdated: new Date(session.lastActivityAt || session.updatedAt || session.createdAt),
   };
 }
@@ -105,11 +109,35 @@ function toPrediction(detail: SessionDetail | null): Prediction | null {
     question: detail.session.question,
     probability,
     confidenceIndex: confidence,
-    status: mapSessionStatus(detail.session.status, detail.session.latestConfidence),
+    status: detail.session.status,
     explanation,
     marketProbability: detail.result?.marketProbability ?? undefined,
+    errorMessage: detail.session.errorMessage,
+    clarificationCandidates: detail.session.clarificationCandidates,
     createdAt: new Date(detail.session.createdAt),
     updatedAt: new Date(detail.session.updatedAt),
+  };
+}
+
+interface ActiveSessionState {
+  id: string;
+  question: string;
+  status: SessionStatus;
+  errorMessage: string | null;
+  clarificationCandidates: ClarificationCandidate[] | null;
+}
+
+function toActiveSessionState(detail: SessionDetail | null): ActiveSessionState | null {
+  if (!detail) {
+    return null;
+  }
+
+  return {
+    id: detail.session.id,
+    question: detail.session.question,
+    status: detail.session.status,
+    errorMessage: detail.session.errorMessage,
+    clarificationCandidates: detail.session.clarificationCandidates,
   };
 }
 
@@ -397,6 +425,7 @@ function App() {
   };
 
   const sidebarSessions = useMemo(() => sessions.map(toSidebarSession), [sessions]);
+  const activeSessionState = useMemo(() => toActiveSessionState(activeSessionDetail), [activeSessionDetail]);
   const prediction = useMemo(() => toPrediction(activeSessionDetail), [activeSessionDetail]);
   const sentimentData = useMemo(() => toSentimentPoints(activeSessionDetail), [activeSessionDetail]);
   const timelineEvents = useMemo(() => toTimelineEvents(activeSessionDetail), [activeSessionDetail]);
@@ -523,6 +552,7 @@ function App() {
       <DashboardPage
         sessions={sidebarSessions}
         activeSessionId={activeSessionId}
+        activeSessionState={activeSessionState}
         prediction={prediction}
         sentimentData={sentimentData}
         timelineEvents={timelineEvents}

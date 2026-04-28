@@ -39,11 +39,23 @@ export function Sidebar({
         .join('') || 'U';
     const membershipLabel = userPlan === 'premium' ? 'Premium plan' : 'Free plan';
     const getStatusView = (status: PredictionSession['status']) => {
-        if (status === 'volatile') {
-            return { label: 'Watching', dot: 'bg-amber-500', text: 'text-amber-700' };
+        if (status === 'queued') {
+            return { label: 'Queued', dot: 'bg-slate-400', text: 'text-slate-600' };
+        }
+        if (status === 'claimed') {
+            return { label: 'Claimed', dot: 'bg-indigo-500', text: 'text-indigo-700' };
+        }
+        if (status === 'running') {
+            return { label: 'Running', dot: 'bg-amber-500', text: 'text-amber-700' };
+        }
+        if (status === 'failed') {
+            return { label: 'Failed', dot: 'bg-red-500', text: 'text-red-700' };
+        }
+        if (status === 'awaiting_clarification') {
+            return { label: 'Needs clarification', dot: 'bg-violet-500', text: 'text-violet-700' };
         }
 
-        return { label: 'Stable', dot: 'bg-green-500', text: 'text-green-700' };
+        return { label: 'Done', dot: 'bg-green-500', text: 'text-green-700' };
     };
 
     return (
@@ -114,7 +126,7 @@ export function Sidebar({
                                             {session.question}
                                         </p>
                                         <span className={`text-xs font-semibold shrink-0 ${activeSessionId === session.id ? 'text-anizai-blue-600' : 'text-gray-400'}`}>
-                                            {formatProbability(session.probability)}
+                                            {session.probability === null ? '—' : formatProbability(session.probability)}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-2">

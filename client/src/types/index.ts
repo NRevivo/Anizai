@@ -1,12 +1,24 @@
+export type SessionStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'awaiting_clarification';
+
+export interface ClarificationCandidate {
+    id: string;
+    label: string;
+    source: 'polymarket' | 'kalshi';
+    description: string;
+    matchConfidence: number;
+}
+
 // Core prediction types
 export interface Prediction {
     id: string;
     question: string;
     probability: number; // 0-1 float
     confidenceIndex: number; // 0-1 float
-    status: 'stable' | 'volatile';
+    status: SessionStatus;
     explanation: string;
     marketProbability?: number;
+    errorMessage?: string | null;
+    clarificationCandidates?: ClarificationCandidate[] | null;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -14,8 +26,10 @@ export interface Prediction {
 export interface PredictionSession {
     id: string;
     question: string;
-    probability: number;
-    status: 'stable' | 'volatile';
+    probability: number | null;
+    status: SessionStatus;
+    errorMessage?: string | null;
+    clarificationCandidates?: ClarificationCandidate[] | null;
     lastUpdated: Date;
 }
 
