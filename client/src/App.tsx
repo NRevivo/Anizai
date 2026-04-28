@@ -15,6 +15,7 @@ import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { CookiesPage } from './pages/CookiesPage';
 import { StateMessage } from './components/ui/StateMessage';
+import { ApiError } from './lib/api';
 import {
   getDemoUserProfile,
   updateUserPlan,
@@ -364,7 +365,15 @@ function App() {
       await loadSession(created.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not create the forecast.';
-      setAuthError(message);
+      if (error instanceof ApiError && error.code === 'PLAN_LIMIT_EXCEEDED') {
+        const details = error.details as { used?: number } | undefined;
+        if (typeof details?.used === 'number') {
+          const used = details.used;
+          setUserProfile((current) => current ? { ...current, monthlyForecastsUsed: used } : current);
+        }
+      } else {
+        setAuthError(message);
+      }
       throw error instanceof Error ? error : new Error(message);
     } finally {
       setIsDashboardLoading(false);

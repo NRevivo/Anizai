@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { UserProfile } from '../services/user.service';
 import { ProfileSettings } from './settings/ProfileSettings';
 import { AccountSettings } from './settings/AccountSettings';
@@ -7,10 +7,10 @@ import { NotificationSettings } from './settings/NotificationSettings';
 import { SecuritySettings } from './settings/SecuritySettings';
 import { SubscriptionSettings } from './settings/SubscriptionSettings';
 
-type Section = 'profile' | 'account' | 'subscription' | 'preferences' | 'notifications' | 'security';
+export type SettingsSection = 'profile' | 'account' | 'subscription' | 'preferences' | 'notifications' | 'security';
 
 interface NavItem {
-    id: Section;
+    id: SettingsSection;
     label: string;
     icon: React.ReactNode;
 }
@@ -78,10 +78,17 @@ interface SettingsModalProps {
     userProfile: UserProfile | null;
     onLogout?: () => void;
     onPlanChange?: (updated: UserProfile) => void;
+    initialSection?: SettingsSection;
 }
 
-export function SettingsModal({ isOpen, onClose, userProfile, onLogout, onPlanChange }: SettingsModalProps) {
-    const [activeSection, setActiveSection] = useState<Section>('profile');
+export function SettingsModal({ isOpen, onClose, userProfile, onLogout, onPlanChange, initialSection = 'profile' }: SettingsModalProps) {
+    const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
+
+    useEffect(() => {
+        if (isOpen) {
+            setActiveSection(initialSection);
+        }
+    }, [initialSection, isOpen]);
 
     if (!isOpen) return null;
 

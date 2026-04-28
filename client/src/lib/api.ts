@@ -10,6 +10,7 @@ interface ApiErrorResponse {
     error?: {
         message?: string;
         code?: string;
+        details?: unknown;
     };
 }
 
@@ -23,18 +24,20 @@ function getErrorPayload(body: ApiSuccessResponse<unknown> | ApiErrorResponse | 
 export class ApiError extends Error {
     status: number;
     code?: string;
+    details?: unknown;
 
-    constructor(message: string, status: number, code?: string) {
+    constructor(message: string, status: number, code?: string, details?: unknown) {
         super(message);
         this.name = 'ApiError';
         this.status = status;
         this.code = code;
+        this.details = details;
     }
 }
 
 export class ApiAuthError extends ApiError {
-    constructor(message: string, status = 401, code?: string) {
-        super(message, status, code);
+    constructor(message: string, status = 401, code?: string, details?: unknown) {
+        super(message, status, code, details);
         this.name = 'ApiAuthError';
     }
 }
@@ -106,12 +109,13 @@ export async function apiRequest<T>(
             errorPayload?.message ??
             `Request failed: ${response.status} ${response.statusText}`;
         const code = errorPayload?.code;
+        const details = errorPayload?.details;
 
         if (response.status === 401 || response.status === 403) {
-            throw new ApiAuthError(message, response.status, code);
+            throw new ApiAuthError(message, response.status, code, details);
         }
 
-        throw new ApiError(message, response.status, code);
+        throw new ApiError(message, response.status, code, details);
     }
 
     return (parsedBody as ApiSuccessResponse<T>).data;

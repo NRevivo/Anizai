@@ -1,15 +1,54 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../components/ui/button';
 import { StateMessage } from '../components/ui/StateMessage';
+import { ApiError } from '../lib/api';
 
 interface CreateForecastViewProps {
     onSubmit: (question: string, idempotencyKey: string) => Promise<void>;
+    onOpenSubscription?: () => void;
 }
 
-export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
+interface PlanLimitDetails {
+    used?: number;
+    limit?: number;
+    planTier?: string;
+    resetAt?: string;
+}
+
+function getPlanLimitDetails(error: unknown): PlanLimitDetails | null {
+    if (!(error instanceof ApiError) || error.code !== 'PLAN_LIMIT_EXCEEDED') {
+        return null;
+    }
+
+    if (!error.details || typeof error.details !== 'object') {
+        return {};
+    }
+
+    return error.details as PlanLimitDetails;
+}
+
+function formatResetDate(resetAt?: string): string | null {
+    if (!resetAt) {
+        return null;
+    }
+
+    const parsed = new Date(resetAt);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+    });
+}
+
+export function CreateForecastView({ onSubmit, onOpenSubscription }: CreateForecastViewProps) {
     const [question, setQuestion] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
+    const [planLimitDetails, setPlanLimitDetails] = useState<PlanLimitDetails | null>(null);
     const [showValidation, setShowValidation] = useState(false);
     const [hints, setHints] = useState<string[]>([]);
 
@@ -72,6 +111,11 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
     const displayError = formError ?? (showValidation ? validationMessage : null);
 
     const getErrorMessage = (error: unknown): string => {
+        const planLimit = getPlanLimitDetails(error);
+        if (planLimit) {
+            return "You've used your free forecasts this month.";
+        }
+
         if (error instanceof Error) {
             const message = error.message.toLowerCase();
             if (message.includes('limit') || message.includes('upgrade') || message.includes('premium')) {
@@ -85,6 +129,7 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
     const handleSubmit = async () => {
         if (isSubmitting) return;
         setFormError(null);
+        setPlanLimitDetails(null);
         setShowValidation(true);
 
         if (!isValid) {
@@ -98,11 +143,23 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
             await onSubmit(trimmedQuestion, idempotencyKey);
             setIdempotencyKey(crypto.randomUUID());
         } catch (error) {
+            setPlanLimitDetails(getPlanLimitDetails(error));
             setFormError(getErrorMessage(error));
         } finally {
             setIsSubmitting(false);
         }
     };
+
+    const resetDateLabel = formatResetDate(planLimitDetails?.resetAt);
+    const planLimitDescription = planLimitDetails
+        ? [
+            typeof planLimitDetails.used === 'number' && typeof planLimitDetails.limit === 'number'
+                ? `${planLimitDetails.used} of ${planLimitDetails.limit} forecasts used`
+                : null,
+            planLimitDetails.planTier ? `Plan: ${planLimitDetails.planTier}` : null,
+            resetDateLabel ? `Resets on ${resetDateLabel}` : null,
+        ].filter(Boolean).join(' • ')
+        : null;
 
     return (
         <div className="min-h-full flex flex-col justify-center px-4 sm:px-6 lg:px-8 py-5 sm:py-6 max-w-3xl mx-auto w-full max-w-full overflow-x-hidden font-sans">
@@ -158,9 +215,18 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
                         <div className="mt-3">
                             <StateMessage
                                 compact
-                                variant="error"
-                                title={formError ? 'Forecast was not started' : 'Check the question'}
-                                description={displayError}
+                                variant={planLimitDetails ? 'warning' : 'error'}
+                                title={planLimitDetails ? 'Free forecast limit reached' : (formError ? 'Forecast was not started' : 'Check the question')}
+                                description={planLimitDescription ? `${displayError} ${planLimitDescription}` : displayError}
+                                action={planLimitDetails && onOpenSubscription ? (
+                                    <button
+                                        type="button"
+                                        onClick={onOpenSubscription}
+                                        className="inline-flex min-h-10 items-center justify-center rounded-md bg-gray-900 px-4 text-sm font-semibold text-white hover:bg-gray-800"
+                                    >
+                                        Review plans
+                                    </button>
+                                ) : null}
                             />
                         </div>
                     ) : null}

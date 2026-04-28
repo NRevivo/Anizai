@@ -6,6 +6,12 @@ function getCurrentUsageMonth(date: Date): string {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+function getUsageResetAt(date: Date): string {
+    return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1, 0, 0, 0, 0)).toISOString();
+}
+
+const FREE_FORECAST_LIMIT = 3;
+
 export const userRepository = {
     /**
      * Get user by UID
@@ -223,8 +229,18 @@ export const userRepository = {
         const plan = data.plan || 'free';
 
         // Limit completely blocks free tier execution
-        if (plan === 'free' && newUsage >= 3) {
-            throw new AppError('Monthly forecast limit reached for free plan (3/3). Please upgrade to Premium.', 403, 'FORBIDDEN');
+        if (plan === 'free' && newUsage >= FREE_FORECAST_LIMIT) {
+            throw new AppError(
+                "You've used your free forecasts this month",
+                403,
+                'PLAN_LIMIT_EXCEEDED',
+                {
+                    used: newUsage,
+                    limit: FREE_FORECAST_LIMIT,
+                    planTier: 'free',
+                    resetAt: getUsageResetAt(new Date()),
+                }
+            );
         }
 
         await userRef.set(

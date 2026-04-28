@@ -6,7 +6,7 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { StateMessage } from '../components/ui/StateMessage';
 import { CreateForecastView } from '../components/CreateForecastView';
 import { TrendingContext } from '../components/CreateForecastContext';
-import { SettingsModal } from '../components/SettingsModal';
+import { SettingsModal, type SettingsSection } from '../components/SettingsModal';
 import type { UserProfile } from '../services/user.service';
 import type {
     ChatMessage,
@@ -79,6 +79,7 @@ export function DashboardPage({
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [settingsSection, setSettingsSection] = useState<SettingsSection>('profile');
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
     const [isDeletingSession, setIsDeletingSession] = useState(false);
@@ -98,6 +99,11 @@ export function DashboardPage({
         setCurrentView('new-forecast');
         setIsSidebarOpen(false);
         setIsChatOpen(false);
+    };
+
+    const openSettingsSection = (section: SettingsSection) => {
+        setSettingsSection(section);
+        setIsSettingsOpen(true);
     };
 
     const handleSessionSelect = (sessionId: string) => {
@@ -222,7 +228,7 @@ export function DashboardPage({
 
     const renderCenterPanel = () => {
         if (currentView === 'new-forecast') {
-            return <CreateForecastView onSubmit={handleSubmitForecast} />;
+            return <CreateForecastView onSubmit={handleSubmitForecast} onOpenSubscription={() => openSettingsSection('subscription')} />;
         }
 
         if (isLoading) {
@@ -363,7 +369,7 @@ export function DashboardPage({
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
                         onLogout={onLogout}
-                        onSettings={() => setIsSettingsOpen(true)}
+                        onSettings={() => openSettingsSection('profile')}
                         onGoHome={onGoHome}
                     />
                 </div>
@@ -386,7 +392,7 @@ export function DashboardPage({
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
                         onLogout={onLogout}
-                        onSettings={() => setIsSettingsOpen(true)}
+                        onSettings={() => openSettingsSection('profile')}
                         onGoHome={onGoHome}
                     />
                 </div>
@@ -439,7 +445,7 @@ export function DashboardPage({
                         onNewPrediction={handleNewPrediction}
                         onDeleteSession={handleDeleteSession}
                         onLogout={onLogout}
-                        onSettings={() => setIsSettingsOpen(true)}
+                        onSettings={() => openSettingsSection('profile')}
                         onGoHome={onGoHome}
                     />
                 </div>
@@ -487,6 +493,7 @@ export function DashboardPage({
             <SettingsModal 
                 isOpen={isSettingsOpen} 
                 onClose={() => setIsSettingsOpen(false)} 
+                initialSection={settingsSection}
                 userProfile={userProfile}
                 onLogout={onLogout}
                 onPlanChange={onPlanChange}
