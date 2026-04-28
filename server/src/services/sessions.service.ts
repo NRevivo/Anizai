@@ -64,12 +64,25 @@ export interface PredictionPoint {
 export interface Evidence {
     id: string;
     type: 'news' | 'social' | 'expert' | 'market';
+    evidenceId: string | null;
+    sourceType: string | null;
+    origin: string | null;
     title: string;
     snippet: string;
     url: string | null;
+    source: string | null;
+    sourceDomain: string | null;
     publishedAt: string | null;
+    fetchedAt: string | null;
     sourceId: string | null;
     score: number;
+    relevanceScore: number | null;
+    credibilityTier: string | null;
+    recencyWeight: number | null;
+    usedInAnswer: boolean | null;
+    impactOnForecast: string | null;
+    justification: string | null;
+    rank: number | null;
     createdAt: string;
     // New: Impact classification
     impact: 'positive' | 'negative' | 'neutral' | null;

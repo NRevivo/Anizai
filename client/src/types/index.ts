@@ -57,9 +57,24 @@ export interface SentimentDataPoint {
 
 export interface TimelineEvent {
     id: string;
+    evidenceId?: string | null;
     date: string;
+    timestamp?: Date | null;
     title: string;
-    sourceType: 'news' | 'expert' | 'social';
+    sourceType: 'news' | 'expert' | 'social' | 'market';
+    source?: string | null;
+    origin?: string | null;
+    sourceDomain?: string | null;
+    snippet?: string | null;
+    url?: string | null;
+    fetchedAt?: Date | null;
+    relevanceScore?: number | null;
+    credibilityTier?: string | null;
+    recencyWeight?: number | null;
+    usedInAnswer?: boolean | null;
+    impactOnForecast?: string | null;
+    justification?: string | null;
+    rank?: number | null;
     impact: 'positive' | 'negative' | 'neutral';
     impactLabel?: string;
     isKeyEvidence?: boolean;

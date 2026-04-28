@@ -63,12 +63,25 @@ export interface SessionMessage {
 export interface Evidence {
     id: string;
     type: 'news' | 'social' | 'expert' | 'market';
+    evidenceId: string | null;
+    sourceType: string | null;
+    origin: string | null;
     title: string;
     snippet: string;
     url: string | null;
+    source: string | null;
+    sourceDomain: string | null;
     publishedAt: string | null;
+    fetchedAt: string | null;
     sourceId: string | null;
     score: number;
+    relevanceScore: number | null;
+    credibilityTier: string | null;
+    recencyWeight: number | null;
+    usedInAnswer: boolean | null;
+    impactOnForecast: string | null;
+    justification: string | null;
+    rank: number | null;
     createdAt: string;
     impact: 'positive' | 'negative' | 'neutral' | null;
     impactLabel: string | null;
@@ -202,12 +215,25 @@ function buildDemoSessionDetail(sessionId: string): SessionDetail {
         evidence: mockTimelineEvents.map((event) => ({
             id: event.id,
             type: event.sourceType,
+            evidenceId: event.id,
+            sourceType: event.sourceType === 'news' ? 'online_news' : event.sourceType === 'social' ? 'online_blog' : 'vault_arxiv',
+            origin: event.sourceType === 'social' ? 'web' : 'vault',
             title: event.title,
             snippet: event.description,
             url: null,
+            source: event.source ?? null,
+            sourceDomain: event.sourceDomain ?? null,
             publishedAt: new Date(`2026 ${event.date}`).toISOString(),
+            fetchedAt: nowIso(),
             sourceId: null,
             score: event.isKeyEvidence ? 0.9 : 0.55,
+            relevanceScore: event.relevanceScore ?? (event.isKeyEvidence ? 0.91 : 0.62),
+            credibilityTier: event.credibilityTier ?? (event.sourceType === 'expert' ? 'high' : 'medium'),
+            recencyWeight: event.recencyWeight ?? 0.64,
+            usedInAnswer: event.usedInAnswer ?? Boolean(event.isKeyEvidence),
+            impactOnForecast: event.impactOnForecast ?? (event.impact === 'positive' ? 'Raised confidence in the forecast.' : event.impact === 'negative' ? 'Introduced downside pressure on the forecast.' : null),
+            justification: event.justification ?? 'Included because it materially affected the forecast assessment.',
+            rank: event.rank ?? null,
             createdAt: nowIso(),
             impact: event.impact,
             impactLabel: event.impactLabel ?? null,

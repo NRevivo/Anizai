@@ -171,14 +171,48 @@ function toTimelineEvents(detail: SessionDetail | null): TimelineEvent[] {
     return [];
   }
 
+  const mapEvidenceSourceType = (evidence: SessionDetail['evidence'][number]): TimelineEvent['sourceType'] => {
+    switch (evidence.sourceType) {
+      case 'vault_news':
+      case 'online_news':
+        return 'news';
+      case 'vault_telegram':
+      case 'online_blog':
+      case 'vault_hackernews':
+        return 'social';
+      case 'vault_arxiv':
+        return 'expert';
+      case 'vault_market':
+      case 'vault_fred':
+        return 'market';
+      default:
+        return evidence.type === 'market' ? 'market' : evidence.type;
+    }
+  };
+
   return detail.evidence.map((evidence) => ({
     id: evidence.id,
+    evidenceId: evidence.evidenceId,
     date: new Date(evidence.publishedAt ?? evidence.createdAt).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
     }),
+    timestamp: evidence.publishedAt ? new Date(evidence.publishedAt) : new Date(evidence.createdAt),
     title: evidence.title,
-    sourceType: evidence.type === 'market' ? 'expert' : evidence.type,
+    sourceType: mapEvidenceSourceType(evidence),
+    source: evidence.source ?? evidence.sourceId,
+    origin: evidence.origin,
+    sourceDomain: evidence.sourceDomain,
+    snippet: evidence.snippet,
+    url: evidence.url,
+    fetchedAt: evidence.fetchedAt ? new Date(evidence.fetchedAt) : null,
+    relevanceScore: evidence.relevanceScore,
+    credibilityTier: evidence.credibilityTier,
+    recencyWeight: evidence.recencyWeight,
+    usedInAnswer: evidence.usedInAnswer,
+    impactOnForecast: evidence.impactOnForecast,
+    justification: evidence.justification,
+    rank: evidence.rank,
     impact: evidence.impact ?? 'neutral',
     impactLabel: evidence.impactLabel ?? undefined,
     isKeyEvidence: evidence.isKeyEvidence,

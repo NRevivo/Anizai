@@ -8,7 +8,7 @@ interface EvidenceTimelineProps {
 }
 
 export function EvidenceTimeline({ events }: EvidenceTimelineProps) {
-    const [filter, setFilter] = useState<'all' | 'news' | 'expert' | 'social'>('all');
+    const [filter, setFilter] = useState<'all' | 'news' | 'expert' | 'social' | 'market'>('all');
 
     // Sort events by date descending
     const sortedEvents = [...events].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -32,7 +32,7 @@ export function EvidenceTimeline({ events }: EvidenceTimelineProps) {
                         </CardDescription>
                     </div>
                     <div className="flex w-full sm:w-fit max-w-full overflow-x-auto bg-gray-100/50 p-1 rounded-lg">
-                        {(['all', 'news', 'expert', 'social'] as const).map((type) => (
+                        {(['all', 'news', 'expert', 'social', 'market'] as const).map((type) => (
                             <button
                                 key={type}
                                 onClick={() => setFilter(type)}
@@ -69,6 +69,9 @@ export function EvidenceTimeline({ events }: EvidenceTimelineProps) {
                                             <span className="text-[10px] text-gray-400 font-mono">{event.date}</span>
                                         </div>
                                         <h4 className="text-sm font-semibold text-gray-900 break-words">{event.title}</h4>
+                                        {event.sourceDomain ? (
+                                            <p className="mt-1 text-[11px] text-gray-500">{event.sourceDomain}</p>
+                                        ) : null}
                                     </div>
                                 ))}
                             </div>
@@ -94,6 +97,11 @@ export function EvidenceTimeline({ events }: EvidenceTimelineProps) {
                                                 {event.sourceType}
                                             </span>
                                             <span className="text-xs text-gray-400 font-medium">{event.date}</span>
+                                            {event.sourceDomain ? (
+                                                <span className="text-[11px] text-gray-400">{event.sourceDomain}</span>
+                                            ) : event.source ? (
+                                                <span className="text-[11px] text-gray-400">{event.source}</span>
+                                            ) : null}
                                             <span className={`text-[10px] font-medium ${event.impact === 'positive' ? 'text-anizai-teal-600' :
                                                     event.impact === 'negative' ? 'text-red-500' : 'text-gray-400'
                                                 }`}>
@@ -106,8 +114,29 @@ export function EvidenceTimeline({ events }: EvidenceTimelineProps) {
                                         </h4>
 
                                         <p className="text-xs text-gray-500 leading-relaxed break-words line-clamp-2">
-                                            {event.description}
+                                            {event.snippet || event.description}
                                         </p>
+
+                                        {(event.relevanceScore !== null && event.relevanceScore !== undefined) || event.credibilityTier || event.justification ? (
+                                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                                                {event.relevanceScore !== null && event.relevanceScore !== undefined ? (
+                                                    <span className="rounded-full bg-gray-50 px-2 py-0.5">
+                                                        Relevance {Math.round(event.relevanceScore * 100)}%
+                                                    </span>
+                                                ) : null}
+                                                {event.credibilityTier ? (
+                                                    <span className="rounded-full bg-gray-50 px-2 py-0.5 capitalize">
+                                                        Credibility {event.credibilityTier}
+                                                    </span>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+
+                                        {event.justification ? (
+                                            <p className="text-[11px] leading-relaxed text-gray-500 break-words">
+                                                {event.justification}
+                                            </p>
+                                        ) : null}
                                     </div>
                                 </div>
                             ))}
