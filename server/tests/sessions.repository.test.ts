@@ -79,7 +79,10 @@ describe('sessionRepository.createSession', () => {
     });
 
     it('writes a session doc with status "queued" and null error/clarification fields', async () => {
-        await sessionRepository.createSession('user-1', { question: 'Will X happen?' });
+        await sessionRepository.createSession('user-1', {
+            question: 'Will X happen?',
+            idempotencyKey: '11111111-1111-4111-8111-111111111111',
+        });
 
         expect(mocks.setMock).toHaveBeenCalledTimes(2);
 
@@ -92,6 +95,7 @@ describe('sessionRepository.createSession', () => {
             userId: 'user-1',
             question: 'Will X happen?',
             title: null,
+            idempotencyKey: '11111111-1111-4111-8111-111111111111',
             status: 'queued',
             errorCode: null,
             errorMessage: null,
@@ -105,7 +109,10 @@ describe('sessionRepository.createSession', () => {
     });
 
     it('writes a forecastQueries doc with exact spec shape and no extra fields', async () => {
-        await sessionRepository.createSession('user-42', { question: 'Will rates fall?' });
+        await sessionRepository.createSession('user-42', {
+            question: 'Will rates fall?',
+            idempotencyKey: '22222222-2222-4222-8222-222222222222',
+        });
 
         expect(mocks.setMock).toHaveBeenCalledTimes(2);
 
@@ -151,7 +158,10 @@ describe('sessionRepository.createSession', () => {
     });
 
     it('queryId is a UUID v4 distinct from sessionId', async () => {
-        await sessionRepository.createSession('user-1', { question: 'q' });
+        await sessionRepository.createSession('user-1', {
+            question: 'q',
+            idempotencyKey: '33333333-3333-4333-8333-333333333333',
+        });
 
         const forecastQueryData = mocks.setMock.mock.calls[1][1];
         const uuidV4Regex =
@@ -163,7 +173,10 @@ describe('sessionRepository.createSession', () => {
     });
 
     it('commits exactly once after both set calls', async () => {
-        await sessionRepository.createSession('user-1', { question: 'q' });
+        await sessionRepository.createSession('user-1', {
+            question: 'q',
+            idempotencyKey: '44444444-4444-4444-8444-444444444444',
+        });
 
         expect(mocks.commitMock).toHaveBeenCalledTimes(1);
         expect(mocks.setMock).toHaveBeenCalledTimes(2);

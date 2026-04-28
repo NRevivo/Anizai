@@ -14,6 +14,7 @@ const router = Router();
 const createSessionSchema = z.object({
     question: z.string().min(1).max(1000),
     title: z.string().max(200).optional(),
+    idempotencyKey: z.string().trim().min(1).uuid(),
 });
 
 const createMessageSchema = z.object({

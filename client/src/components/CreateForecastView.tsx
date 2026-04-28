@@ -3,7 +3,7 @@ import { Button } from '../components/ui/button';
 import { StateMessage } from '../components/ui/StateMessage';
 
 interface CreateForecastViewProps {
-    onSubmit: (question: string) => Promise<void>;
+    onSubmit: (question: string, idempotencyKey: string) => Promise<void>;
 }
 
 export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
@@ -22,6 +22,7 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
     ];
     const [placeholderIndex, setPlaceholderIndex] = useState(0);
     const [fade, setFade] = useState(true);
+    const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
     const minLength = 10;
     const maxLength = 500;
@@ -94,7 +95,8 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
         setShowValidation(false);
         setIsSubmitting(true);
         try {
-            await onSubmit(trimmedQuestion);
+            await onSubmit(trimmedQuestion, idempotencyKey);
+            setIdempotencyKey(crypto.randomUUID());
         } catch (error) {
             setFormError(getErrorMessage(error));
         } finally {

@@ -126,6 +126,7 @@ export interface SessionDetail {
 export interface CreateSessionInput {
     question: string;
     title?: string;
+    idempotencyKey: string;
 }
 
 export interface CreateMessageInput {
@@ -219,8 +220,27 @@ export async function getSessionDetail(sessionId: string, userId: string): Promi
  * Create a new session
  */
 export async function createSession(userId: string, input: CreateSessionInput): Promise<Session> {
+    const existing = await sessionRepository.findRecentSessionByIdempotencyKey(
+        userId,
+        input.idempotencyKey
+    );
+
+    if (existing) {
+        return existing;
+    }
+
     // Check and commit increment usage synchronously prior to document writing
     await usersService.incrementUsage(userId);
+
+    const existingAfterUsage = await sessionRepository.findRecentSessionByIdempotencyKey(
+        userId,
+        input.idempotencyKey
+    );
+
+    if (existingAfterUsage) {
+        return existingAfterUsage;
+    }
+
     return sessionRepository.createSession(userId, input);
 }
 

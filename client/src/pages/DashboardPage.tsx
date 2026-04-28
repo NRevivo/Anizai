@@ -34,7 +34,7 @@ interface DashboardPageProps {
     messages: ChatMessage[];
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
-    onCreateSession: (question: string) => Promise<void>;
+    onCreateSession: (question: string, idempotencyKey: string) => Promise<void>;
     onSendMessage: (message: string) => Promise<void>;
     onDeleteSession: (sessionId: string) => Promise<void>;
     userDisplayName?: string | null;
@@ -96,14 +96,14 @@ export function DashboardPage({
         setIsSidebarOpen(false);
     };
 
-    const handleSubmitForecast = async (question: string) => {
+    const handleSubmitForecast = async (question: string, idempotencyKey: string) => {
         if (isCreatingForecast) {
             return;
         }
 
         try {
             setIsCreatingForecast(true);
-            await onCreateSession(question);
+            await onCreateSession(question, idempotencyKey);
             setCurrentView('dashboard');
         } finally {
             setIsCreatingForecast(false);
@@ -203,7 +203,7 @@ export function DashboardPage({
                 <TrendingContext
                     forecasts={trendingForecasts}
                     onAnalyze={(question) => {
-                        void handleSubmitForecast(question).catch(() => undefined);
+                        void handleSubmitForecast(question, crypto.randomUUID()).catch(() => undefined);
                     }}
                 />
             );
@@ -300,7 +300,7 @@ export function DashboardPage({
                         {renderCenterPanel()}
                         {currentView === 'new-forecast' && (
                             <div className="border-t border-gray-200">
-                                <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q).catch(() => undefined)} />
+                                <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q, crypto.randomUUID()).catch(() => undefined)} />
                             </div>
                         )}
                     </div>
@@ -329,7 +329,7 @@ export function DashboardPage({
                     {renderCenterPanel()}
                     {currentView === 'new-forecast' && (
                         <div className="border-t border-gray-200">
-                            <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q).catch(() => undefined)} />
+                            <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q, crypto.randomUUID()).catch(() => undefined)} />
                         </div>
                     )}
                 </div>

@@ -326,11 +326,11 @@ function App() {
     }
   };
 
-  const handleCreateSession = async (question: string) => {
+  const handleCreateSession = async (question: string, idempotencyKey: string) => {
     try {
       setAuthError(null);
       setIsDashboardLoading(true);
-      const created = await createSession({ question });
+      const created = await createSession({ question, idempotencyKey });
       const sessionsData = await fetchSessions();
       setSessions(sessionsData);
       await loadSession(created.id);

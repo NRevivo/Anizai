@@ -117,6 +117,7 @@ export interface SessionDetail {
 export interface CreateSessionInput {
     question: string;
     title?: string;
+    idempotencyKey: string;
 }
 
 export interface CreateMessageInput {
