@@ -38,6 +38,12 @@ export function Dashboard({ prediction, sentimentData, timelineEvents, agentEven
                             confidenceIndex={prediction.confidenceIndex}
                             explanation={prediction.explanation}
                             evidenceCount={timelineEvents.length}
+                            keyFactors={prediction.keyFactors}
+                            whatIDidntFind={prediction.whatIDidntFind}
+                            reasoningChain={prediction.reasoningChain}
+                            generatedAt={prediction.generatedAt}
+                            agentVersion={prediction.agentVersion}
+                            tier={prediction.tier}
                         />
                     </div>
 

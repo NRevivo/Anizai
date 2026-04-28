@@ -1,3 +1,4 @@
+import type { KeyFactor, ReasoningStep } from '../../types';
 import { useId } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
 import { formatProbability } from '../../lib/utils';
@@ -7,6 +8,12 @@ interface PredictionOverviewProps {
     confidenceIndex: number;
     explanation: string;
     evidenceCount: number;
+    keyFactors?: KeyFactor[];
+    whatIDidntFind?: string[];
+    reasoningChain?: ReasoningStep[];
+    generatedAt?: Date | null;
+    agentVersion?: string | null;
+    tier?: 'tier_1' | 'tier_2' | null;
 }
 
 function getConfidenceLabel(confidenceIndex: number): string {
@@ -22,7 +29,24 @@ function getProbabilityAnswer(probability: number): string {
     return 'Uncertain';
 }
 
-export function PredictionOverview({ probability, confidenceIndex, explanation, evidenceCount }: PredictionOverviewProps) {
+function getFactorTone(direction: KeyFactor['direction']): string {
+    if (direction === 'supports') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (direction === 'opposes') return 'bg-red-50 text-red-700 border-red-200';
+    return 'bg-amber-50 text-amber-700 border-amber-200';
+}
+
+export function PredictionOverview({
+    probability,
+    confidenceIndex,
+    explanation,
+    evidenceCount,
+    keyFactors = [],
+    whatIDidntFind = [],
+    reasoningChain = [],
+    generatedAt = null,
+    agentVersion = null,
+    tier = null,
+}: PredictionOverviewProps) {
     const radius = 70;
     const circumference = 2 * Math.PI * radius;
     const strokeDashoffset = circumference - probability * circumference;
@@ -30,6 +54,9 @@ export function PredictionOverview({ probability, confidenceIndex, explanation, 
     const confidenceLabel = getConfidenceLabel(confidenceIndex);
     const probabilityAnswer = getProbabilityAnswer(probability);
     const confidenceScore = Math.round(confidenceIndex * 100);
+    const hasKeyFactors = keyFactors.length > 0;
+    const hasWhatIDidntFind = whatIDidntFind.length > 0;
+    const hasReasoningChain = reasoningChain.length > 0;
 
     return (
         <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm ring-1 ring-anizai-teal-500/10">
@@ -111,6 +138,72 @@ export function PredictionOverview({ probability, confidenceIndex, explanation, 
                             </h4>
                             <p className="text-sm text-gray-600 leading-relaxed max-w-3xl break-words">{explanation}</p>
                         </div>
+
+                        {hasKeyFactors ? (
+                            <div>
+                                <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">Key factors</h4>
+                                <div className="space-y-2">
+                                    {keyFactors
+                                        .slice()
+                                        .sort((a, b) => a.rank - b.rank)
+                                        .map((factor) => (
+                                            <div key={`${factor.rank}-${factor.title}`} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <p className="text-sm font-semibold text-gray-900">{factor.title}</p>
+                                                    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getFactorTone(factor.direction)}`}>
+                                                        {factor.direction}
+                                                    </span>
+                                                    <span className="text-[11px] text-gray-500">
+                                                        Weight {Math.round(factor.weight * 100)}%
+                                                    </span>
+                                                </div>
+                                                <p className="mt-1.5 text-sm text-gray-600 break-words">{factor.explanation}</p>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {hasWhatIDidntFind ? (
+                            <div>
+                                <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">What we did not find</h4>
+                                <ul className="space-y-2 text-sm text-gray-600">
+                                    {whatIDidntFind.map((item) => (
+                                        <li key={item} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 break-words">
+                                            {item}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        ) : null}
+
+                        {hasReasoningChain ? (
+                            <div>
+                                <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">Reasoning chain</h4>
+                                <div className="space-y-2">
+                                    {reasoningChain
+                                        .slice()
+                                        .sort((a, b) => a.sequence - b.sequence)
+                                        .map((step) => (
+                                            <div key={`${step.sequence}-${step.description}`} className="rounded-md border border-gray-100 bg-white px-3 py-2">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Step {step.sequence}</span>
+                                                    <span className="text-[11px] text-gray-500">{step.outcome}</span>
+                                                </div>
+                                                <p className="mt-1 text-sm text-gray-600 break-words">{step.description}</p>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {(generatedAt || agentVersion || tier) ? (
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
+                                {generatedAt ? <span>Generated {generatedAt.toLocaleString()}</span> : null}
+                                {agentVersion ? <span>{agentVersion}</span> : null}
+                                {tier ? <span>{tier.replace('_', ' ')}</span> : null}
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             </CardContent>

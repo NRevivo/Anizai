@@ -100,6 +100,34 @@ export interface SessionResult {
     sentimentAnalysisInsight: string | null;
     // New: Evidence feed insights
     evidenceFeedSummary: string | null;
+    keyFactors: KeyFactor[];
+    whatIDidntFind: string[];
+    reasoningChain: ReasoningStep[];
+    suggestedActions: SuggestedAction[];
+    generatedAt: string | null;
+    agentVersion: string | null;
+    tier: 'tier_1' | 'tier_2' | null;
+}
+
+export interface KeyFactor {
+    rank: number;
+    title: string;
+    explanation: string;
+    direction: 'supports' | 'opposes' | 'uncertain';
+    weight: number;
+    supportingEvidenceIds: string[];
+}
+
+export interface ReasoningStep {
+    sequence: number;
+    description: string;
+    outcome: string;
+}
+
+export interface SuggestedAction {
+    id: string;
+    label: string;
+    prompt: string;
 }
 
 export interface SentimentDataPoint {

@@ -194,6 +194,13 @@ export const sessionRepository = {
             marketComparisonInsight: data.marketComparisonInsight ?? null,
             sentimentAnalysisInsight: data.sentimentAnalysisInsight ?? null,
             evidenceFeedSummary: data.evidenceFeedSummary ?? null,
+            keyFactors: data.keyFactors ?? [],
+            whatIDidntFind: data.whatIDidntFind ?? [],
+            reasoningChain: data.reasoningChain ?? [],
+            suggestedActions: data.suggestedActions ?? [],
+            generatedAt: toISOString(data.generatedAt),
+            agentVersion: data.agentVersion ?? null,
+            tier: data.tier ?? null,
         };
     },
 

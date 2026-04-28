@@ -117,6 +117,13 @@ function toPrediction(detail: SessionDetail | null): Prediction | null {
     marketProbability: detail.result?.marketProbability ?? undefined,
     errorMessage: detail.session.errorMessage,
     clarificationCandidates: detail.session.clarificationCandidates,
+    keyFactors: detail.result?.keyFactors ?? [],
+    whatIDidntFind: detail.result?.whatIDidntFind ?? [],
+    reasoningChain: detail.result?.reasoningChain ?? [],
+    suggestedActions: detail.result?.suggestedActions ?? [],
+    generatedAt: detail.result?.generatedAt ? new Date(detail.result.generatedAt) : null,
+    agentVersion: detail.result?.agentVersion ?? null,
+    tier: detail.result?.tier ?? null,
     createdAt: new Date(detail.session.createdAt),
     updatedAt: new Date(detail.session.updatedAt),
   };

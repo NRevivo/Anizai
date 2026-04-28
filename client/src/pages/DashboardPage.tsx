@@ -99,9 +99,9 @@ export function DashboardPage({
 
     const suggestedActions = useMemo<SuggestedAction[]>(
         () => [
-            { id: 'drivers', label: 'What drives uncertainty?' },
-            { id: 'historical', label: 'Find similar events' },
-            { id: 'track', label: 'How should I track this?' },
+            { id: 'drivers', label: 'What drives uncertainty?', prompt: 'What drives uncertainty in this forecast?' },
+            { id: 'historical', label: 'Find similar events', prompt: 'Find similar historical events for this forecast.' },
+            { id: 'track', label: 'How should I track this?', prompt: 'How should I track this forecast over time?' },
         ],
         []
     );

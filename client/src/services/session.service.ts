@@ -15,7 +15,7 @@ import {
     mockSessions,
     mockTimelineEvents,
 } from '../data/mockData';
-import type { AgentEvent, AgentEventStatus, AgentEventType } from '../types';
+import type { AgentEvent, AgentEventStatus, AgentEventType, KeyFactor, ReasoningStep, SuggestedAction } from '../types';
 
 export type SessionStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'awaiting_clarification';
 
@@ -104,6 +104,13 @@ export interface SessionResult {
     marketComparisonInsight: string | null;
     sentimentAnalysisInsight: string | null;
     evidenceFeedSummary: string | null;
+    keyFactors: KeyFactor[];
+    whatIDidntFind: string[];
+    reasoningChain: ReasoningStep[];
+    suggestedActions: SuggestedAction[];
+    generatedAt: string | null;
+    agentVersion: string | null;
+    tier: 'tier_1' | 'tier_2' | null;
 }
 
 export interface PredictionPoint {
@@ -224,6 +231,47 @@ function buildDemoSessionDetail(sessionId: string): SessionDetail {
             marketComparisonInsight: 'Demo market data is close to the model estimate.',
             sentimentAnalysisInsight: 'Expert sentiment is moving ahead of public sentiment.',
             evidenceFeedSummary: 'Demo evidence is assembled from local data.',
+            keyFactors: [
+                {
+                    rank: 1,
+                    title: 'Legislative momentum',
+                    explanation: 'Committee progress still points toward passage within the current timeline.',
+                    direction: 'supports',
+                    weight: 0.82,
+                    supportingEvidenceIds: ['1', '2'],
+                },
+                {
+                    rank: 2,
+                    title: 'Industry pushback',
+                    explanation: 'Lobbying pressure may slow implementation details even if passage remains likely.',
+                    direction: 'opposes',
+                    weight: 0.41,
+                    supportingEvidenceIds: ['3'],
+                },
+            ],
+            whatIDidntFind: ['No confirmed final plenary vote date was available in the current evidence set.'],
+            reasoningChain: [
+                {
+                    sequence: 1,
+                    description: 'Reviewed legislative progress and recent committee actions.',
+                    outcome: 'Momentum remains favorable.',
+                },
+                {
+                    sequence: 2,
+                    description: 'Compared expert commentary with market pricing.',
+                    outcome: 'External views remain broadly aligned with the forecast.',
+                },
+            ],
+            suggestedActions: [
+                {
+                    id: 'track-vote-date',
+                    label: 'Track the next vote',
+                    prompt: 'What upcoming vote or milestone would most change this forecast?',
+                },
+            ],
+            generatedAt: session.updatedAt,
+            agentVersion: 'demo-agent-v1',
+            tier: 'tier_1',
         },
         sentimentTimeSeries: mockSentimentData.map((point, index) => ({
             id: `${session.id}-sentiment-${index + 1}`,

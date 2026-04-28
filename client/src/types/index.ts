@@ -19,6 +19,13 @@ export interface Prediction {
     marketProbability?: number;
     errorMessage?: string | null;
     clarificationCandidates?: ClarificationCandidate[] | null;
+    keyFactors?: KeyFactor[];
+    whatIDidntFind?: string[];
+    reasoningChain?: ReasoningStep[];
+    suggestedActions?: SuggestedAction[];
+    generatedAt?: Date | null;
+    agentVersion?: string | null;
+    tier?: 'tier_1' | 'tier_2' | null;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -62,7 +69,23 @@ export interface TimelineEvent {
 export interface SuggestedAction {
     id: string;
     label: string;
+    prompt?: string;
     icon?: string;
+}
+
+export interface KeyFactor {
+    rank: number;
+    title: string;
+    explanation: string;
+    direction: 'supports' | 'opposes' | 'uncertain';
+    weight: number;
+    supportingEvidenceIds: string[];
+}
+
+export interface ReasoningStep {
+    sequence: number;
+    description: string;
+    outcome: string;
 }
 
 export type AgentEventType =
