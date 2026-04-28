@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
         getSentimentTimeSeries: vi.fn(),
         findRecentSessionByIdempotencyKey: vi.fn(),
         createSession: vi.fn(),
+        requeueClarifiedSession: vi.fn(),
         addMessage: vi.fn(),
         deleteSession: vi.fn(),
         incrementUsage: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('../src/repositories/session.repository.js', () => ({
         getSentimentTimeSeries: mocks.getSentimentTimeSeries,
         findRecentSessionByIdempotencyKey: mocks.findRecentSessionByIdempotencyKey,
         createSession: mocks.createSession,
+        requeueClarifiedSession: mocks.requeueClarifiedSession,
         addMessage: mocks.addMessage,
         deleteSession: mocks.deleteSession,
     },
@@ -79,5 +81,53 @@ describe('sessionsService.createSession', () => {
 
         expect(mocks.createSession).not.toHaveBeenCalled();
         expect(mocks.findRecentSessionByIdempotencyKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-queues an awaiting_clarification session with the selected candidate', async () => {
+        const clarificationCandidate = {
+            id: 'market-123',
+            label: 'Fed rate cut by July 2026',
+            source: 'polymarket' as const,
+            description: 'Market resolving to yes if the Fed cuts rates by July 2026.',
+            matchConfidence: 0.82,
+        };
+
+        const session = {
+            id: 'session-1',
+            userId: 'user-1',
+            question: 'Will the Fed cut rates by July 2026?',
+            title: null,
+            status: 'awaiting_clarification' as const,
+            latestProbability: null,
+            latestConfidence: null,
+            followEnabled: false,
+            isFollowing: false,
+            canonicalKey: null,
+            errorCode: null,
+            errorMessage: 'Clarification required',
+            clarificationCandidates: [clarificationCandidate],
+            createdAt: '2026-04-28T12:00:00.000Z',
+            updatedAt: '2026-04-28T12:00:00.000Z',
+            lastActivityAt: '2026-04-28T12:00:00.000Z',
+        };
+        const requeuedSession = {
+            ...session,
+            status: 'queued' as const,
+            canonicalKey: clarificationCandidate.id,
+            errorMessage: null,
+            clarificationCandidates: null,
+            updatedAt: '2026-04-28T12:05:00.000Z',
+            lastActivityAt: '2026-04-28T12:05:00.000Z',
+        };
+
+        mocks.getSession.mockResolvedValue(session);
+        mocks.requeueClarifiedSession.mockResolvedValue(requeuedSession);
+
+        const result = await sessionsService.clarifySession('session-1', 'user-1', {
+            chosenCandidateId: clarificationCandidate.id,
+        });
+
+        expect(mocks.requeueClarifiedSession).toHaveBeenCalledWith(session, clarificationCandidate);
+        expect(result).toEqual(requeuedSession);
     });
 });

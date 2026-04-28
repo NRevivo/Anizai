@@ -30,6 +30,10 @@ const createMessageSchema = z.object({
         .optional(),
 });
 
+const clarifySessionSchema = z.object({
+    chosenCandidateId: z.string().trim().min(1).nullable(),
+});
+
 // ─────────────────────────────────────────────────────────────
 // Routes
 // ─────────────────────────────────────────────────────────────
@@ -120,6 +124,32 @@ router.post('/sessions/:id/messages', authMiddleware, async (req, res, next) => 
         };
 
         res.status(201).json(response);
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * POST /sessions/:id/clarify
+ * Submit a clarification choice for a queued follow-up request
+ */
+router.post('/sessions/:id/clarify', authMiddleware, async (req, res, next) => {
+    try {
+        const user = req.user as AuthUser;
+        const sessionId = req.params.id as string;
+
+        const parsed = clarifySessionSchema.safeParse(req.body);
+        if (!parsed.success) {
+            throw new AppError('Invalid request body', 400, 'VALIDATION_ERROR');
+        }
+
+        const session = await sessionsService.clarifySession(sessionId, user.uid, parsed.data);
+
+        const response: ApiSuccessResponse = {
+            data: session,
+        };
+
+        res.json(response);
     } catch (error) {
         next(error);
     }

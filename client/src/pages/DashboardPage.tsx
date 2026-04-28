@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { Dashboard } from '../components/Dashboard';
 import { ChatPanel } from '../components/ChatPanel';
@@ -44,6 +44,7 @@ interface DashboardPageProps {
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
     onCreateSession: (question: string, idempotencyKey: string) => Promise<void>;
+    onClarifySession: (sessionId: string, chosenCandidateId: string | null) => Promise<void>;
     onSendMessage: (message: string) => Promise<void>;
     onDeleteSession: (sessionId: string) => Promise<void>;
     userDisplayName?: string | null;
@@ -66,6 +67,7 @@ export function DashboardPage({
     trendingForecasts,
     onSessionSelect,
     onCreateSession,
+    onClarifySession,
     onSendMessage,
     onDeleteSession,
     userDisplayName,
@@ -84,6 +86,9 @@ export function DashboardPage({
     const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
     const [isDeletingSession, setIsDeletingSession] = useState(false);
     const [isCreatingForecast, setIsCreatingForecast] = useState(false);
+    const [selectedClarificationId, setSelectedClarificationId] = useState<string>('none');
+    const [isSubmittingClarification, setIsSubmittingClarification] = useState(false);
+    const [clarificationError, setClarificationError] = useState<string | null>(null);
     const [currentView, setCurrentView] = useState<'dashboard' | 'new-forecast'>('dashboard');
 
     const suggestedActions = useMemo<SuggestedAction[]>(
@@ -94,6 +99,12 @@ export function DashboardPage({
         ],
         []
     );
+
+    useEffect(() => {
+        setSelectedClarificationId('none');
+        setClarificationError(null);
+        setIsSubmittingClarification(false);
+    }, [activeSessionState?.id, activeSessionState?.status]);
 
     const handleNewPrediction = () => {
         setCurrentView('new-forecast');
@@ -128,6 +139,25 @@ export function DashboardPage({
 
     const handleSendMessage = (message: string) => {
         void onSendMessage(message);
+    };
+
+    const handleClarificationSubmit = async () => {
+        if (!activeSessionState || activeSessionState.status !== 'awaiting_clarification' || isSubmittingClarification) {
+            return;
+        }
+
+        try {
+            setClarificationError(null);
+            setIsSubmittingClarification(true);
+            await onClarifySession(
+                activeSessionState.id,
+                selectedClarificationId === 'none' ? null : selectedClarificationId
+            );
+        } catch (error) {
+            setClarificationError(error instanceof Error ? error.message : 'Could not submit the clarification choice.');
+        } finally {
+            setIsSubmittingClarification(false);
+        }
     };
 
     const handleActionClick = (actionId: string) => {
@@ -209,17 +239,99 @@ export function DashboardPage({
         }
 
         if (activeSessionState.status === 'awaiting_clarification') {
-            const candidateCount = activeSessionState.clarificationCandidates?.length ?? 0;
+            const candidates = [...(activeSessionState.clarificationCandidates ?? [])]
+                .sort((a, b) => b.matchConfidence - a.matchConfidence);
 
             return (
-                <StateMessage
-                    variant="warning"
-                    align="center"
-                    title="Clarification needed"
-                    description={candidateCount > 0
-                        ? `This forecast needs clarification before analysis can continue. ${candidateCount} candidate market${candidateCount === 1 ? '' : 's'} were identified.`
-                        : 'This forecast needs clarification before analysis can continue.'}
-                />
+                <div className="rounded-lg border border-violet-200 bg-white p-4 sm:p-5 shadow-sm space-y-4">
+                    <div className="space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-600">Clarification needed</p>
+                        <h2 className="text-lg font-semibold text-gray-900">Which market or intent did you mean?</h2>
+                        <p className="text-sm text-gray-600">
+                            Choose the closest match so we can queue the right forecast. If none fit, we can re-queue the request without a market selection.
+                        </p>
+                    </div>
+
+                    <div className="space-y-3">
+                        {candidates.map((candidate) => (
+                            <label
+                                key={candidate.id}
+                                className={`flex gap-3 rounded-lg border p-3 sm:p-4 cursor-pointer transition-colors ${
+                                    selectedClarificationId === candidate.id
+                                        ? 'border-violet-300 bg-violet-50'
+                                        : 'border-gray-200 hover:border-violet-200 hover:bg-gray-50'
+                                }`}
+                            >
+                                <input
+                                    type="radio"
+                                    name="clarification-candidate"
+                                    value={candidate.id}
+                                    checked={selectedClarificationId === candidate.id}
+                                    onChange={() => setSelectedClarificationId(candidate.id)}
+                                    className="mt-1 h-4 w-4 text-violet-600"
+                                />
+                                <div className="min-w-0 space-y-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <p className="text-sm font-semibold text-gray-900 break-words">{candidate.label}</p>
+                                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                                            {candidate.source}
+                                        </span>
+                                        <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                                            {Math.round(candidate.matchConfidence * 100)}% match
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-gray-600 break-words">{candidate.description}</p>
+                                </div>
+                            </label>
+                        ))}
+
+                        <label
+                            className={`flex gap-3 rounded-lg border p-3 sm:p-4 cursor-pointer transition-colors ${
+                                selectedClarificationId === 'none'
+                                    ? 'border-violet-300 bg-violet-50'
+                                    : 'border-gray-200 hover:border-violet-200 hover:bg-gray-50'
+                            }`}
+                        >
+                            <input
+                                type="radio"
+                                name="clarification-candidate"
+                                value="none"
+                                checked={selectedClarificationId === 'none'}
+                                onChange={() => setSelectedClarificationId('none')}
+                                className="mt-1 h-4 w-4 text-violet-600"
+                            />
+                            <div className="min-w-0 space-y-1">
+                                <p className="text-sm font-semibold text-gray-900">None of these</p>
+                                <p className="text-sm text-gray-600">
+                                    Queue the forecast again without selecting one of the suggested markets.
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+
+                    {clarificationError ? (
+                        <StateMessage
+                            compact
+                            variant="error"
+                            title="Clarification was not submitted"
+                            description={clarificationError}
+                        />
+                    ) : null}
+
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => void handleClarificationSubmit()}
+                            disabled={isSubmittingClarification}
+                            className="inline-flex min-h-11 items-center justify-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-60"
+                        >
+                            {isSubmittingClarification ? 'Submitting clarification...' : 'Submit clarification'}
+                        </button>
+                        <p className="text-xs text-gray-500">
+                            The session will return to the queue after you confirm a choice.
+                        </p>
+                    </div>
+                </div>
             );
         }
 

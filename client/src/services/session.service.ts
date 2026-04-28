@@ -228,6 +228,10 @@ function buildDemoSessionDetail(sessionId: string): SessionDetail {
     };
 }
 
+export interface ClarifySessionInput {
+    chosenCandidateId: string | null;
+}
+
 export async function fetchSessions(): Promise<SessionListItem[]> {
     try {
         return await apiRequest<SessionListItem[]>('/sessions');
@@ -301,6 +305,44 @@ export async function addSessionMessage(
         const messages = demoMessagesBySessionId.get(sessionId) ?? [];
         demoMessagesBySessionId.set(sessionId, [...messages, created]);
         return created;
+    }
+}
+
+export async function clarifySession(
+    sessionId: string,
+    input: ClarifySessionInput
+): Promise<SessionListItem> {
+    try {
+        return await apiRequest<SessionListItem>(`/sessions/${sessionId}/clarify`, {
+            method: 'POST',
+            body: input,
+        });
+    } catch (error) {
+        console.warn('Updating a demo clarification choice because the authenticated API is unavailable.', error);
+        const existing = demoSessions.find((session) => session.id === sessionId);
+
+        if (!existing) {
+            throw error;
+        }
+
+        const selectedCandidate = input.chosenCandidateId === null
+            ? null
+            : existing.clarificationCandidates?.find((candidate) => candidate.id === input.chosenCandidateId) ?? null;
+        const updatedAt = nowIso();
+
+        const updated: SessionListItem = {
+            ...existing,
+            status: 'queued',
+            canonicalKey: selectedCandidate?.id ?? existing.canonicalKey,
+            errorCode: null,
+            errorMessage: null,
+            clarificationCandidates: null,
+            updatedAt,
+            lastActivityAt: updatedAt,
+        };
+
+        demoSessions = demoSessions.map((session) => session.id === sessionId ? updated : session);
+        return updated;
     }
 }
 

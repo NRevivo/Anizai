@@ -24,6 +24,7 @@ import {
 } from './services/user.service';
 import {
   addSessionMessage,
+  clarifySession,
   type ClarificationCandidate,
   createSession,
   deleteSession,
@@ -404,6 +405,22 @@ function App() {
     }
   };
 
+  const handleClarifySession = async (sessionId: string, chosenCandidateId: string | null) => {
+    try {
+      setAuthError(null);
+      setIsDashboardLoading(true);
+      await clarifySession(sessionId, { chosenCandidateId });
+      const sessionsData = await fetchSessions();
+      setSessions(sessionsData);
+      await loadSession(sessionId);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not update the clarification choice.');
+      throw error instanceof Error ? error : new Error('Could not update the clarification choice.');
+    } finally {
+      setIsDashboardLoading(false);
+    }
+  };
+
   const handleDeleteSession = async (sessionId: string) => {
     try {
       setAuthError(null);
@@ -574,6 +591,7 @@ function App() {
           void handleSessionSelect(sessionId);
         }}
         onCreateSession={handleCreateSession}
+        onClarifySession={handleClarifySession}
         onSendMessage={handleSendMessage}
         onDeleteSession={handleDeleteSession}
         onLogout={handleLogout}

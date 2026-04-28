@@ -135,6 +135,10 @@ export interface CreateMessageInput {
     meta?: SessionMessage['meta'];
 }
 
+export interface ClarifySessionInput {
+    chosenCandidateId: string | null;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
@@ -242,6 +246,29 @@ export async function createSession(userId: string, input: CreateSessionInput): 
     }
 
     return sessionRepository.createSession(userId, input);
+}
+
+export async function clarifySession(
+    sessionId: string,
+    userId: string,
+    input: ClarifySessionInput
+): Promise<Session> {
+    const session = await getSession(sessionId, userId);
+
+    if (session.status !== 'awaiting_clarification') {
+        throw new AppError('Session is not awaiting clarification', 409, 'INVALID_SESSION_STATUS');
+    }
+
+    const candidates = session.clarificationCandidates ?? [];
+    const selectedCandidate = input.chosenCandidateId === null
+        ? null
+        : candidates.find((candidate) => candidate.id === input.chosenCandidateId) ?? null;
+
+    if (input.chosenCandidateId !== null && !selectedCandidate) {
+        throw new AppError('Chosen clarification candidate is invalid', 400, 'INVALID_CLARIFICATION_CANDIDATE');
+    }
+
+    return sessionRepository.requeueClarifiedSession(session, selectedCandidate);
 }
 
 /**

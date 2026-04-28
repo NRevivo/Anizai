@@ -398,6 +398,49 @@ export const sessionRepository = {
         };
     },
 
+    async requeueClarifiedSession(
+        session: Session,
+        selectedCandidate: ClarificationCandidate | null
+    ): Promise<Session> {
+        const updatedAt = now();
+        const sessionRef = collectionRef('sessions').doc(session.id);
+        const forecastQueryRef = collectionRef('forecastQueries').doc();
+        const writeBatch = batch();
+
+        const sessionUpdate = {
+            status: 'queued' as const,
+            canonicalKey: selectedCandidate?.id ?? session.canonicalKey ?? null,
+            errorCode: null,
+            errorMessage: null,
+            clarificationCandidates: null,
+            updatedAt,
+            lastActivityAt: updatedAt,
+        };
+
+        const forecastQueryData = {
+            queryId: randomUUID(),
+            sessionId: session.id,
+            userId: session.userId,
+            question: session.question,
+            status: 'pending' as const,
+            createdAt: updatedAt,
+            claimedAt: null,
+            claimedBy: null,
+        };
+
+        writeBatch.update(sessionRef, sessionUpdate);
+        writeBatch.set(forecastQueryRef, forecastQueryData);
+
+        await writeBatch.commit();
+
+        return {
+            ...session,
+            ...sessionUpdate,
+            updatedAt: updatedAt.toDate().toISOString(),
+            lastActivityAt: updatedAt.toDate().toISOString(),
+        };
+    },
+
     async addMessage(sessionId: string, input: CreateMessageInput): Promise<SessionMessage> {
         const createdAt = now();
 
