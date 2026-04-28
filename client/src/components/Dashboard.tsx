@@ -1,16 +1,19 @@
-import type { Prediction, SentimentDataPoint, TimelineEvent } from '../types';
+import type { AgentEvent, Prediction, SentimentDataPoint, TimelineEvent } from '../types';
 import { PredictionOverview } from './cards/PredictionOverview';
 import { MarketComparison } from './cards/MarketComparison';
 import { SentimentAnalysis } from './cards/SentimentAnalysis';
 import { EvidenceTimeline } from './cards/EvidenceTimeline';
+import { AgentEventsTimeline } from './cards/AgentEventsTimeline';
 
 interface DashboardProps {
     prediction: Prediction;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
+    agentEvents: AgentEvent[];
+    isAgentEventsLoading?: boolean;
 }
 
-export function Dashboard({ prediction, sentimentData, timelineEvents }: DashboardProps) {
+export function Dashboard({ prediction, sentimentData, timelineEvents, agentEvents, isAgentEventsLoading = false }: DashboardProps) {
     return (
         <div className="w-full h-full max-w-full overflow-y-auto overflow-x-hidden bg-slate-50 font-sans">
             <div className="max-w-6xl 2xl:max-w-7xl mx-auto px-3 sm:px-5 xl:px-6 py-3 sm:py-4 lg:py-5 space-y-4">
@@ -48,6 +51,10 @@ export function Dashboard({ prediction, sentimentData, timelineEvents }: Dashboa
 
                     <div className="w-full">
                         <EvidenceTimeline events={timelineEvents} />
+                    </div>
+
+                    <div className="w-full">
+                        <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
                     </div>
                 </div>
             </div>

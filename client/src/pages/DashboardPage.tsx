@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { Dashboard } from '../components/Dashboard';
 import { ChatPanel } from '../components/ChatPanel';
+import { AgentEventsTimeline } from '../components/cards/AgentEventsTimeline';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { StateMessage } from '../components/ui/StateMessage';
 import { CreateForecastView } from '../components/CreateForecastView';
@@ -11,6 +12,7 @@ import type { UserProfile } from '../services/user.service';
 import type {
     ChatMessage,
     ClarificationCandidate,
+    AgentEvent,
     Prediction,
     PredictionSession,
     SessionStatus,
@@ -40,6 +42,7 @@ interface DashboardPageProps {
     prediction: Prediction | null;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
+    agentEvents: AgentEvent[];
     messages: ChatMessage[];
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
@@ -52,6 +55,7 @@ interface DashboardPageProps {
     onLogout?: () => void;
     onGoHome?: () => void;
     isLoading?: boolean;
+    isAgentEventsLoading?: boolean;
     userProfile: UserProfile | null;
     onPlanChange?: (updated: UserProfile) => void;
 }
@@ -63,6 +67,7 @@ export function DashboardPage({
     prediction,
     sentimentData,
     timelineEvents,
+    agentEvents,
     messages,
     trendingForecasts,
     onSessionSelect,
@@ -75,6 +80,7 @@ export function DashboardPage({
     onLogout,
     onGoHome,
     isLoading = false,
+    isAgentEventsLoading = false,
     userProfile,
     onPlanChange,
 }: DashboardPageProps) {
@@ -371,6 +377,7 @@ export function DashboardPage({
                             </h1>
                         </div>
                         {statusPanel}
+                        <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
                     </div>
                 </div>
             );
@@ -406,6 +413,8 @@ export function DashboardPage({
                 prediction={prediction}
                 sentimentData={sentimentData}
                 timelineEvents={timelineEvents}
+                agentEvents={agentEvents}
+                isAgentEventsLoading={isAgentEventsLoading}
             />
         );
     };

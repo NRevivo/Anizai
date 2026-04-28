@@ -1,4 +1,13 @@
 import { apiRequest } from '../lib/api';
+import { db } from '../lib/firebase';
+import {
+    collection,
+    onSnapshot,
+    orderBy,
+    query,
+    type QueryDocumentSnapshot,
+    type Unsubscribe,
+} from 'firebase/firestore';
 import {
     mockChatMessages,
     mockCurrentPrediction,
@@ -6,6 +15,7 @@ import {
     mockSessions,
     mockTimelineEvents,
 } from '../data/mockData';
+import type { AgentEvent, AgentEventStatus, AgentEventType } from '../types';
 
 export type SessionStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'awaiting_clarification';
 
@@ -232,6 +242,39 @@ export interface ClarifySessionInput {
     chosenCandidateId: string | null;
 }
 
+function toDateValue(value: unknown): Date {
+    if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+        return value.toDate() as Date;
+    }
+
+    if (typeof value === 'string' || value instanceof Date) {
+        const parsed = new Date(value);
+        if (!Number.isNaN(parsed.getTime())) {
+            return parsed;
+        }
+    }
+
+    return new Date();
+}
+
+function mapAgentEventDoc(docSnapshot: QueryDocumentSnapshot): AgentEvent {
+    const data = docSnapshot.data();
+
+    return {
+        eventId: typeof data.eventId === 'string' ? data.eventId : docSnapshot.id,
+        sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
+        sequence: typeof data.sequence === 'number' ? data.sequence : 0,
+        timestamp: toDateValue(data.timestamp),
+        parentMessageId: typeof data.parentMessageId === 'string' ? data.parentMessageId : null,
+        type: data.type as AgentEventType,
+        title: typeof data.title === 'string' ? data.title : 'Untitled event',
+        description: typeof data.description === 'string' ? data.description : null,
+        status: data.status as AgentEventStatus,
+        durationMs: typeof data.durationMs === 'number' ? data.durationMs : null,
+        payload: data.payload && typeof data.payload === 'object' ? (data.payload as Record<string, unknown>) : null,
+    };
+}
+
 export async function fetchSessions(): Promise<SessionListItem[]> {
     try {
         return await apiRequest<SessionListItem[]>('/sessions');
@@ -344,6 +387,29 @@ export async function clarifySession(
         demoSessions = demoSessions.map((session) => session.id === sessionId ? updated : session);
         return updated;
     }
+}
+
+export function subscribeToAgentEvents(
+    sessionId: string,
+    handlers: {
+        onData: (events: AgentEvent[]) => void;
+        onError?: (error: Error) => void;
+    }
+): Unsubscribe {
+    const eventsQuery = query(
+        collection(db, 'sessions', sessionId, 'agentEvents'),
+        orderBy('sequence', 'asc')
+    );
+
+    return onSnapshot(
+        eventsQuery,
+        (snapshot) => {
+            handlers.onData(snapshot.docs.map(mapAgentEventDoc));
+        },
+        (error) => {
+            handlers.onError?.(error);
+        }
+    );
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

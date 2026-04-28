@@ -64,3 +64,35 @@ export interface SuggestedAction {
     label: string;
     icon?: string;
 }
+
+export type AgentEventType =
+    | 'vault_query'
+    | 'vault_query_result'
+    | 'sufficiency_check'
+    | 'reactive_search'
+    | 'reactive_search_result'
+    | 'evidence_rated'
+    | 'synthesis_started'
+    | 'synthesis_complete'
+    | 'clarification_needed'
+    | 'followup_started'
+    | 'context_loaded'
+    | 'followup_search'
+    | 'followup_response_complete'
+    | 'error';
+
+export type AgentEventStatus = 'in_progress' | 'complete' | 'failed';
+
+export interface AgentEvent {
+    eventId: string;
+    sessionId: string;
+    sequence: number;
+    timestamp: Date;
+    parentMessageId: string | null;
+    type: AgentEventType;
+    title: string;
+    description: string | null;
+    status: AgentEventStatus;
+    durationMs: number | null;
+    payload: Record<string, unknown> | null;
+}

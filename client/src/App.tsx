@@ -30,12 +30,13 @@ import {
   deleteSession,
   fetchSessionDetail,
   fetchSessions,
+  subscribeToAgentEvents,
   type SessionDetail,
   type SessionListItem,
   type SessionStatus,
 } from './services/session.service';
 import { fetchTrendingForecasts, type TrendingForecast } from './services/trending.service';
-import type { ChatMessage, Prediction, PredictionSession, SentimentDataPoint, TimelineEvent } from './types';
+import type { AgentEvent, ChatMessage, Prediction, PredictionSession, SentimentDataPoint, TimelineEvent } from './types';
 
 type AppState =
   | 'landing'
@@ -221,12 +222,39 @@ function App() {
   const [trending, setTrending] = useState<TrendingForecast[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionDetail, setActiveSessionDetail] = useState<SessionDetail | null>(null);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [isAgentEventsLoading, setIsAgentEventsLoading] = useState(false);
 
   const loadSession = useCallback(async (sessionId: string) => {
     const detail = await fetchSessionDetail(sessionId);
     setActiveSessionId(sessionId);
     setActiveSessionDetail(detail);
   }, []);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setAgentEvents([]);
+      setIsAgentEventsLoading(false);
+      return;
+    }
+
+    setIsAgentEventsLoading(true);
+
+    const unsubscribe = subscribeToAgentEvents(activeSessionId, {
+      onData: (events) => {
+        setAgentEvents(events);
+        setIsAgentEventsLoading(false);
+      },
+      onError: () => {
+        setAgentEvents([]);
+        setIsAgentEventsLoading(false);
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeSessionId]);
 
   useEffect(() => {
     setIsHydratingAuth(false);
@@ -335,6 +363,8 @@ function App() {
     setTrending([]);
     setActiveSessionId(null);
     setActiveSessionDetail(null);
+    setAgentEvents([]);
+    setIsAgentEventsLoading(false);
     setAppState('landing');
   };
 
@@ -582,6 +612,7 @@ function App() {
         prediction={prediction}
         sentimentData={sentimentData}
         timelineEvents={timelineEvents}
+        agentEvents={agentEvents}
         messages={messages}
         trendingForecasts={trendingItems}
         userDisplayName={userProfile?.displayName}
@@ -597,6 +628,7 @@ function App() {
         onLogout={handleLogout}
         onGoHome={handleBackToLanding}
         isLoading={isDashboardLoading}
+        isAgentEventsLoading={isAgentEventsLoading}
         onPlanChange={setUserProfile}
       />
     </>
