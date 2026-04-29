@@ -4,7 +4,22 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // vi.hoisted runs before imports and is the supported way to share mocks
 // between the factory and the test body.
 const mocks = vi.hoisted(() => {
-    const mockSessionRef = { id: 'session-abc-123' };
+    const mockMessagesDocRef = { id: 'message-doc-123' };
+    const mockMessagesCollection = {
+        doc: vi.fn(() => mockMessagesDocRef),
+    };
+    const mockSessionRef: {
+        id: string;
+        collection: ReturnType<typeof vi.fn>;
+    } = {
+        id: 'session-abc-123',
+        collection: vi.fn((name: string) => {
+            if (name === 'messages') {
+                return mockMessagesCollection;
+            }
+            throw new Error(`Unexpected subcollection in test: ${name}`);
+        }),
+    };
     const mockForecastQueryRef = { id: 'forecast-query-ref' };
 
     const mockSessionsCollection = {
@@ -41,6 +56,8 @@ const mocks = vi.hoisted(() => {
     return {
         mockSessionRef,
         mockForecastQueryRef,
+        mockMessagesDocRef,
+        mockMessagesCollection,
         mockSessionsCollection,
         mockForecastQueriesCollection,
         setMock,
@@ -75,7 +92,9 @@ describe('sessionRepository.createSession', () => {
         mocks.batchMock.mockClear();
         mocks.mockSessionsCollection.doc.mockClear();
         mocks.mockForecastQueriesCollection.doc.mockClear();
+        mocks.mockMessagesCollection.doc.mockClear();
         mocks.collectionRefMock.mockClear();
+        mocks.mockSessionRef.collection.mockClear();
     });
 
     it('writes a session doc with status "queued" and null error/clarification fields', async () => {
@@ -188,5 +207,36 @@ describe('sessionRepository.createSession', () => {
 
         expect(firstSetOrder).toBeLessThan(commitOrder);
         expect(secondSetOrder).toBeLessThan(commitOrder);
+    });
+
+    it('writes follow-up messages with user metadata into the session messages subcollection', async () => {
+        await sessionRepository.addMessage('session-abc-123', 'user-99', {
+            role: 'user',
+            content: 'What changed after the last update?',
+            meta: {
+                runId: 'run-1',
+            },
+        });
+
+        expect(mocks.mockSessionRef.collection).toHaveBeenCalledWith('messages');
+        expect(mocks.mockMessagesCollection.doc).toHaveBeenCalledTimes(1);
+
+        const firstSetCall = mocks.setMock.mock.calls[0];
+        expect(firstSetCall[0]).toBe(mocks.mockMessagesDocRef);
+        expect(firstSetCall[1]).toMatchObject({
+            userId: 'user-99',
+            role: 'user',
+            content: 'What changed after the last update?',
+            status: 'sent',
+            meta: {
+                runId: 'run-1',
+            },
+        });
+
+        expect(mocks.updateMock).toHaveBeenCalledWith(mocks.mockSessionRef, expect.objectContaining({
+            lastActivityAt: mocks.fixedTimestamp,
+            updatedAt: mocks.fixedTimestamp,
+        }));
+        expect(mocks.commitMock).toHaveBeenCalledTimes(1);
     });
 });

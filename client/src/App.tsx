@@ -31,7 +31,9 @@ import {
   fetchSessionDetail,
   fetchSessions,
   subscribeToAgentEvents,
+  subscribeToSessionMessages,
   type SessionDetail,
+  type SessionMessage,
   type SessionListItem,
   type SessionStatus,
 } from './services/session.service';
@@ -225,12 +227,17 @@ function toChatMessages(detail: SessionDetail | null): ChatMessage[] {
     return [];
   }
 
-  return detail.messages.map((message) => ({
+  return detail.messages.map(toChatMessage);
+}
+
+function toChatMessage(message: SessionMessage): ChatMessage {
+  return {
     id: message.id,
     role: message.role === 'system' ? 'assistant' : message.role,
     content: message.content,
     timestamp: new Date(message.createdAt),
-  }));
+    status: message.status === 'failed' ? 'failed' : 'sent',
+  };
 }
 
 function toTrendingView(items: TrendingForecast[]): TrendingQuestionView[] {
@@ -265,6 +272,10 @@ function App() {
   const [activeSessionDetail, setActiveSessionDetail] = useState<SessionDetail | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [isAgentEventsLoading, setIsAgentEventsLoading] = useState(false);
+  const [sessionMessages, setSessionMessages] = useState<ChatMessage[] | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<ChatMessage[]>([]);
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
 
   const loadSession = useCallback(async (sessionId: string) => {
     const detail = await fetchSessionDetail(sessionId);
@@ -289,6 +300,34 @@ function App() {
       onError: () => {
         setAgentEvents([]);
         setIsAgentEventsLoading(false);
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setSessionMessages(null);
+      setPendingMessages([]);
+      setIsMessagesLoading(false);
+      return;
+    }
+
+    setSessionMessages(null);
+    setPendingMessages([]);
+    setIsMessagesLoading(true);
+
+    const unsubscribe = subscribeToSessionMessages(activeSessionId, {
+      onData: (messages) => {
+        setSessionMessages(messages.map(toChatMessage));
+        setIsMessagesLoading(false);
+      },
+      onError: () => {
+        setSessionMessages(null);
+        setIsMessagesLoading(false);
       },
     });
 
@@ -406,6 +445,10 @@ function App() {
     setActiveSessionDetail(null);
     setAgentEvents([]);
     setIsAgentEventsLoading(false);
+    setSessionMessages(null);
+    setPendingMessages([]);
+    setIsMessagesLoading(false);
+    setIsSendingMessage(false);
     setAppState('landing');
   };
 
@@ -464,15 +507,43 @@ function App() {
       return;
     }
 
+    const optimisticMessage: ChatMessage = {
+      id: `pending-${Date.now()}`,
+      role: 'user',
+      content,
+      timestamp: new Date(),
+      status: 'pending',
+    };
+
     try {
       setAuthError(null);
-      await addSessionMessage(sessionId, {
+      setPendingMessages((current) => [...current, optimisticMessage]);
+      setIsSendingMessage(true);
+
+      const createdMessage = await addSessionMessage(sessionId, {
         role: 'user',
         content,
       });
-      await loadSession(sessionId);
+
+      setActiveSessionDetail((current) => {
+        if (!current || current.session.id !== sessionId) {
+          return current;
+        }
+
+        const nextMessages = current.messages.some((existing) => existing.id === createdMessage.id)
+          ? current.messages
+          : [...current.messages, createdMessage];
+
+        return {
+          ...current,
+          messages: nextMessages,
+        };
+      });
     } catch (error) {
+      setPendingMessages((current) => current.filter((item) => item.id !== optimisticMessage.id));
       setAuthError(error instanceof Error ? error.message : 'Could not save your follow-up.');
+    } finally {
+      setIsSendingMessage(false);
     }
   };
 
@@ -526,7 +597,35 @@ function App() {
   const prediction = useMemo(() => toPrediction(activeSessionDetail), [activeSessionDetail]);
   const sentimentData = useMemo(() => toSentimentPoints(activeSessionDetail), [activeSessionDetail]);
   const timelineEvents = useMemo(() => toTimelineEvents(activeSessionDetail), [activeSessionDetail]);
-  const messages = useMemo(() => toChatMessages(activeSessionDetail), [activeSessionDetail]);
+  const messages = useMemo(() => {
+    const persistedMessages = sessionMessages ?? toChatMessages(activeSessionDetail);
+    const unreconciledPending = pendingMessages.filter((pendingMessage) => {
+      return !persistedMessages.some((message) => (
+        message.role === pendingMessage.role &&
+        message.content === pendingMessage.content &&
+        Math.abs(message.timestamp.getTime() - pendingMessage.timestamp.getTime()) <= 120000
+      ));
+    });
+
+    return [...persistedMessages, ...unreconciledPending].sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+    );
+  }, [activeSessionDetail, pendingMessages, sessionMessages]);
+  const isAwaitingAssistantResponse = useMemo(() => {
+    let lastUserTimestamp: number | null = null;
+    let lastAssistantTimestamp: number | null = null;
+
+    for (const message of messages) {
+      const timestamp = message.timestamp.getTime();
+      if (message.role === 'user') {
+        lastUserTimestamp = timestamp;
+      } else if (message.role === 'assistant') {
+        lastAssistantTimestamp = timestamp;
+      }
+    }
+
+    return lastUserTimestamp !== null && (lastAssistantTimestamp === null || lastUserTimestamp > lastAssistantTimestamp);
+  }, [messages]);
   const trendingItems = useMemo(() => toTrendingView(trending), [trending]);
 
   if (isHydratingAuth) {
@@ -655,6 +754,9 @@ function App() {
         timelineEvents={timelineEvents}
         agentEvents={agentEvents}
         messages={messages}
+        isMessagesLoading={isMessagesLoading}
+        isSendingMessage={isSendingMessage}
+        isAwaitingAssistantResponse={isAwaitingAssistantResponse}
         trendingForecasts={trendingItems}
         userDisplayName={userProfile?.displayName}
         userPlan={userProfile?.plan}

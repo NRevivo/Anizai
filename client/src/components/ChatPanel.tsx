@@ -9,6 +9,9 @@ import ReactMarkdown from 'react-markdown';
 interface ChatPanelProps {
     messages: ChatMessage[];
     suggestedActions: SuggestedAction[];
+    isLoading?: boolean;
+    isSendingMessage?: boolean;
+    isAwaitingAssistantResponse?: boolean;
     currentQuestion?: string;
     currentAnswer?: string;
     onSendMessage: (message: string) => void;
@@ -19,12 +22,19 @@ interface ChatPanelProps {
 export function ChatPanel({
     messages,
     suggestedActions,
+    isLoading = false,
+    isSendingMessage = false,
+    isAwaitingAssistantResponse = false,
     onSendMessage,
     onActionClick
 }: ChatPanelProps) {
     const [inputValue, setInputValue] = useState('');
 
     const handleSend = () => {
+        if (isSendingMessage) {
+            return;
+        }
+
         if (inputValue.trim()) {
             onSendMessage(inputValue);
             setInputValue('');
@@ -39,7 +49,14 @@ export function ChatPanel({
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
-                {messages.length === 0 ? (
+                {isLoading && messages.length === 0 ? (
+                    <StateMessage
+                        compact
+                        variant="loading"
+                        title="Loading follow-ups"
+                        description="Pulling the latest conversation for this forecast."
+                    />
+                ) : messages.length === 0 ? (
                     <StateMessage
                         compact
                         title="No follow-ups yet"
@@ -67,6 +84,17 @@ export function ChatPanel({
                         </div>
                     ))
                 )}
+
+                {isAwaitingAssistantResponse ? (
+                    <div className="flex justify-start">
+                        <div className="max-w-[92%] min-w-0 rounded-lg border border-dashed border-anizai-teal-200 bg-anizai-teal-50/60 px-3.5 py-2.5 text-sm text-anizai-teal-900">
+                            <p className="font-medium">Waiting for response</p>
+                            <p className="mt-1 text-xs text-anizai-teal-700">
+                                The follow-up was sent and the assistant reply will appear here when it is ready.
+                            </p>
+                        </div>
+                    </div>
+                ) : null}
             </div>
 
             {suggestedActions.length > 0 && (
@@ -81,6 +109,7 @@ export function ChatPanel({
                                 variant="outline"
                                 size="sm"
                                 onClick={() => onActionClick(action)}
+                                disabled={isSendingMessage}
                                 className="h-auto min-h-8 max-w-full whitespace-normal text-xs hover:border-anizai-teal-400 hover:text-anizai-teal-600"
                             >
                                 <svg className="mr-1.5 h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -96,20 +125,28 @@ export function ChatPanel({
             <div className="p-3 border-t border-gray-100 flex-shrink-0 bg-white">
                 <div className="flex min-w-0 gap-2">
                     <Input
-                        placeholder="Ask a follow-up..."
+                        placeholder="Ask a follow-up about the forecast or evidence"
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                        disabled={isSendingMessage}
                         className="min-w-0 bg-gray-50 border-gray-200 focus:bg-white focus:border-anizai-teal-500 focus:ring-1 focus:ring-anizai-teal-500 transition-all text-sm"
                     />
                     <Button
                         onClick={handleSend}
-                        disabled={!inputValue.trim()}
+                        disabled={!inputValue.trim() || isSendingMessage}
                         className="h-10 w-10 shrink-0 bg-anizai-teal-600 hover:bg-anizai-teal-700 text-white border-0 shadow-sm"
                     >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                        </svg>
+                        {isSendingMessage ? (
+                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" className="opacity-30" />
+                                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                            </svg>
+                        ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            </svg>
+                        )}
                     </Button>
                 </div>
             </div>

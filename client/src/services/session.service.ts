@@ -52,6 +52,7 @@ export interface SessionMessage {
     content: string;
     createdAt: string;
     status: 'sent' | 'failed' | null;
+    userId?: string | null;
     meta: {
         model?: string;
         tokensIn?: number;
@@ -349,6 +350,20 @@ function mapAgentEventDoc(docSnapshot: QueryDocumentSnapshot): AgentEvent {
     };
 }
 
+function mapSessionMessageDoc(docSnapshot: QueryDocumentSnapshot): SessionMessage {
+    const data = docSnapshot.data();
+
+    return {
+        id: docSnapshot.id,
+        role: data.role as SessionMessage['role'],
+        content: typeof data.content === 'string' ? data.content : '',
+        createdAt: toDateValue(data.createdAt).toISOString(),
+        status: data.status === 'failed' ? 'failed' : data.status === 'sent' ? 'sent' : null,
+        userId: typeof data.userId === 'string' ? data.userId : null,
+        meta: data.meta && typeof data.meta === 'object' ? (data.meta as SessionMessage['meta']) : null,
+    };
+}
+
 export async function fetchSessions(): Promise<SessionListItem[]> {
     try {
         return await apiRequest<SessionListItem[]>('/sessions');
@@ -479,6 +494,29 @@ export function subscribeToAgentEvents(
         eventsQuery,
         (snapshot) => {
             handlers.onData(snapshot.docs.map(mapAgentEventDoc));
+        },
+        (error) => {
+            handlers.onError?.(error);
+        }
+    );
+}
+
+export function subscribeToSessionMessages(
+    sessionId: string,
+    handlers: {
+        onData: (messages: SessionMessage[]) => void;
+        onError?: (error: Error) => void;
+    }
+): Unsubscribe {
+    const messagesQuery = query(
+        collection(db, 'sessions', sessionId, 'messages'),
+        orderBy('createdAt', 'asc')
+    );
+
+    return onSnapshot(
+        messagesQuery,
+        (snapshot) => {
+            handlers.onData(snapshot.docs.map(mapSessionMessageDoc));
         },
         (error) => {
             handlers.onError?.(error);

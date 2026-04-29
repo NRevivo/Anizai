@@ -130,4 +130,49 @@ describe('sessionsService.createSession', () => {
         expect(mocks.requeueClarifiedSession).toHaveBeenCalledWith(session, clarificationCandidate);
         expect(result).toEqual(requeuedSession);
     });
+
+    it('stores follow-up messages only after verifying session ownership', async () => {
+        const session = {
+            id: 'session-1',
+            userId: 'user-1',
+            question: 'Will the Fed cut rates by July 2026?',
+            title: null,
+            status: 'done' as const,
+            latestProbability: 0.62,
+            latestConfidence: 0.74,
+            followEnabled: true,
+            isFollowing: false,
+            canonicalKey: null,
+            errorCode: null,
+            errorMessage: null,
+            clarificationCandidates: null,
+            createdAt: '2026-04-28T12:00:00.000Z',
+            updatedAt: '2026-04-28T12:00:00.000Z',
+            lastActivityAt: '2026-04-28T12:00:00.000Z',
+        };
+        const storedMessage = {
+            id: 'message-1',
+            role: 'user' as const,
+            content: 'What evidence would change this the most?',
+            createdAt: '2026-04-28T12:10:00.000Z',
+            status: 'sent' as const,
+            userId: 'user-1',
+            meta: null,
+        };
+
+        mocks.getSession.mockResolvedValue(session);
+        mocks.addMessage.mockResolvedValue(storedMessage);
+
+        const result = await sessionsService.addMessage('session-1', 'user-1', {
+            role: 'user',
+            content: storedMessage.content,
+        });
+
+        expect(mocks.getSession).toHaveBeenCalledWith('session-1');
+        expect(mocks.addMessage).toHaveBeenCalledWith('session-1', 'user-1', {
+            role: 'user',
+            content: storedMessage.content,
+        });
+        expect(result).toEqual(storedMessage);
+    });
 });

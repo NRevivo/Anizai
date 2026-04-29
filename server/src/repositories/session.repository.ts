@@ -213,6 +213,7 @@ export const sessionRepository = {
                 content: data.content,
                 createdAt: toISOString(data.createdAt) ?? '',
                 status: data.status ?? null,
+                userId: data.userId ?? null,
                 meta: data.meta ?? null,
             };
         };
@@ -461,10 +462,11 @@ export const sessionRepository = {
         };
     },
 
-    async addMessage(sessionId: string, input: CreateMessageInput): Promise<SessionMessage> {
+    async addMessage(sessionId: string, userId: string, input: CreateMessageInput): Promise<SessionMessage> {
         const createdAt = now();
 
         const messageData = {
+            userId,
             role: input.role,
             content: input.content,
             createdAt,

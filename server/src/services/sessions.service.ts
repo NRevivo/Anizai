@@ -44,6 +44,7 @@ export interface SessionMessage {
     content: string;
     createdAt: string;
     status: 'sent' | 'failed' | null;
+    userId?: string | null;
     meta: {
         model?: string;
         tokensIn?: number;
@@ -323,7 +324,7 @@ export async function addMessage(
     // Verify ownership first
     await getSession(sessionId, userId);
 
-    return sessionRepository.addMessage(sessionId, input);
+    return sessionRepository.addMessage(sessionId, userId, input);
 }
 
 /**

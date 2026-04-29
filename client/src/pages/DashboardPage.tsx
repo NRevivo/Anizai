@@ -44,6 +44,9 @@ interface DashboardPageProps {
     timelineEvents: TimelineEvent[];
     agentEvents: AgentEvent[];
     messages: ChatMessage[];
+    isMessagesLoading?: boolean;
+    isSendingMessage?: boolean;
+    isAwaitingAssistantResponse?: boolean;
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
     onCreateSession: (question: string, idempotencyKey: string) => Promise<void>;
@@ -69,6 +72,9 @@ export function DashboardPage({
     timelineEvents,
     agentEvents,
     messages,
+    isMessagesLoading = false,
+    isSendingMessage = false,
+    isAwaitingAssistantResponse = false,
     trendingForecasts,
     onSessionSelect,
     onCreateSession,
@@ -163,7 +169,7 @@ export function DashboardPage({
     };
 
     const handleActionClick = (action: SuggestedAction) => {
-        if (!action.prompt) {
+        if (!action.prompt || isSendingMessage) {
             return;
         }
 
@@ -434,6 +440,9 @@ export function DashboardPage({
         return (
             <ChatPanel
                 messages={messages}
+                isLoading={isMessagesLoading}
+                isSendingMessage={isSendingMessage}
+                isAwaitingAssistantResponse={isAwaitingAssistantResponse}
                 onSendMessage={handleSendMessage}
                 suggestedActions={suggestedActions}
                 currentQuestion={prediction?.question}
@@ -530,6 +539,9 @@ export function DashboardPage({
                     <div className={`fixed inset-y-0 right-0 w-full max-w-[min(24rem,100vw)] z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                         <ChatPanel
                             messages={messages}
+                            isLoading={isMessagesLoading}
+                            isSendingMessage={isSendingMessage}
+                            isAwaitingAssistantResponse={isAwaitingAssistantResponse}
                             suggestedActions={suggestedActions}
                             currentQuestion={prediction?.question}
                             currentAnswer={prediction?.explanation}
@@ -573,6 +585,9 @@ export function DashboardPage({
                 <div className={`fixed inset-y-0 right-0 w-full max-w-[min(24rem,100vw)] z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                     <ChatPanel
                         messages={messages}
+                        isLoading={isMessagesLoading}
+                        isSendingMessage={isSendingMessage}
+                        isAwaitingAssistantResponse={isAwaitingAssistantResponse}
                         suggestedActions={suggestedActions}
                         currentQuestion={prediction?.question}
                         currentAnswer={prediction?.explanation}
