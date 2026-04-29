@@ -592,6 +592,20 @@ function App() {
     }
   };
 
+  const handleRetrySession = async (sessionId: string) => {
+    const detail = activeSessionDetail;
+    if (!detail || detail.session.id !== sessionId) {
+      throw new Error('Open the failed forecast before retrying.');
+    }
+
+    const originalQuestion = detail.session.question.trim();
+    if (!originalQuestion) {
+      throw new Error('This forecast cannot be retried because the original question is missing.');
+    }
+
+    await handleCreateSession(originalQuestion, crypto.randomUUID());
+  };
+
   const sidebarSessions = useMemo(() => sessions.map(toSidebarSession), [sessions]);
   const activeSessionState = useMemo(() => toActiveSessionState(activeSessionDetail), [activeSessionDetail]);
   const prediction = useMemo(() => toPrediction(activeSessionDetail), [activeSessionDetail]);
@@ -765,6 +779,7 @@ function App() {
           void handleSessionSelect(sessionId);
         }}
         onCreateSession={handleCreateSession}
+        onRetrySession={handleRetrySession}
         onClarifySession={handleClarifySession}
         onSendMessage={handleSendMessage}
         onDeleteSession={handleDeleteSession}

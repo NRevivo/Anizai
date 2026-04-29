@@ -50,6 +50,7 @@ interface DashboardPageProps {
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
     onCreateSession: (question: string, idempotencyKey: string) => Promise<void>;
+    onRetrySession: (sessionId: string) => Promise<void>;
     onClarifySession: (sessionId: string, chosenCandidateId: string | null) => Promise<void>;
     onSendMessage: (message: string) => Promise<void>;
     onDeleteSession: (sessionId: string) => Promise<void>;
@@ -78,6 +79,7 @@ export function DashboardPage({
     trendingForecasts,
     onSessionSelect,
     onCreateSession,
+    onRetrySession,
     onClarifySession,
     onSendMessage,
     onDeleteSession,
@@ -101,6 +103,8 @@ export function DashboardPage({
     const [selectedClarificationId, setSelectedClarificationId] = useState<string>('none');
     const [isSubmittingClarification, setIsSubmittingClarification] = useState(false);
     const [clarificationError, setClarificationError] = useState<string | null>(null);
+    const [isRetryingFailedSession, setIsRetryingFailedSession] = useState(false);
+    const [failedRetryError, setFailedRetryError] = useState<string | null>(null);
     const [currentView, setCurrentView] = useState<'dashboard' | 'new-forecast'>('dashboard');
 
     const suggestedActions = useMemo<SuggestedAction[]>(
@@ -112,6 +116,8 @@ export function DashboardPage({
         setSelectedClarificationId('none');
         setClarificationError(null);
         setIsSubmittingClarification(false);
+        setIsRetryingFailedSession(false);
+        setFailedRetryError(null);
     }, [activeSessionState?.id, activeSessionState?.status]);
 
     const handleNewPrediction = () => {
@@ -165,6 +171,28 @@ export function DashboardPage({
             setClarificationError(error instanceof Error ? error.message : 'Could not submit the clarification choice.');
         } finally {
             setIsSubmittingClarification(false);
+        }
+    };
+
+    const handleRetryFailedSession = async () => {
+        if (!activeSessionState || activeSessionState.status !== 'failed' || isRetryingFailedSession) {
+            return;
+        }
+
+        if (!activeSessionState.question.trim()) {
+            setFailedRetryError('This forecast cannot be retried because the original question is missing.');
+            return;
+        }
+
+        try {
+            setFailedRetryError(null);
+            setIsRetryingFailedSession(true);
+            await onRetrySession(activeSessionState.id);
+            setCurrentView('dashboard');
+        } catch (error) {
+            setFailedRetryError(error instanceof Error ? error.message : 'Could not retry this forecast.');
+        } finally {
+            setIsRetryingFailedSession(false);
         }
     };
 
@@ -240,13 +268,40 @@ export function DashboardPage({
         }
 
         if (activeSessionState.status === 'failed') {
+            const canRetry = activeSessionState.question.trim().length > 0;
+
             return (
-                <StateMessage
-                    variant="error"
-                    align="center"
-                    title="Forecast could not be completed"
-                    description={activeSessionState.errorMessage ?? 'This session ended with an error before a final result was produced.'}
-                />
+                <div className="rounded-lg border border-red-200 bg-white p-4 sm:p-5 shadow-sm space-y-4">
+                    <StateMessage
+                        variant="error"
+                        align="center"
+                        title="Forecast could not be completed"
+                        description={activeSessionState.errorMessage ?? 'This session ended with an error before a final result was produced.'}
+                    />
+                    {failedRetryError ? (
+                        <StateMessage
+                            compact
+                            variant="error"
+                            title="Retry was not started"
+                            description={failedRetryError}
+                        />
+                    ) : null}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => void handleRetryFailedSession()}
+                            disabled={!canRetry || isRetryingFailedSession}
+                            className="inline-flex min-h-11 items-center justify-center rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {isRetryingFailedSession ? 'Retrying forecast...' : 'Retry forecast'}
+                        </button>
+                        <p className="text-xs text-gray-500">
+                            {canRetry
+                                ? 'This starts a new forecast request with the original question.'
+                                : 'Retry is unavailable because the original question could not be recovered.'}
+                        </p>
+                    </div>
+                </div>
             );
         }
 
