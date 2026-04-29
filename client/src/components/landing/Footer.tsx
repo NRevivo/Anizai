@@ -14,7 +14,7 @@ interface FooterProps {
     };
 }
 
-export function Footer({ onAuth, onContact, onNavigation }: FooterProps) {
+export function Footer({ onAuth: _onAuth, onContact, onNavigation }: FooterProps) {
     return (
         <footer className="bg-gray-50 border-t border-gray-200 pt-16 pb-12 px-6">
             <div className="max-w-6xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">

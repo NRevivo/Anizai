@@ -7,15 +7,19 @@ interface MarketComparisonProps {
 }
 
 export function MarketComparison({ anizaiProbability, marketProbability }: MarketComparisonProps) {
+    // Convert 0–1 floats to percentage values for chart display
+    const anizaiPct = anizaiProbability * 100;
+    const marketPct = marketProbability * 100;
+
     const data = [
         {
             name: 'Compare',
-            'Market Consensus': marketProbability,
-            'Anizai Forecast': anizaiProbability,
+            'Market Consensus': marketPct,
+            'Anizai Forecast': anizaiPct,
         },
     ];
 
-    const difference = anizaiProbability - marketProbability;
+    const difference = anizaiPct - marketPct;
     const isBullish = difference > 0;
 
     // Insight-first header text

@@ -6,27 +6,49 @@ import { formatProbability, formatRelativeTime } from '../lib/utils';
 interface SidebarProps {
     sessions: PredictionSession[];
     activeSessionId: string;
+    userDisplayName?: string | null;
+    userPlan?: 'free' | 'premium';
     onSessionSelect: (id: string) => void;
     onNewPrediction: () => void;
     onDeleteSession?: (id: string) => void;
     onLogout?: () => void;
     onSettings?: () => void;
+    onGoHome?: () => void;
 }
 
-export function Sidebar({ sessions, activeSessionId, onSessionSelect, onNewPrediction, onDeleteSession, onLogout, onSettings }: SidebarProps) {
+export function Sidebar({
+    sessions,
+    activeSessionId,
+    userDisplayName,
+    userPlan = 'free',
+    onSessionSelect,
+    onNewPrediction,
+    onDeleteSession,
+    onLogout,
+    onSettings,
+    onGoHome,
+}: SidebarProps) {
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+    const name = userDisplayName?.trim() || 'User';
+    const initials = name
+        .split(' ')
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase() ?? '')
+        .join('') || 'U';
+    const membershipLabel = userPlan === 'premium' ? 'Premium Plan' : 'Free Plan';
 
     return (
         <div className="w-full h-full bg-slate-50 border-r border-gray-200 flex flex-col overflow-hidden font-sans">
             {/* Logo area */}
-            <div className="px-5 py-5 flex items-center gap-3 border-b border-gray-100 bg-white">
+            <button onClick={onGoHome} className="w-full text-left px-5 py-5 flex items-center gap-3 border-b border-gray-100 bg-white hover:bg-gray-50 transition-colors cursor-pointer decoration-transparent focus:outline-none">
                 <img
                     src="/logo-brain.png"
                     alt="Anizai"
                     className="h-8 w-auto"
                 />
                 <span className="text-xl font-semibold text-gray-900 tracking-tight">Anizai</span>
-            </div>
+            </button>
 
             {/* Actions & Search */}
             <div className="p-4 bg-white border-b border-gray-100 space-y-3">
@@ -113,11 +135,11 @@ export function Sidebar({ sessions, activeSessionId, onSessionSelect, onNewPredi
                     className="w-full flex items-center gap-3 hover:bg-gray-100 p-2 rounded-lg transition-colors"
                 >
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center text-white font-medium text-xs shadow-sm">
-                        NR
+                        {initials}
                     </div>
                     <div className="flex-1 min-w-0 text-left">
-                        <p className="text-sm font-medium text-gray-900 truncate">Noam Revivo</p>
-                        <p className="text-xs text-gray-500 truncate">Pro Plan</p>
+                        <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
+                        <p className="text-xs text-gray-500 truncate">{membershipLabel}</p>
                     </div>
                     <svg className={`w-4 h-4 text-gray-400 transition-transform ${isProfileMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -159,4 +181,3 @@ export function Sidebar({ sessions, activeSessionId, onSessionSelect, onNewPredi
         </div>
     );
 }
-

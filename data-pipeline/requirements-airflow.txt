@@ -1,0 +1,70 @@
+# ==========================================================
+# Anizai Data Pipeline — Airflow Container Dependencies
+# ==========================================================
+# Producer-specific packages needed when Airflow PythonOperator tasks
+# invoke the scheduled producer main() functions (Section 2.3).
+#
+# These are the ONLY additional packages required on top of the
+# apache/airflow:2.9.3-python3.12 base image (which already ships
+# apache-airflow[postgres] and its full dependency tree).
+#
+# EXCLUDED (not needed by scheduled producers):
+#   - apache-flink / apache-beam  — Flink cluster handles processing
+#   - openai / tiktoken           — AI enrichment is a Gold-layer Flink job
+#   - praw                        — Reddit permanently blocked (task_plan.md)
+#   - pytest / pytest-asyncio     — test-only, not needed in containers
+#   - psycopg2-binary / pgvector  — producers emit to Kafka only; no DB writes
+#
+# NOTE: websockets and telethon are included below even though Polymarket and
+# Telegram are streaming (not DAG-scheduled) producers. Both are run via
+# `docker exec` inside this container during validation (Sprint 17), so the
+# image must carry their dependencies.
+#
+# Version policy: exact pins (==) matching requirements.txt to prevent
+# divergence between the local venv and the containerised environment.
+#
+# Python version: 3.12 (matches apache/airflow:2.9.3-python3.12 base
+# image and local development venv — see requirements.txt header).
+#
+# References:
+#   - Section 2.3: Scheduled pollers — Airflow DAGs manage invocation
+#   - Section 8.2: Docker stack — Airflow service
+#   - Section 9.1: Environment parity — same version pins across environments
+# ==========================================================
+
+# .env loading — config/settings.py calls load_dotenv() at import time.
+# In Docker, docker-compose env_file: injects vars into os.environ directly;
+# load_dotenv() falls through gracefully when .env is absent inside the container.
+python-dotenv==1.0.1
+
+# Synchronous HTTP — REST calls in all 7 scheduled producers (Sections B.1–B.7).
+# FRED, NewsAPI, HackerNews, OpenWeather, and OpenSky use requests directly.
+requests==2.31.0
+
+# Kafka Bronze topic emission — all scheduled producers write to Kafka (Section 3.4).
+# Maintained fork of kafka-python with active bug fixes and KRaft compatibility.
+kafka-python-ng==2.2.3
+
+# ArXiv API wrapper — handles Atom XML feed pagination + mandatory 3-second
+# inter-request delay per ArXiv ToS (Section B.1 daily producer).
+arxiv==2.1.0
+
+# Google Trends unofficial API — static (daily) and reactive modes (Section B.5).
+# Pytrends wraps Google's internal endpoint; included here because the static
+# GoogleTrends producer is an Airflow-scheduled task.
+pytrends==4.9.2
+
+# Structured JSON logging — Section 7.2 observability.
+# All containers in the stack use python-json-logger for Google Cloud Logging
+# compatibility (100% ERROR capture, 1% INFO sampling).
+python-json-logger==2.0.7
+
+# Telegram MTProto streaming — ingestion/telegram_producer.py.
+# Required when running the Telegram producer via `docker exec` inside this
+# container. Version pin matches requirements.txt (Section 9.1 parity).
+telethon==1.36.0
+
+# Polymarket WebSocket streaming — ingestion/polymarket_producer.py.
+# Required when running the Polymarket producer via `docker exec` inside this
+# container. Version pin matches requirements.txt (Section 9.1 parity).
+websockets==12.0

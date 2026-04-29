@@ -1,0 +1,21 @@
+{
+  "_comment": "Realistic mock of a Polymarket CLOB WebSocket last_trade event after normalisation by _handle_ws_event(). Updated from price_change to last_trade (Gap 3 fix, Sprint 11): only last_trade events carry meaningful execution prices (Section B.8). This dict is stored verbatim as raw_payload inside the Bronze envelope. Section 4.4 / Section C.1.",
+  "payload_type": "price_update",
+  "ingestion_mode": "websocket",
+  "event_type": "last_trade",
+  "asset_id": "71321045679652173895153786947501143655108564919899054916890429347085006392",
+  "market_id": "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
+  "price": 0.67,
+  "side": "BUY",
+  "size": 5000.0,
+  "trade_value_usd": 3350.0,
+  "whale_alert": false,
+  "volume_24h_usd": 285400.0,
+  "timestamp": "2026-03-28T14:22:31.412000+00:00",
+  "_market_context": {
+    "question": "Will the Federal Reserve cut rates before June 2026?",
+    "end_date": "2026-06-30T23:59:00+00:00",
+    "liquidity_usd": 128900.0,
+    "outcome_label": "YES"
+  }
+}

@@ -1,40 +1,54 @@
 """
-This package initializer exposes key configuration variables and schema mappers.
-It allows for cleaner imports throughout the project (e.g., 'from config import TOPIC_NEWS').
+Config Package — Centralized project configuration.
+Exposes Kafka topic constants, API credentials, and file paths.
+
+References: Section 3.1 (Topic Hierarchy), Section 2.1 (Producer Matrix).
 """
 
-# 1. Expose settings and constants (from settings.py)
-from .settings import (
-    # Infrastructure
-    KAFKA_BOOTSTRAP_SERVERS,
-    
-    # Topics
-    TOPIC_NEWS,
-    TOPIC_COMMUNITY,
-    TOPIC_PROFESSIONAL,
-    
-    # Credentials & API Keys
-    NEWS_API_KEY,
-    REDDIT_CLIENT_ID,
-    REDDIT_SECRET,
-    REDDIT_USER_AGENT,
-    ARXIV_MAX_RESULTS,
-    HACKER_NEWS_API_BASE_URL,
-    YOUTUBE_API_KEY,
-    OPENAI_API_KEY,
-    OPENAI_MODEL_NAME,
-    
-    # Paths
-    BASE_DIR,
-    DATA_DIR
+from .kafka_topics import (
+    # Bronze (BRONZE_PREDICTIT omitted — API permanently shut down CFTC 2022-2024)
+    # (BRONZE_REDDIT omitted — API pre-approval required Nov 2025. All code removed.)
+    BRONZE_POLYMARKET, BRONZE_TELEGRAM,
+    BRONZE_HACKERNEWS, BRONZE_NEWSAPI, BRONZE_ARXIV, BRONZE_FRED,
+    BRONZE_GOOGLETRENDS, BRONZE_OPENWEATHER, BRONZE_OPENSKY,
+    ALL_BRONZE_TOPICS,
+    # Silver
+    SILVER_SOCIAL_PULSE, SILVER_GLOBAL_NEWS, SILVER_STRUCTURED_METRICS,
+    # Gold
+    GOLD_SOCIAL_PULSE, GOLD_GLOBAL_NEWS, GOLD_STRUCTURED_METRICS,
+    # System
+    INGESTION_TRIGGERS, DEAD_LETTER_QUEUE,
+    # Routing
+    BRONZE_TO_SILVER_ROUTING,
 )
 
-# 2. Expose schema mapping functions (from schemas.py)
-from .schemas import (
-    create_unified_message,
-    map_news_to_unified,
-    map_reddit_to_unified,
-    map_arxiv_to_unified,
-    map_hacker_news_to_unified,
-    map_youtube_to_unified
+from .settings import (
+    # Paths
+    BASE_DIR,
+    DATA_DIR,
+    # Infrastructure — Kafka
+    KAFKA_BOOTSTRAP_SERVERS,
+    # Infrastructure — PostgreSQL
+    POSTGRES_HOST,
+    POSTGRES_PORT,
+    POSTGRES_USER,
+    POSTGRES_PASSWORD,
+    POSTGRES_DB,
+    # AI & Enrichment
+    OPENAI_API_KEY,
+    OPENAI_MODEL_NAME,
+    # Source credentials
+    POLYMARKET_API_KEY,
+    POLYMARKET_API_SECRET,
+    # PREDICTIT_API_BASE_URL omitted — API permanently shut down (CFTC 2022-2024)
+    TELEGRAM_API_ID,
+    TELEGRAM_API_HASH,
+    # REDDIT credentials removed — API pre-approval required (Nov 2025 policy)
+    HACKERNEWS_API_BASE_URL,
+    NEWS_API_KEY,
+    ARXIV_MAX_RESULTS,
+    FRED_API_KEY,
+    OPENWEATHER_API_KEY,
+    OPENSKY_CLIENT_ID,
+    OPENSKY_CLIENT_SECRET,
 )

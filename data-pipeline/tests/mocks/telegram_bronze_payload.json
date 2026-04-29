@@ -1,0 +1,16 @@
+{
+  "_comment": "Realistic mock of a single Telegram message after construction by TelegramProducer._build_raw_payload(). Stored verbatim as raw_payload inside the Bronze envelope. Source: @clashreport (Clash Report) — geopolitical and military events channel (Section A.1). Message contains text and an extracted link; no media. is_forwarded=false. No impact_boost field — Impact Boost does not apply to Telegram (Section B.4). message_url is the canonical SHA-256 dedup key used by map_telegram_message_to_silver() (Section 4.1C). Silver store: knowledge_vault. Vector target: knowledge_vectors, entry_type='direct_message' (Section C.5). Section 4.4 / Section C.1 / Section A.1.",
+  "message_id": 98765,
+  "channel_username": "clashreport",
+  "channel_title": "Clash Report",
+  "message_text": "BREAKING: Iranian IRGC naval vessels have entered the Strait of Hormuz in an unusual multi-vessel formation. Three frigates and four fast attack craft observed moving toward the central shipping lane. Oil tanker traffic is being rerouted by maritime authorities. Situation is developing. Full OSINT thread below.",
+  "message_date": "2024-09-23T14:08:31+00:00",
+  "message_url": "https://t.me/clashreport/98765",
+  "extracted_links": [
+    "https://t.me/clashreport/98764"
+  ],
+  "is_forwarded": false,
+  "forwarded_from": null,
+  "views": 24312,
+  "has_media": false
+}

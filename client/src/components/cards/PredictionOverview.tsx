@@ -10,7 +10,8 @@ interface PredictionOverviewProps {
 export function PredictionOverview({ probability, confidenceIndex, explanation }: PredictionOverviewProps) {
     const radius = 70;
     const circumference = 2 * Math.PI * radius;
-    const strokeDashoffset = circumference - (probability / 100) * circumference;
+    // probability is a 0–1 float; multiply for arc calculation
+    const strokeDashoffset = circumference - probability * circumference;
     const uniqueGradientId = "gauge-gradient-" + Math.random().toString(36).substr(2, 9);
 
     return (
@@ -67,7 +68,7 @@ export function PredictionOverview({ probability, confidenceIndex, explanation }
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
                                 <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-1">Confidence</p>
-                                <p className="text-lg font-bold text-gray-900">{confidenceIndex}/100</p>
+                                <p className="text-lg font-bold text-gray-900">{(confidenceIndex * 100).toFixed(0)}/100</p>
                             </div>
                             <div className="p-3 bg-gray-50 rounded-lg border border-gray-100">
                                 <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-1">Evidence Vol.</p>

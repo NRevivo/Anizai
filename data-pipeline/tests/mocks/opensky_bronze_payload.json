@@ -1,0 +1,39 @@
+{
+  "_comment": "Realistic mock of a single OpenSky observation after extraction by OpenSkyProducer._build_raw_payload(). Represents a STATIC mode observation for the taiwan_strait bounding box on 2026-04-04. aircraft_count=47 represents a moderately elevated density. states_compact includes one aircraft (icao24='abc123') with lat=null and lon=null and on_ground=false — this is a transponder silence event that the Silver Job will count as transponder_silence_events=1 (domain filter applied in silver_job.py). The second aircraft ('def456') has valid position data and on_ground=false — not a silence event. A third aircraft ('ghi789') has lat=null/lon=null but on_ground=true — not a silence event (ground contact is expected). Section 4.4 / Section C.1 / Section B.7.",
+  "bounding_box_id": "taiwan_strait",
+  "strategic_tag": "taiwan_strait",
+  "lat_min": 22.0,
+  "lat_max": 27.0,
+  "lon_min": 118.0,
+  "lon_max": 123.0,
+  "aircraft_count": 47,
+  "states_compact": [
+    {
+      "icao24": "abc123",
+      "callsign": "CAL123 ",
+      "lat": null,
+      "lon": null,
+      "on_ground": false,
+      "last_contact": 1743760800
+    },
+    {
+      "icao24": "def456",
+      "callsign": "EVA456 ",
+      "lat": 24.5,
+      "lon": 120.3,
+      "on_ground": false,
+      "last_contact": 1743760810
+    },
+    {
+      "icao24": "ghi789",
+      "callsign": "CKS789 ",
+      "lat": null,
+      "lon": null,
+      "on_ground": true,
+      "last_contact": 1743760790
+    }
+  ],
+  "observation_time": 1743760800,
+  "fetch_timestamp": "2026-04-04T10:00:00+00:00",
+  "mode": "static"
+}

@@ -1,28 +1,163 @@
-# --- Environment & General Utilities ---
-python-dotenv          # טעינת משתני סביבה מקובץ .env
-requests               # שליחת בקשות HTTP (ל-API של חדשות ועוד)
-pandas                 # עבודה עם דאטה-פריימס (נוח לבדיקות מקומיות)
-numpy                  # חישובים מתמטיים (תלות של ספריות רבות)
+# ==========================================================
+# Anizai Data Pipeline — Pinned Dependencies
+# ==========================================================
+# Install:
+#   pip install -r requirements.txt
+#
+# Python version: 3.12 (matches venv in repo)
+#
+# Version policy: exact pins (==) for reproducible builds.
+# Before the first Docker build, run:
+#   pip install -r requirements.txt && pip freeze > requirements.lock
+# and commit requirements.lock for absolute reproducibility.
+#
+# Sections reference the Technical Specification.
+# ==========================================================
 
-# --- Ingestion (Producers) ---
-kafka-python           # ספרייה לתקשורת עם Kafka (לכתיבת Producers)
-praw                   # Python Reddit API Wrapper (למשיכת מידע מרדיט)
-arxiv                  # ספרייה למשיכת מאמרים אקדמיים מ-ArXiv
-beautifulsoup4         # ניתוח וגירוד דפי HTML (לבלוגים אם נצטרך)
-lxml                   # מנוע עיבוד ל-BeautifulSoup
 
-# --- Processing (Spark & Big Data) ---
-pyspark==3.5.0         # המנוע של Spark (חשוב שתהיה גרסה אחידה לכולם)
-delta-spark==3.0.0     # עבודה עם Delta Lake (שמירת קבצי Parquet)
+# ----------------------------------------------------------
+# Core — Environment & HTTP
+# ----------------------------------------------------------
 
-# --- AI & Enrichment ---
-openai                 # העבודה מול GPT-4o ו-Embeddings
-tiktoken               # ספירת טוקנים (לפעמים נדרש ע"י OpenAI)
-langchain              # (אופציונלי) מסגרת עבודה נוחה לניהול פרומפטים
-langchain-openai       # חיבור ספציפי של LangChain ל-OpenAI
+# .env loading — config/settings.py uses this at startup (Section 9.1)
+python-dotenv==1.0.1
 
-# --- Vector Database ---
-chromadb               # הלקוח של מסד הנתונים הוקטורי
+# Synchronous HTTP — used by all REST producers (Sections B.1-B.9)
+requests==2.31.0
 
-# --- Testing & Quality ---
-pytest                 # להרצת בדיקות יחידה אם תרצו
+
+# ----------------------------------------------------------
+# Kafka Client (Section 3, 8.2)
+# ----------------------------------------------------------
+
+# Maintained fork of kafka-python with active bug fixes.
+# Must be compatible with Kafka broker 3.7.0 (docker-compose.yml).
+kafka-python-ng==2.2.3
+
+
+# ----------------------------------------------------------
+# Ingestion — Source-Specific Libraries
+# ----------------------------------------------------------
+
+# Polymarket — WebSocket client for real-time CLOB stream (Section B.8)
+websockets==12.0
+
+# Telegram — MTProto streaming via Telethon (Section A.1)
+telethon==1.36.0
+
+# Reddit — PRAW streaming API wrapper (Section A.2)
+praw==7.7.1
+
+# Hacker News — Algolia REST API; no dedicated library needed.
+# Uses requests directly. Listed here for dependency clarity (Section B.2).
+# (no extra package)
+
+# ArXiv — official Python wrapper handles pagination and rate limits (Section B.1)
+arxiv==2.1.0
+
+# Google Trends — Pytrends wraps Google's unofficial API (Section B.5)
+pytrends==4.9.2
+
+# FRED — Federal Reserve economic data API wrapper (Section B.3)
+# Wraps the /fred/series/observations endpoint; handles series pagination.
+fredapi==0.5.2
+
+# OpenWeather — REST API; uses requests directly (Section B.6)
+# (no extra package)
+
+# OpenSky — REST API with bounding box filtering (Section B.7)
+# Uses requests directly; no official Python client pinned.
+# (no extra package)
+
+# PredictIt — public REST API; uses requests directly (Section B.9)
+# (no extra package)
+
+# Article scraping — post-Silver full-text enrichment layer (Sprint 15)
+# Fetches full article text from scrapable outlets (BBC, Guardian, ToI, JPost,
+# Ynetnews, i24news) to enrich knowledge_vault.full_text_raw for RAG quality.
+newspaper4k==0.9.5
+
+
+# ----------------------------------------------------------
+# Processing — Apache Flink / PyFlink (Section 4)
+# ----------------------------------------------------------
+# NOTE: PyFlink is NOT installed in the local venv.
+# Flink runs exclusively inside Docker containers (Section 8.2).
+# Flink job Python files are submitted to the JobManager container,
+# which has apache-flink pre-installed in its own image.
+# No host-side PyFlink install is required or desired.
+
+
+# ----------------------------------------------------------
+# AI & Enrichment (Section 4.2)
+# ----------------------------------------------------------
+
+# OpenAI SDK — GPT-4o for Cognitive Metadata Extraction,
+# Consensus Bundling, and real-time translation (Section 4.2A).
+# Async client (AsyncOpenAI) used inside Flink Async I/O operators.
+# Lower bound: langchain-openai requires >=1.109.1.
+# Upper bound: <3.0.0 guards against breaking API changes in a future major.
+openai>=1.109.1,<3.0.0
+httpx>=0.27.0,<0.28.0      # openai 1.x passes 'proxies' to httpx.Client; removed in httpx 0.28
+
+# Token counting — used to enforce OpenAI TPM quotas (Section 4.3)
+tiktoken==0.7.0
+
+
+# ----------------------------------------------------------
+# Storage — PostgreSQL + pgvector (Section 5)
+# ----------------------------------------------------------
+
+# PostgreSQL driver — used by utils/db.py connection pool (Section 3.2)
+# Binary distribution bundles libpq — no system-level install required.
+psycopg2-binary==2.9.9
+
+# pgvector Python client — helpers for inserting vector(1536) columns
+# and building HNSW query parameters (Section 5.2)
+pgvector==0.3.2
+
+
+# ----------------------------------------------------------
+# Observability (Section 7.2)
+# ----------------------------------------------------------
+
+# Structured JSON logging — all log output is JSON for Google Cloud Logging
+# compatibility. Sampling logic (1% INFO, 100% ERROR) built on top (Section 7.2).
+python-json-logger==2.0.7
+
+
+# ----------------------------------------------------------
+# Agentic Hub (Section 8)
+# ----------------------------------------------------------
+
+# Firebase Admin SDK — Firestore reads/writes, atomic transactions
+# (db.transaction() for claim_query), and snapshot listeners for the
+# forecastQueries collection (Section 8.7, 8.8).
+# ADC in dev (gcloud auth application-default login); service-account
+# JSON via GOOGLE_APPLICATION_CREDENTIALS in prod.
+firebase-admin==6.5.0
+
+# LangGraph — StateGraph orchestration for the forecast pipeline
+# (Section 8.3). Sprint 18 stub: claim -> running -> write stub -> done.
+# Later sprints (19-25) add real nodes: query_understand, vault_query,
+# sufficiency_check, synthesize, etc. ForecastState (agent/state.py)
+# is a TypedDict consumed by StateGraph.
+langgraph==0.2.39
+
+# LangChain OpenAI — ChatOpenAI / OpenAIEmbeddings used by the
+# LLM-calling nodes (Sprints 19-23). Compatible with openai>=1.109.1
+# already pinned above and with langgraph 0.2.x.
+langchain-openai==0.2.8
+
+
+# ----------------------------------------------------------
+# Testing (Section 9.3)
+# ----------------------------------------------------------
+
+# Test runner — Triple-Gate tests in tests/test_ingestion,
+# test_processing, test_persistence (Section 9.3)
+pytest==8.1.1
+
+# Async test support — required for testing Telethon/WebSocket producers
+# and OpenAI async calls in Flink job unit tests (Section 4.4)
+pytest-asyncio==0.23.6

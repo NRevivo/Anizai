@@ -1,0 +1,288 @@
+# ==========================================================
+# Anizai Data Pipeline — Custom Flink Image (Section 8.2)
+# ==========================================================
+# WHY a custom image: the upstream apache/flink:1.19.1-java11 image ships
+# only the Java runtime. It has no Python, no PyFlink, and no Kafka connector
+# JAR. All Phase 5 processing jobs (translation.py, consensus.py, gold_job.py)
+# are written in PyFlink and require all three additions.
+#
+# This image is deployed to BOTH flink-jobmanager and flink-taskmanager.
+# Both containers must be identical so the Python operator code that the
+# JobManager compiles is byte-for-byte the same as what the TaskManager runs.
+#
+# Python version rationale: PyFlink 1.19.x officially supports Python 3.8–3.11.
+# Python 3.12 support was added in PyFlink 1.20. Using 3.12 inside a 1.19
+# container causes the apache-flink pip install to fail or produce runtime
+# errors in the Py4J bridge. Do NOT upgrade Python to 3.12 without also
+# upgrading Flink to 1.20+ and re-validating all processing jobs.
+#
+# Kafka connector strategy: flink-sql-connector-kafka is the uber-jar variant.
+# It bundles kafka-clients, serializers, and all Kafka-side dependencies into
+# a single JAR. The thin flink-connector-kafka alternative requires kafka-clients
+# and other JARs to be co-located — the uber-jar eliminates that classpath risk.
+#
+# Source code is COPY'd at build time for immutable, reproducible builds.
+# A dev-mode volume override can be added to docker-compose.yml if rapid
+# iteration without rebuilding is needed during Phase 5 development.
+#
+# EXACTLY_ONCE checkpointing (Section 4.3) is configured via FLINK_PROPERTIES
+# in docker-compose.yml. This Dockerfile does not override those settings —
+# it is purely additive (Python + JARs + source code).
+#
+# References:
+#   Section 8.2: Core services, custom Flink image requirements
+#   Section 4.3: EXACTLY_ONCE checkpointing, 60s interval, state backend
+#   Section 9.1: Pinned dependency versions, reproducible builds
+# ==========================================================
+
+FROM apache/flink:1.19.1-java11
+# Base: eclipse-temurin:11-jre-jammy (Ubuntu 22.04 Jammy Jellyfish).
+# Pin: 1.19.1-java11 — exact patch version, not the floating 1.19-java11 tag.
+# If a newer 1.19.x patch is released, update this line AND apache-flink
+# pip version below to match.
+
+
+# ==========================================================
+# LAYER 1 — System packages
+# ==========================================================
+# python3.11     : interpreter; Ubuntu 22.04 universe repo ships 3.11 natively
+# python3.11-dev : C headers for building pip extensions (tiktoken Rust ext, etc.)
+# wget           : used in LAYER 2 to download the Kafka connector JAR
+#
+# WHY NOT python3.12: see file header. Pin to 3.11 until Flink is upgraded to 1.20.
+# WHY NOT python3-pip: system pip is wired to Python 3.10 (Ubuntu default).
+#   We bootstrap pip for Python 3.11 via ensurepip in LAYER 3 instead.
+# ==========================================================
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-dev \
+        wget \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# ==========================================================
+# LAYER 2 — Python 3.11 as system default
+# ==========================================================
+# Ubuntu 22.04 ships Python 3.10 as default. update-alternatives registers
+# python3.11 with priority 10, which beats the default 3.10 registration.
+# Both `python3` and `python` now resolve to /usr/bin/python3.11.
+# This is required so that `flink run -py` subprocess calls use 3.11.
+# ==========================================================
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 10 && \
+    update-alternatives --install /usr/bin/python  python  /usr/bin/python3.11 10
+
+
+# ==========================================================
+# LAYER 3 — pip for Python 3.11
+# ==========================================================
+# WHY NOT ensurepip: Ubuntu 22.04 deliberately patches out ensurepip from
+# system Python packages (python3.11, python3.10, etc.) to prevent users
+# from bypassing APT. Running `python3.11 -m ensurepip` raises
+# "No module named ensurepip" on any Ubuntu Jammy python3.x package.
+#
+# FIX: get-pip.py from bootstrap.pypa.io is the standard Docker workaround.
+# It installs pip directly into python3.11's site-packages without requiring
+# ensurepip. wget is already installed in LAYER 1.
+#
+# We use `python3.11 -m pip` (not `pip3`) everywhere below to guarantee
+# all packages land in python3.11's site-packages, not python3.10's.
+# ==========================================================
+RUN wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py && \
+    python3.11 /tmp/get-pip.py && \
+    rm /tmp/get-pip.py && \
+    python3.11 -m pip install --upgrade pip
+
+
+# ==========================================================
+# LAYER 4 — Kafka SQL Connector JAR (Section 8.2)
+# ==========================================================
+# flink-sql-connector-kafka 3.3.0-1.19: latest connector release for Flink 1.19.x.
+# Placed in /opt/flink/lib/ — Flink's classloader scans this directory at
+# startup and auto-registers KafkaSource / KafkaSink factories.
+#
+# The uber-jar bundles kafka-clients 3.x, so no separate kafka-clients JAR
+# is needed. This single JAR satisfies Section 8.2's Kafka connector requirement.
+#
+# Source: Apache Flink connector release on Maven Central.
+# Version format: {connector-major}.{connector-minor}.{patch}-{flink-minor}
+# ==========================================================
+RUN wget -q \
+    -O /opt/flink/lib/flink-sql-connector-kafka-3.3.0-1.19.jar \
+    "https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.3.0-1.19/flink-sql-connector-kafka-3.3.0-1.19.jar"
+
+
+# ==========================================================
+# LAYER 4B — Prometheus Metrics Reporter plugin (Section 7.2)
+# ==========================================================
+# WHY a separate layer: the PrometheusReporter JAR ships inside the base image
+# at /opt/flink/opt/flink-metrics-prometheus-*.jar but Flink's plugin classloader
+# only scans /opt/flink/plugins/<subdirectory>/ — it never looks in opt/.
+#
+# The FLINK_PROPERTIES entry `metrics.reporter.prom.factory.class` configures
+# WHICH reporter to use, but Flink will fail silently with "no reporter named prom"
+# unless the JAR is discoverable in the plugins/ tree AND
+# `metrics.reporters: prom` is set (the activation list).
+#
+# WHY wildcard cp: the JAR filename includes the patch version
+# (flink-metrics-prometheus-1.19.1.jar). A glob avoids hard-coding the patch
+# so this layer still works if the base image is updated to 1.19.2+.
+#
+# References:
+#   Section 7.2: Prometheus scrape on port 9249, PrometheusReporter plugin
+#   Section 8.2: Flink image requirements — plugins must be in /opt/flink/plugins/
+# ==========================================================
+RUN mkdir -p /opt/flink/plugins/metrics-prometheus && \
+    wget -q \
+        -O /opt/flink/plugins/metrics-prometheus/flink-metrics-prometheus-1.19.1.jar \
+        "https://repo1.maven.org/maven2/org/apache/flink/flink-metrics-prometheus/1.19.1/flink-metrics-prometheus-1.19.1.jar"
+
+
+# ==========================================================
+# LAYER 5 — PyFlink (Section 4.3, 8.2)
+# ==========================================================
+# Installed BEFORE requirements.txt so Docker layer caching can skip this
+# slow step (~5–10 min download + install) when only application code changes.
+#
+# Version must match the Flink cluster version (1.19.1) exactly.
+# The pip package provides the Python API and Py4J bridge; the Java JARs are
+# already in the base image at /opt/flink/lib/. PyFlink locates them via
+# the FLINK_HOME=/opt/flink environment variable set in the base image.
+# ==========================================================
+RUN python3.11 -m pip install --no-cache-dir apache-flink==1.19.1
+
+
+# ==========================================================
+# LAYER 6 — Python runtime dependencies
+# ==========================================================
+# Full requirements.txt is installed. Flink processing jobs need:
+#   openai / httpx / tiktoken    — GPT-4o enrichment (Section 4.2A)
+#   psycopg2-binary / pgvector   — PostgreSQL vault writes (Section 5)
+#   kafka-python-ng              — DLQ producer inside Flink jobs (Section 3.5)
+#   python-dotenv                — .env loading in config/settings.py (Section 9.1)
+#   python-json-logger           — structured logging (Section 7.2)
+#
+# Ingestion-only packages (websockets, telethon, praw, arxiv, pytrends, fredapi)
+# are installed but never imported by Flink jobs — they are harmless no-ops.
+# Keeping the full requirements.txt avoids a divergence between this Dockerfile
+# and the producer Dockerfiles that will be added in Phase 6A.
+#
+# apache-flink is already installed in LAYER 5; pip skips the duplicate
+# unless the version specifier conflicts (it does not — same pinned version).
+# ==========================================================
+COPY requirements.txt /tmp/requirements.txt
+RUN python3.11 -m pip install --no-cache-dir -r /tmp/requirements.txt
+
+
+# ==========================================================
+# LAYER 7 — Project source code
+# ==========================================================
+# Copied to /opt/flink/usrlib/ — the conventional PyFlink user library path.
+# PYTHONPATH (set below) makes all project modules importable without
+# sys.path manipulation in job submission scripts.
+#
+# Five directories are required by processing jobs at runtime:
+#   config/     — settings.py, kafka_topics.py — env vars + topic constants
+#                 (Section 9.1, 3.1)
+#   utils/      — db.py, kafka_utils.py, validators.py — shared utilities
+#                 (Section 3.2 DRY contract)
+#   processing/ — silver_job.py, gold_job.py, keyword_sniper.py, deduplication.py,
+#                 translation.py, consensus.py, momentum.py — all Flink jobs
+#                 (Section 4)
+#   persistence/— knowledge_vault.py, knowledge_vectors.py, social_vault.py,
+#                 social_vectors.py, momentum_vault.py, mapping_dict.py
+#                 (Section 5)
+#   prompts/    — cognitive_metadata.py, consensus_summary.py — AI prompt
+#                 templates used by Gold Job async enrichment (Section 4.2)
+#
+# WHY NOT mount as volume: volume mounts require the source tree to exist at
+# the same path on every host and lose reproducibility guarantees. COPY
+# at build time means the image is self-contained — same behaviour on any
+# machine and in GCP production (Section 9.1 parity requirement).
+# ==========================================================
+COPY config/       /opt/flink/usrlib/config/
+COPY utils/        /opt/flink/usrlib/utils/
+COPY processing/   /opt/flink/usrlib/processing/
+COPY persistence/  /opt/flink/usrlib/persistence/
+COPY prompts/      /opt/flink/usrlib/prompts/
+
+# PYTHONPATH makes `from processing.silver_job import ...` work without any
+# sys.path.insert() calls in job code. Set at image level so it applies to
+# both `flink run -py` submissions and `docker exec python3 ...` invocations.
+ENV PYTHONPATH=/opt/flink/usrlib
+
+
+# ==========================================================
+# LAYER 8 — setuptools pin for pkg_resources compatibility
+# ==========================================================
+# WHY: get-pip.py installs the latest setuptools (82.x as of April 2026).
+# setuptools >= 81.0 removed the pkg_resources module from its package.
+# apache-flink's apache_beam execution dependency imports pkg_resources at
+# job submission time via pyflink.fn_execution.beam. Without pkg_resources,
+# every PyFlink job fails with ModuleNotFoundError on the first Python UDF.
+#
+# Fix: pin setuptools to 70.3.0 — last series to reliably include pkg_resources.
+# This satisfies apache-beam's `setuptools >= 65.5.1` constraint.
+# This layer is placed LAST so no subsequent pip step can re-upgrade setuptools.
+# If upgrading Flink to 1.20+, re-evaluate whether this pin is still needed.
+# ==========================================================
+RUN python3.11 -m pip install --no-cache-dir "setuptools==70.3.0"
+
+
+# ==========================================================
+# LAYER 9 — Directory permissions for the flink user
+# ==========================================================
+# Flink runs as uid 9999 ('flink', set in the base image). Three directories
+# must be owned by flink before any process starts:
+#
+#   /opt/flink/checkpoints  — Flink state snapshots. flink_checkpoints volume
+#                              is mounted here at container start; pre-creating
+#                              with flink ownership prevents "Permission denied"
+#                              when Docker initialises the mount point as root.
+#   /opt/flink/savepoints   — Same volume, savepoint subpath.
+#   /opt/flink/usrlib/data  — config/settings.py calls os.makedirs(DATA_DIR)
+#                              at import time (line 30). BASE_DIR resolves to
+#                              /opt/flink/usrlib inside this container, so
+#                              DATA_DIR = /opt/flink/usrlib/data. The COPY
+#                              layers above leave /opt/flink/usrlib/ root-owned;
+#                              without this pre-creation the Python worker process
+#                              fails immediately with:
+#                              PermissionError: [Errno 13] Permission denied:
+#                              '/opt/flink/usrlib/data'
+# ==========================================================
+RUN mkdir -p /opt/flink/checkpoints /opt/flink/savepoints \
+             /opt/flink/usrlib/data && \
+    chown -R flink:flink /opt/flink/checkpoints /opt/flink/savepoints \
+                         /opt/flink/usrlib/data
+
+
+# ==========================================================
+# LAYER 10 — Security: suppress env-var exposure in logs
+# ==========================================================
+# Root cause: org.apache.flink.python.env.process.ProcessPythonEnvironmentManager
+# logs the full subprocess environment at INFO level in Flink 1.19 when
+# starting Python UDF worker processes. The TaskManager inherits every env var
+# injected via env_file: in docker-compose.yml (OPENAI_API_KEY, POSTGRES_PASSWORD,
+# TELEGRAM_API_HASH, etc.), so a single INFO log line exposes all secrets.
+#
+# Fix: append logger suppression rules to the base image's log4j2.properties.
+# Sets the two Python env-manager loggers to WARN — errors still surface, but
+# the INFO-level env-var dump is silenced. No other Flink loggers are affected.
+#
+# printf is used instead of echo to avoid shell interpretation differences
+# between build environments. The leading \n ensures a clean line boundary
+# after whatever the base image's log4j2.properties ends with.
+#
+# References:
+#   Section 7.2: 100% ERROR capture; secrets must never appear in logs.
+#   Section 9.1: Parity — this suppression must apply in both dev and production.
+# ==========================================================
+RUN { \
+        printf '\n'; \
+        printf '# Security: suppress Python env manager INFO logs that expose secrets\n'; \
+        printf '# (ProcessPythonEnvironmentManager logs full subprocess env in Flink 1.19)\n'; \
+        printf 'logger.python_env.name = org.apache.flink.python.env\n'; \
+        printf 'logger.python_env.level = WARN\n'; \
+        printf 'logger.python_proc_env.name = org.apache.flink.python.env.process\n'; \
+        printf 'logger.python_proc_env.level = WARN\n'; \
+    } >> /opt/flink/conf/log4j2.properties

@@ -1,0 +1,23 @@
+{
+  "_comment": "Expected shape of a Silver Full-Text Document Store record produced by map_newsapi_article_to_silver() from the newsapi_article.json mock. Used by Gate 2 Silver tests for structural assertions. Hashes and UUIDs are illustrative — tests generate them live via process_newsapi_message(). Section C.3 / Section 4.4.",
+  "doc_id": "<uuid-generated-at-runtime>",
+  "document_hash": "<64-char-sha256-generated-at-runtime>",
+  "canonical_event_id": "<bronze-event_id>",
+  "full_text_raw": "VIENNA, March 31 (Reuters) - OPEC+ ministers agreed on Monday to maintain their current crude oil production cuts through the third quarter of 2026, keeping the alliance's collective reduction at 3.66 million barrels per day. [+1250 chars]",
+  "inverted_pyramid_lead": "OPEC+ ministers agreed on Monday to maintain their current crude oil production cuts through the third quarter of 2026, supporting oil prices amid global demand uncertainty.",
+  "source_name": "newsapi",
+  "original_url": "https://www.reuters.com/markets/commodities/opec-extends-output-cuts-q3-2026-03-31",
+  "author": "Ahmad Ghaddar",
+  "publish_date": "2026-03-31T10:15:00Z",
+  "detected_entities": [],
+  "relevance_score": 1.0,
+  "title": "OPEC agrees to extend crude oil output cuts through Q3 2026",
+  "source_display_name": "Reuters",
+  "category": "business",
+  "impact_boost": true,
+  "impact_boost_reason": "crude oil",
+  "sniper_keywords": ["<sorted list of matched keywords>"],
+  "is_high_signal": true,
+  "fetch_mode": "pulse",
+  "bronze_ref": "<bronze-event_id>"
+}

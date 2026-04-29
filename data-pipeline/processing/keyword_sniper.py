@@ -1,0 +1,501 @@
+"""
+Keyword Sniper Filter — SNR Optimization (Section 4.1A).
+
+Called by the Flink Silver Job before any heavy processing (OpenAI enrichment,
+embedding generation). Matches article text against the Master Keyword List and
+produces a relevance score based on keyword density and position. Only
+"High-Signal" articles (relevance_score >= threshold) proceed to Gold enrichment,
+significantly reducing downstream token costs.
+
+Why position-weighted scoring (not simple count):
+    A keyword in the headline carries far more signal than the same keyword
+    buried in a 2,000-word article body. A Reuters headline "NATO expands east"
+    is more actionable than an article that mentions "NATO" once in paragraph 12.
+    Title weight (2.0) > description weight (1.5) > content weight (1.0) reflects
+    this journalistic inverted-pyramid convention (Section C.3 inverted_pyramid_lead).
+
+Why not TF-IDF:
+    TF-IDF requires a corpus-level IDF table to be pre-computed and kept in sync
+    with the keyword list. For a fixed, domain-curated list of ~60 keywords,
+    simple position-weighted counting is simpler, fully interpretable, and
+    produces equally good SNR results for the geopolitical/financial domain.
+
+Scoring formula:
+    1. For each keyword in MASTER_KEYWORD_LIST, find the highest-weight field
+       where it appears (title > description > content). Count each keyword
+       only once — a keyword found in both title and description adds only
+       the title weight (2.0).
+    2. raw_score = sum of weights for all matched keywords
+    3. relevance_score = min(1.0, raw_score / SCORE_SATURATION)
+       where SCORE_SATURATION = 10.0.
+       This means 5 title hits → score = 1.0; 1 content hit → score = 0.1.
+    4. is_high_signal = (relevance_score >= threshold)
+
+Scope:
+    This module is the Silver-layer filter (Section 4.1A). The producer-level
+    pre-filter (newsapi_producer.py) does a simpler any() check on the 9
+    General-category keywords from Section B.4 to gate what enters Bronze.
+    This module applies full relevance scoring to everything that already
+    passed the Bronze gate, deciding what proceeds to OpenAI enrichment.
+
+Callers:
+    - processing/silver_job.py — map_newsapi_article_to_silver() (Task 3.4)
+    - processing/silver_job.py — map_arxiv_paper_to_silver() (Phase 4)
+
+References:
+    - Section 4.1A: Keyword Sniper Filter specification
+    - Section 2.2:  SNR Optimization — Domain Filtering Strategy
+    - Section B.4:  NewsAPI Keyword Sniper keywords (subset of Master Keyword List)
+    - Section C.3:  Silver Full-Text Document Store — relevance_score field
+    - Section C.5:  Gold Global Signal Schema — domain_context.sniper_keywords field
+    - Section 3.2:  DRY — shared processing logic centralized in processing/
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+
+# ==========================================================
+# Scoring Constants
+# ==========================================================
+
+# Position weights — reflects inverted-pyramid journalism convention (Section C.3).
+TITLE_WEIGHT       = 2.0   # Headline keywords are highest-signal
+DESCRIPTION_WEIGHT = 1.5   # Lede/summary paragraph
+CONTENT_WEIGHT     = 1.0   # Full body (may be truncated on some API plan tiers)
+
+# raw_score at which relevance_score is capped at 1.0.
+# 5 title hits = 5 * 2.0 = 10.0 → score = 1.0.
+# 1 content hit = 1.0 → score = 0.10 (just above default threshold of 0.09).
+SCORE_SATURATION = 10.0
+
+# Default relevance_score threshold for is_high_signal.
+# 0.09 = at least one content-body keyword match (score = 0.10 >= 0.09).
+# Callers may override per use-case (e.g., ArXiv papers may use a lower
+# threshold since abstract density is inherently lower than news headlines).
+DEFAULT_THRESHOLD = 0.09
+
+
+# ==========================================================
+# Master Keyword List (Section 4.1A, 2.2, B.4)
+# ==========================================================
+# Organized by domain for maintainability. All lowercase — matching is
+# case-insensitive. Multi-word phrases are matched as contiguous substrings.
+#
+# Expansion policy: add keywords here only for geopolitical, financial,
+# or scientific signals relevant to prediction market forecasting. Do NOT
+# add generic news terms (e.g., "news", "report", "official") — they
+# would eliminate the SNR benefit entirely.
+
+# Relationship to newsapi_producer.GENERAL_KEYWORDS:
+#   The 9 B.4 terms in ingestion/newsapi_producer.py (GENERAL_KEYWORDS) are a
+#   strict subset of this list. They serve as a coarse Bronze admission gate
+#   (Section 2.2). This list is the Silver-layer fine-grained scorer.
+#   If Section B.4 keywords change, update BOTH files.
+#   Importing this module from ingestion/ is prohibited — Section 3.3 Service Isolation.
+MASTER_KEYWORD_LIST: frozenset[str] = frozenset({
+
+    # --- Geopolitical Conflict & Security (Section 2.2, B.4) ---
+    "conflict",
+    "war",
+    "ceasefire",
+    "escalation",
+    "invasion",
+    "airstrike",
+    "strike",
+    "attack",
+    "bombing",
+    "missile",
+    "drone strike",
+    "drone",
+    "warship",
+    "naval",
+    "troops",
+    "military",
+    "armed forces",
+    "defense",
+    "sanctions",
+    "embargo",
+    "blockade",
+    "treaty",
+    "nato",
+    "alliance",
+    "coup",
+    "regime",
+
+    # --- Missile & Nuclear (Section B.4: Missile Defense) ---
+    "missile defense",
+    "nuclear",
+    "ballistic",
+    "hypersonic",
+    "icbm",
+    "uranium enrichment",
+    "plutonium",
+
+    # --- Regional Hotspots (Spec: high-signal geographies) ---
+    "israel",
+    "israeli",
+    "middle east",
+    "iran",
+    "hezbollah",
+    "hamas",
+    "gaza",
+    "west bank",
+    "ukraine",
+    "russia",
+    "taiwan",
+    "strait of taiwan",
+    "north korea",
+    "strait of hormuz",
+    "suez canal",
+    "red sea",
+    "bab al-mandab",
+    "south china sea",
+
+    # --- Energy & Commodities (Section 2.2, B.4) ---
+    "crude oil",
+    "opec",
+    "oil price",
+    "petroleum",
+    "natural gas",
+    "lng",
+    "pipeline",
+    "energy crisis",
+    "energy",
+    "oil supply",
+    "production cut",
+    "refinery",
+    "brent",
+    "wti",
+
+    # --- Prediction Markets & Betting (core project domain) ---
+    "polymarket",
+    "prediction markets",
+    "prediction market",
+    "kalshi",
+    "manifold",
+    "metaculus",
+    "futarchy",
+    "betting market",
+    "odds",
+    "forecast",
+
+    # --- AI & Machine Learning (dominant HN category, prediction-market relevant) ---
+    "artificial intelligence",
+    "machine learning",
+    "deep learning",
+    "large language model",
+    "llm",
+    "gpt",
+    "openai",
+    "anthropic",
+    "gemini",
+    "claude",
+    "generative ai",
+    "neural network",
+    "foundation model",
+    "ai safety",
+    "alignment",
+    "agi",
+    "reinforcement learning",
+    "fine-tuning",
+    "inference",
+
+    # --- Crypto & Digital Assets (major prediction-market category) ---
+    "bitcoin",
+    "ethereum",
+    "crypto",
+    "cryptocurrency",
+    "blockchain",
+    "defi",
+    "stablecoin",
+    "web3",
+    "token",
+    "nft",
+    "sec crypto",
+    "crypto regulation",
+    "etf",
+    "halving",
+
+    # --- Startups, VC & Corporate (HN core; affects economic predictions) ---
+    "startup",
+    "venture capital",
+    "funding round",
+    "series a",
+    "series b",
+    "ipo",
+    "acquisition",
+    "merger",
+    "valuation",
+    "unicorn",
+    "layoff",
+    "bankruptcy",
+    "earnings",
+    "revenue",
+    "profit warning",
+    "stock market",
+    "nasdaq",
+    "s&p",
+    "dow jones",
+
+    # --- Elections & Government Policy (core prediction-market category) ---
+    "election",
+    "presidential",
+    "vote",
+    "ballot",
+    "congress",
+    "senate",
+    "legislation",
+    "white house",
+    "supreme court",
+    "government shutdown",
+    "impeachment",
+    "tariff",
+    "trade war",
+    "geopolitics",
+    "foreign policy",
+
+    # --- Health, Science & Space (ArXiv + broader prediction markets) ---
+    "fda approval",
+    "clinical trial",
+    "vaccine",
+    "drug approval",
+    "cancer",
+    "biotech",
+    "spacex",
+    "nasa",
+    "rocket launch",
+    "nuclear energy",
+    "fusion energy",
+    "climate change",
+    "carbon emissions",
+    "earthquake",
+    "hurricane",
+    "natural disaster",
+
+    # --- Financial & Monetary Policy (Section B.4) ---
+    "interest rates",
+    "central bank",
+    "federal reserve",
+    "rate hike",
+    "rate cut",
+    "inflation",
+    "recession",
+    "gdp",
+    "unemployment",
+    "bond yield",
+    "treasury yield",
+    "yield curve",
+    "market crash",
+    "quantitative easing",
+    "monetary policy",
+    "currency crisis",
+    "debt ceiling",
+    "fiscal",
+    "default",
+    "volatility",
+    "vix",
+
+    # --- Technology & Regulatory Policy (Section B.4: AI Regulation) ---
+    "ai regulation",
+    "semiconductor",
+    "chip export",
+    "chip ban",
+    "export controls",
+    "technology restriction",
+    "cyber attack",
+    "cybersecurity",
+    "data breach",
+    "antitrust",
+    "big tech",
+
+    # --- Scientific / Systemic Risk (ArXiv scope: cs.AI, econ.GN, q-fin.PM) ---
+    "pandemic",
+    "outbreak",
+    "epidemic",
+    "public health emergency",
+    "climate risk",
+    "supply chain",
+    "food security",
+    "famine",
+})
+
+
+# ==========================================================
+# Result
+# ==========================================================
+
+@dataclass
+class SniperResult:
+    """
+    Output of snipe(). Contains all fields the Silver and Gold Jobs need.
+
+    Silver Job stores:
+        relevance_score → Silver document's relevance_score field (Section C.3)
+
+    Gold Job stores:
+        matched_keywords → domain_context.sniper_keywords (Section C.5)
+
+    Processing gate:
+        is_high_signal → if False, the Silver Job skips OpenAI enrichment
+                         and does not emit to the Gold topic (Section 4.1A)
+    """
+    is_high_signal:   bool
+    relevance_score:  float
+    matched_keywords: list[str] = field(default_factory=list)
+
+    # keyword_density is retained for audit/observability but not stored in DB.
+    # Silver Job logs it at DEBUG level; useful for tuning DEFAULT_THRESHOLD.
+    keyword_density: float = 0.0   # matched / total_unique_searched
+
+
+# ==========================================================
+# Core Sniper Function
+# ==========================================================
+
+def snipe(
+    title:       str,
+    description: str = "",
+    content:     str = "",
+    threshold:   float = DEFAULT_THRESHOLD,
+) -> SniperResult:
+    """
+    Score an article's text fields against the Master Keyword List.
+
+    Each keyword in MASTER_KEYWORD_LIST is scored at most once, using the
+    weight of the highest-ranked field in which it appears:
+        title weight (2.0) > description weight (1.5) > content weight (1.0)
+
+    Why deduplicate across fields: the same keyword in both title and
+    description should not double-count — the title occurrence already
+    signals maximum relevance for that term.
+
+    Args:
+        title:       Article headline or paper title (highest weight).
+        description: Lede paragraph, abstract, or snippet (medium weight).
+        content:     Full body text — may be truncated by API tier (low weight).
+        threshold:   Minimum relevance_score for is_high_signal=True.
+                     Default = 0.09 (at least one content-body keyword hit).
+                     Pass a lower value (e.g., 0.05) for ArXiv abstracts, which
+                     are denser but shorter than news articles.
+
+    Returns:
+        SniperResult with is_high_signal, relevance_score, matched_keywords,
+        and keyword_density.
+
+    Examples:
+        >>> r = snipe("NATO expands eastern flank amid Russia tensions", "")
+        >>> r.is_high_signal
+        True
+        >>> "nato" in r.matched_keywords
+        True
+        >>> r = snipe("Local sports team wins championship", "")
+        >>> r.is_high_signal
+        False
+    """
+    title_norm       = _normalise(title)
+    description_norm = _normalise(description)
+    content_norm     = _normalise(content)
+
+    raw_score         = 0.0
+    matched_keywords: list[str] = []
+
+    for keyword in MASTER_KEYWORD_LIST:
+        kw = keyword  # already lowercase in the frozenset
+
+        if _contains(title_norm, kw):
+            raw_score += TITLE_WEIGHT
+            matched_keywords.append(keyword)
+        elif _contains(description_norm, kw):
+            raw_score += DESCRIPTION_WEIGHT
+            matched_keywords.append(keyword)
+        elif _contains(content_norm, kw):
+            raw_score += CONTENT_WEIGHT
+            matched_keywords.append(keyword)
+
+    relevance_score  = min(1.0, raw_score / SCORE_SATURATION)
+    keyword_density  = len(matched_keywords) / len(MASTER_KEYWORD_LIST)
+    is_high_signal   = relevance_score >= threshold
+
+    return SniperResult(
+        is_high_signal=is_high_signal,
+        relevance_score=round(relevance_score, 4),
+        matched_keywords=sorted(matched_keywords),
+        keyword_density=round(keyword_density, 4),
+    )
+
+
+# ==========================================================
+# Convenience Wrapper — called by Silver Job with raw_payload dict
+# ==========================================================
+
+def snipe_article(raw_payload: dict, threshold: float = DEFAULT_THRESHOLD) -> SniperResult:
+    """
+    Convenience wrapper for Silver Job callers (Task 3.4, Phase 4).
+
+    Extracts title, description, and content from the Bronze raw_payload dict
+    produced by NewsAPIProducer._build_raw_payload() and calls snipe().
+
+    Why a wrapper instead of calling snipe() directly: keeps the Silver Job's
+    transform function clean — it passes the full raw_payload rather than
+    three separate string arguments, and this wrapper isolates the field-name
+    knowledge (e.g., "description" vs "abstract" for ArXiv in Phase 4).
+
+    Args:
+        raw_payload: Bronze raw_payload dict. Expected keys: "title",
+                     "description", "content". Missing keys silently default
+                     to empty string — caller must ensure payload type is
+                     a document (not a structured_metric) before calling.
+        threshold:   Passed through to snipe(). Defaults to DEFAULT_THRESHOLD.
+
+    Returns:
+        SniperResult
+    """
+    return snipe(
+        title=raw_payload.get("title", ""),
+        description=raw_payload.get("description", ""),
+        content=raw_payload.get("content", ""),
+        threshold=threshold,
+    )
+
+
+# ==========================================================
+# Internal Helpers
+# ==========================================================
+
+def _normalise(text: str) -> str:
+    """
+    Lowercase and collapse whitespace for consistent keyword matching.
+
+    Why collapse whitespace: API responses occasionally contain double spaces,
+    non-breaking spaces, or tab characters. Collapsing ensures multi-word
+    keywords like "crude oil" always match regardless of minor whitespace
+    variations in the source text.
+    """
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text.lower().strip())
+
+
+def _contains(text: str, keyword: str) -> bool:
+    """
+    Return True if keyword appears as a word-boundary-safe substring in text.
+
+    Why not a simple `in` check: "war" would match "award", "aware", "forward".
+    Word-boundary anchoring prevents false positives on short keywords.
+
+    Implementation: `\\b` regex anchors work for single-word keywords.
+    For multi-word phrases (e.g., "crude oil"), both words already provide
+    natural boundary context so the phrase match is unambiguous.
+    """
+    if not text or not keyword:
+        return False
+    # Multi-word phrases: use simple substring match — the phrase boundary
+    # is inherently unambiguous (e.g., "crude oil" won't match "crude oily").
+    if " " in keyword:
+        return keyword in text
+    # Single-word keywords: use word-boundary regex to avoid partial matches.
+    pattern = r"\b" + re.escape(keyword) + r"\b"
+    return bool(re.search(pattern, text))
