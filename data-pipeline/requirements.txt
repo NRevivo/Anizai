@@ -127,6 +127,30 @@ python-json-logger==2.0.7
 
 
 # ----------------------------------------------------------
+# Agentic Hub (Section 8)
+# ----------------------------------------------------------
+
+# Firebase Admin SDK — Firestore reads/writes, atomic transactions
+# (db.transaction() for claim_query), and snapshot listeners for the
+# forecastQueries collection (Section 8.7, 8.8).
+# ADC in dev (gcloud auth application-default login); service-account
+# JSON via GOOGLE_APPLICATION_CREDENTIALS in prod.
+firebase-admin==6.5.0
+
+# LangGraph — StateGraph orchestration for the forecast pipeline
+# (Section 8.3). Sprint 18 stub: claim -> running -> write stub -> done.
+# Later sprints (19-25) add real nodes: query_understand, vault_query,
+# sufficiency_check, synthesize, etc. ForecastState (agent/state.py)
+# is a TypedDict consumed by StateGraph.
+langgraph==0.2.39
+
+# LangChain OpenAI — ChatOpenAI / OpenAIEmbeddings used by the
+# LLM-calling nodes (Sprints 19-23). Compatible with openai>=1.109.1
+# already pinned above and with langgraph 0.2.x.
+langchain-openai==0.2.8
+
+
+# ----------------------------------------------------------
 # Testing (Section 9.3)
 # ----------------------------------------------------------
 

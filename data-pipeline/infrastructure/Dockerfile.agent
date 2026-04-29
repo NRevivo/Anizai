@@ -1,0 +1,122 @@
+# ==========================================================
+# Anizai Agentic Hub — Worker Image (Section 8.10)
+# ==========================================================
+# WHY a separate image: the hub is a logically independent service from
+# the rest of the data pipeline (different deployment unit, different
+# lifecycle, Firestore worker rather than a Kafka producer or Flink job).
+# It needs only the agent/ source tree and a small subset of
+# requirements.txt; baking the full pipeline into the image would carry
+# kafka-python-ng, telethon, praw, psycopg2-binary, and other unrelated
+# dependencies that the worker never imports.
+#
+# Sprint 18 scope (image-size note): we still install the FULL
+# requirements.txt for simplicity. The hub-only subset is
+# python-dotenv + firebase-admin + langgraph + langchain-openai
+# (~30MB of wheels) but the rest of requirements.txt adds ~150-200MB
+# we don't strictly need. Splitting into requirements-agent.txt is a
+# Sprint 26 hardening optimization — flagged here so it's not lost.
+#
+# Build context: data-pipeline/ root (one level up from infrastructure/).
+#   docker build -f infrastructure/Dockerfile.agent -t anizai-agent:test .
+# (run from inside data-pipeline/)
+#
+# Entry point: `python -m agent.worker`
+#   - Snapshot listener on forecastQueries where status=='pending'
+#   - SIGTERM/SIGINT drain (sets shutdown_event, finishes current doc,
+#     unsubscribes the watch, exits)
+#   - Health server on HUB_HEALTH_PORT (default 8000)
+#
+# Entry point intentionally has NO shell wrapper — exec form means
+# SIGTERM goes straight to the Python process, not to a shell that
+# would swallow it. Section 8.8.2 lifecycle relies on this.
+#
+# References:
+#   Section 8.10: hub deployment, container image
+#   Section 8.11: HUB_HEALTH_HOST/PORT environment contract
+#   Section 9.1:  pinned dependency versions, reproducible builds
+# ==========================================================
+
+FROM python:3.12-slim
+# Base: python:3.12-slim (Debian-based). Matches the local venv version.
+# Slim variant is ~120MB; alpine variant rejected because grpcio (a
+# transitive dep of firebase-admin) doesn't ship reliable musl wheels
+# and would force a slow source build.
+
+
+# ==========================================================
+# LAYER 1 — Python runtime configuration
+# ==========================================================
+# PYTHONUNBUFFERED=1     stdout/stderr flush immediately; without this,
+#                        log lines stay buffered until the process exits,
+#                        making `docker logs` useless during long-running
+#                        worker sessions and breaking real-time debugging.
+# PYTHONDONTWRITEBYTECODE=1
+#                        no .pyc files. The agent/ source is read-only
+#                        once the image is built; .pyc generation just
+#                        clutters the layer with files Docker can't dedupe.
+# ==========================================================
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+
+# ==========================================================
+# LAYER 2 — Working directory
+# ==========================================================
+WORKDIR /app
+
+
+# ==========================================================
+# LAYER 3 — System packages
+# ==========================================================
+# None required. firebase-admin's transitive deps (grpcio, protobuf,
+# google-cloud-firestore, cryptography) all ship binary wheels for
+# linux/amd64 cpython 3.12. No gcc/build-essential needed.
+#
+# curl deliberately NOT installed — the docker-compose healthcheck (T9)
+# uses Python's stdlib urllib instead of curl, saving ~6MB and avoiding
+# an APT layer.
+# ==========================================================
+
+
+# ==========================================================
+# LAYER 4 — Python dependencies
+# ==========================================================
+# Copied and installed BEFORE the source tree so that subsequent edits
+# to agent/ don't bust the deps layer (the slow one).
+#
+# --no-cache-dir: pip's wheel cache is irrelevant in a single-shot
+# image build; skipping it shaves ~50MB off the layer.
+# ==========================================================
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+
+# ==========================================================
+# LAYER 5 — Agent source tree
+# ==========================================================
+# Only agent/ — pipeline modules (producers/, processing/, persistence/,
+# utils/, config/, prompts/) are intentionally excluded. The hub does
+# not import them, so excluding them keeps the image scoped and reduces
+# blast radius if a pipeline file ever leaks credentials in a comment
+# or default value.
+#
+# Note that agent/config/ is the hub's OWN config package
+# (agent/config/__init__.py + agent/config/settings.py — the 24 hub env
+# vars per §8.11, Patch 14), distinct from the pipeline's config/
+# directory at the repo root.
+# ==========================================================
+COPY agent/ /app/agent/
+
+
+# ==========================================================
+# LAYER 6 — Entry point
+# ==========================================================
+# Exec form (JSON array). Critical: shell form would wrap the Python
+# process under /bin/sh -c, and Docker SIGTERM goes to the shell, not
+# the worker. T6's drain logic relies on the worker receiving signals
+# directly so its handler can set _shutdown_event.
+#
+# `python -m agent.worker` resolves agent/worker.py:main() via the
+# __main__ guard at the bottom of the file.
+# ==========================================================
+CMD ["python", "-m", "agent.worker"]

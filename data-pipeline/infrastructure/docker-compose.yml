@@ -644,6 +644,79 @@ services:
       start_period: 15s
 
   # ----------------------------------------------------------
+  # 13. AGENT WORKER — Agentic Hub (Section 8.10)
+  # ----------------------------------------------------------
+  # Forecast worker: subscribes to Firestore forecastQueries where
+  # status=='pending', atomically claims a doc, processes it through
+  # process_query (Sprint 18 stub; real LangGraph reasoning in Sprint 19+),
+  # and writes a SessionResult. See agent/worker.py for the lifecycle.
+  #
+  # Sprint 18 dev model: the service is defined here for T13 manual
+  # validation, but day-to-day Sprint 18 development runs the worker
+  # host-side against a host-side Firestore emulator (per T1 decision).
+  # When the container does run, FIRESTORE_EMULATOR_HOST below uses
+  # host.docker.internal so it still reaches the host-side emulator.
+  #
+  # extra_hosts: explicit host-gateway mapping makes host.docker.internal
+  # resolve on Linux. Docker Desktop (Mac/Windows) resolves it natively;
+  # Linux requires the explicit alias.
+  #
+  # depends_on: omitted — the hub doesn't talk to Postgres in Sprint 18
+  # (vault reads land Sprint 19+), doesn't talk to Kafka, and the
+  # Firestore emulator runs host-side so compose can't depend on it.
+  #
+  # restart: unless-stopped pairs with worker.py's listener-error
+  # exit-non-zero policy: any fatal listener error becomes a container
+  # restart, surfaced via Docker's restart-counter (Section 8.8.2).
+  # ----------------------------------------------------------
+  agent-worker:
+    build:
+      # Same convention as flink-jobmanager / airflow-scheduler: build
+      # context is data-pipeline/ (parent of infrastructure/).
+      context: ..
+      dockerfile: infrastructure/Dockerfile.agent
+    image: anizai-agent:0.1.0
+    container_name: anizai-agent-worker
+    env_file: .env
+    environment:
+      # Container-only override — host-side workers default to
+      # localhost:8080 via the unset/.env value (per Sprint 18 T9 decision:
+      # FIRESTORE_EMULATOR_HOST is NOT set in the shared .env so host
+      # Python doesn't try to resolve host.docker.internal).
+      FIRESTORE_EMULATOR_HOST: host.docker.internal:8080
+      # Bind health server to all interfaces inside the container so
+      # the host port mapping below reaches it. settings.py already
+      # defaults to 0.0.0.0; this is belt-and-suspenders.
+      HUB_HEALTH_HOST: 0.0.0.0
+    extra_hosts:
+      # Linux requires explicit host-gateway aliasing for
+      # host.docker.internal. Mac/Windows Docker Desktop handles it natively.
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"  # HUB_HEALTH_PORT — internal monitoring only
+    networks:
+      - anizai-network
+    restart: unless-stopped
+    healthcheck:
+      # Python urllib instead of curl — curl is intentionally not
+      # installed in the agent image (Dockerfile.agent LAYER 3 note).
+      # status==200 only counts ready: /health returns 503 during
+      # 'starting' and 'draining' states, so start_period must cover
+      # the worst-case init_app + listener-subscribe time.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/health',timeout=2); sys.exit(0 if r.status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # Production-only — uncomment and fill in when deploying outside
+    # the local emulator. Dev uses ADC against the emulator and does
+    # NOT need a service-account JSON file.
+    # volumes:
+    #   - /path/to/service-account.json:/secrets/sa.json:ro
+    # environment:  (merge with active environment block above)
+    #   GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa.json
+
+  # ----------------------------------------------------------
   # PRODUCERS — 11 independent containers (Section 8.2)
   # ----------------------------------------------------------
   # Uncomment each producer as its vertical slice is implemented.
