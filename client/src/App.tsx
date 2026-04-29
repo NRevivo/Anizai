@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signInWithPopup, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
 
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
@@ -15,26 +14,31 @@ import { BlogPage } from './pages/BlogPage';
 import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { CookiesPage } from './pages/CookiesPage';
-import { auth, googleProvider } from './lib/firebase';
-import { ApiAuthError } from './lib/api';
+import { StateMessage } from './components/ui/StateMessage';
+import { ApiError } from './lib/api';
 import {
-  fetchCurrentUser,
+  getDemoUserProfile,
   updateUserPlan,
   type UserPlan,
   type UserProfile,
 } from './services/user.service';
 import {
   addSessionMessage,
+  clarifySession,
+  type ClarificationCandidate,
   createSession,
   deleteSession,
   fetchSessionDetail,
   fetchSessions,
+  subscribeToAgentEvents,
+  subscribeToSessionMessages,
   type SessionDetail,
+  type SessionMessage,
   type SessionListItem,
   type SessionStatus,
 } from './services/session.service';
 import { fetchTrendingForecasts, type TrendingForecast } from './services/trending.service';
-import type { ChatMessage, Prediction, PredictionSession, SentimentDataPoint, TimelineEvent } from './types';
+import type { AgentEvent, ChatMessage, Prediction, PredictionSession, SentimentDataPoint, TimelineEvent } from './types';
 
 type AppState =
   | 'landing'
@@ -76,14 +80,17 @@ function mapSessionStatus(status: SessionStatus, confidence: number | null): 'st
   }
   return 'stable';
 }
+void mapSessionStatus;
 
 function toSidebarSession(session: SessionListItem): PredictionSession {
   return {
     id: session.id,
     question: session.title ?? session.question,
     // Pass 0–1 float directly — display conversion happens in formatProbability
-    probability: session.latestProbability ?? 0,
-    status: mapSessionStatus(session.status, session.latestConfidence),
+    probability: session.latestProbability,
+    status: session.status,
+    errorMessage: session.errorMessage,
+    clarificationCandidates: session.clarificationCandidates,
     lastUpdated: new Date(session.lastActivityAt || session.updatedAt || session.createdAt),
   };
 }
@@ -100,18 +107,49 @@ function toPrediction(detail: SessionDetail | null): Prediction | null {
     detail.result?.detailedExplanation ??
     detail.result?.bottomLineAnswer ??
     detail.result?.summaryMarkdown ??
-    'Analysis in progress.';
+    'Forecast is still being prepared.';
 
   return {
     id: detail.session.id,
     question: detail.session.question,
     probability,
     confidenceIndex: confidence,
-    status: mapSessionStatus(detail.session.status, detail.session.latestConfidence),
+    status: detail.session.status,
     explanation,
-    marketProbability: detail.result?.marketProbability ?? undefined,
+    marketProbability: detail.result?.marketProbability ?? null,
+    errorMessage: detail.session.errorMessage,
+    clarificationCandidates: detail.session.clarificationCandidates,
+    keyFactors: detail.result?.keyFactors ?? [],
+    whatIDidntFind: detail.result?.whatIDidntFind ?? [],
+    reasoningChain: detail.result?.reasoningChain ?? [],
+    suggestedActions: detail.result?.suggestedActions ?? [],
+    generatedAt: detail.result?.generatedAt ? new Date(detail.result.generatedAt) : null,
+    agentVersion: detail.result?.agentVersion ?? null,
+    tier: detail.result?.tier ?? null,
     createdAt: new Date(detail.session.createdAt),
     updatedAt: new Date(detail.session.updatedAt),
+  };
+}
+
+interface ActiveSessionState {
+  id: string;
+  question: string;
+  status: SessionStatus;
+  errorMessage: string | null;
+  clarificationCandidates: ClarificationCandidate[] | null;
+}
+
+function toActiveSessionState(detail: SessionDetail | null): ActiveSessionState | null {
+  if (!detail) {
+    return null;
+  }
+
+  return {
+    id: detail.session.id,
+    question: detail.session.question,
+    status: detail.session.status,
+    errorMessage: detail.session.errorMessage,
+    clarificationCandidates: detail.session.clarificationCandidates,
   };
 }
 
@@ -135,14 +173,48 @@ function toTimelineEvents(detail: SessionDetail | null): TimelineEvent[] {
     return [];
   }
 
+  const mapEvidenceSourceType = (evidence: SessionDetail['evidence'][number]): TimelineEvent['sourceType'] => {
+    switch (evidence.sourceType) {
+      case 'vault_news':
+      case 'online_news':
+        return 'news';
+      case 'vault_telegram':
+      case 'online_blog':
+      case 'vault_hackernews':
+        return 'social';
+      case 'vault_arxiv':
+        return 'expert';
+      case 'vault_market':
+      case 'vault_fred':
+        return 'market';
+      default:
+        return evidence.type === 'market' ? 'market' : evidence.type;
+    }
+  };
+
   return detail.evidence.map((evidence) => ({
     id: evidence.id,
+    evidenceId: evidence.evidenceId,
     date: new Date(evidence.publishedAt ?? evidence.createdAt).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
     }),
+    timestamp: evidence.publishedAt ? new Date(evidence.publishedAt) : new Date(evidence.createdAt),
     title: evidence.title,
-    sourceType: evidence.type === 'market' ? 'expert' : evidence.type,
+    sourceType: mapEvidenceSourceType(evidence),
+    source: evidence.source ?? evidence.sourceId,
+    origin: evidence.origin,
+    sourceDomain: evidence.sourceDomain,
+    snippet: evidence.snippet,
+    url: evidence.url,
+    fetchedAt: evidence.fetchedAt ? new Date(evidence.fetchedAt) : null,
+    relevanceScore: evidence.relevanceScore,
+    credibilityTier: evidence.credibilityTier,
+    recencyWeight: evidence.recencyWeight,
+    usedInAnswer: evidence.usedInAnswer,
+    impactOnForecast: evidence.impactOnForecast,
+    justification: evidence.justification,
+    rank: evidence.rank,
     impact: evidence.impact ?? 'neutral',
     impactLabel: evidence.impactLabel ?? undefined,
     isKeyEvidence: evidence.isKeyEvidence,
@@ -155,12 +227,17 @@ function toChatMessages(detail: SessionDetail | null): ChatMessage[] {
     return [];
   }
 
-  return detail.messages.map((message) => ({
+  return detail.messages.map(toChatMessage);
+}
+
+function toChatMessage(message: SessionMessage): ChatMessage {
+  return {
     id: message.id,
     role: message.role === 'system' ? 'assistant' : message.role,
     content: message.content,
     timestamp: new Date(message.createdAt),
-  }));
+    status: message.status === 'failed' ? 'failed' : 'sent',
+  };
 }
 
 function toTrendingView(items: TrendingForecast[]): TrendingQuestionView[] {
@@ -177,7 +254,7 @@ function toTrendingView(items: TrendingForecast[]): TrendingQuestionView[] {
       question: item.question ?? item.title ?? 'Untitled forecast',
       probability,
       trend,
-      context: `Popularity score: ${item.popularityScore}`,
+      context: `Popularity: ${item.popularityScore}`,
     };
   });
 }
@@ -193,6 +270,12 @@ function App() {
   const [trending, setTrending] = useState<TrendingForecast[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionDetail, setActiveSessionDetail] = useState<SessionDetail | null>(null);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [isAgentEventsLoading, setIsAgentEventsLoading] = useState(false);
+  const [sessionMessages, setSessionMessages] = useState<ChatMessage[] | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<ChatMessage[]>([]);
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
 
   const loadSession = useCallback(async (sessionId: string) => {
     const detail = await fetchSessionDetail(sessionId);
@@ -200,71 +283,98 @@ function App() {
     setActiveSessionDetail(detail);
   }, []);
 
-  const loadDashboardData = useCallback(async (preferredSessionId?: string | null) => {
+  useEffect(() => {
+    if (!activeSessionId) {
+      setAgentEvents([]);
+      setIsAgentEventsLoading(false);
+      return;
+    }
+
+    setIsAgentEventsLoading(true);
+
+    const unsubscribe = subscribeToAgentEvents(activeSessionId, {
+      onData: (events) => {
+        setAgentEvents(events);
+        setIsAgentEventsLoading(false);
+      },
+      onError: () => {
+        setAgentEvents([]);
+        setIsAgentEventsLoading(false);
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setSessionMessages(null);
+      setPendingMessages([]);
+      setIsMessagesLoading(false);
+      return;
+    }
+
+    setSessionMessages(null);
+    setPendingMessages([]);
+    setIsMessagesLoading(true);
+
+    const unsubscribe = subscribeToSessionMessages(activeSessionId, {
+      onData: (messages) => {
+        setSessionMessages(messages.map(toChatMessage));
+        setIsMessagesLoading(false);
+      },
+      onError: () => {
+        setSessionMessages(null);
+        setIsMessagesLoading(false);
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    setIsHydratingAuth(false);
+  }, []);
+
+  const enterDemoDashboard = useCallback(async () => {
+    setAuthError(null);
     setIsDashboardLoading(true);
 
     try {
-      const [profile, sessionsData, trendingData] = await Promise.all([
-        fetchCurrentUser(),
+      const [sessionsData, trendingData] = await Promise.all([
         fetchSessions(),
         fetchTrendingForecasts(20),
       ]);
 
-      setUserProfile(profile);
+      setUserProfile(getDemoUserProfile());
       setSessions(sessionsData);
       setTrending(trendingData);
 
-      const nextSessionId =
-        preferredSessionId && sessionsData.some((session) => session.id === preferredSessionId)
-          ? preferredSessionId
-          : sessionsData[0]?.id ?? null;
-
+      const nextSessionId = sessionsData[0]?.id ?? null;
       if (nextSessionId) {
         await loadSession(nextSessionId);
       } else {
         setActiveSessionId(null);
         setActiveSessionDetail(null);
       }
+
+      setAppState('dashboard');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not open the dashboard.');
     } finally {
       setIsDashboardLoading(false);
     }
   }, [loadSession]);
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUserProfile(null);
-        setSessions([]);
-        setTrending([]);
-        setActiveSessionId(null);
-        setActiveSessionDetail(null);
-        setAppState('landing');
-        setIsHydratingAuth(false);
-        return;
-      }
-
-      try {
-        setAuthError(null);
-        await loadDashboardData();
-        setAppState('dashboard');
-      } catch (error) {
-        if (error instanceof ApiAuthError) {
-          await signOut(auth);
-        }
-        setAuthError(error instanceof Error ? error.message : 'Failed to initialize session');
-      } finally {
-        setIsHydratingAuth(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [loadDashboardData]);
-
   const handleGoToLogin = () => {
     if (userProfile) {
       setAppState('dashboard');
     } else {
-      setAppState('login');
+      void enterDemoDashboard();
     }
   };
 
@@ -281,55 +391,25 @@ function App() {
   };
 
   const handleGoogleAuth = async () => {
-    try {
-      setAuthError(null);
-      await signInWithPopup(auth, googleProvider);
-      await loadDashboardData();
-      setAppState('dashboard');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Google sign-in failed');
-    }
+    await enterDemoDashboard();
   };
 
-  const handleEmailAuth = async (email: string, password?: string) => {
+  const handleEmailAuth = async (_email: string, password?: string) => {
     if (!password) {
       setAuthError('Password is required for email sign-in.');
       return;
     }
-    try {
-      setAuthError(null);
-      await signInWithEmailAndPassword(auth, email, password);
-      await loadDashboardData();
-      setAppState('dashboard');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Email sign-in failed');
-    }
+    await enterDemoDashboard();
   };
 
   const handleCreateAccount = async (payload: { name: string; email: string; password: string }) => {
-    try {
-      setAuthError(null);
-      const userCredential = await createUserWithEmailAndPassword(auth, payload.email, payload.password);
-      if (userCredential.user) {
-        await updateProfile(userCredential.user, { displayName: payload.name });
-        await userCredential.user.getIdToken(true);
-      }
-      await loadDashboardData();
-      setAppState('plan-selection');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Email sign-up failed');
-    }
+    setUserProfile({ ...getDemoUserProfile(), displayName: payload.name, email: payload.email });
+    setAppState('plan-selection');
   };
 
   const handleGoogleSignup = async () => {
-    try {
-      setAuthError(null);
-      await signInWithPopup(auth, googleProvider);
-      await loadDashboardData();
-      setAppState('plan-selection');
-    } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Google sign-up failed');
-    }
+    setUserProfile(getDemoUserProfile());
+    setAppState('plan-selection');
   };
 
   const handleSelectPlan = async (plan: UserPlan) => {
@@ -339,7 +419,7 @@ function App() {
       setUserProfile(updatedProfile);
       setAppState('dashboard');
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to update membership');
+      setAuthError(error instanceof Error ? error.message : 'Could not update your plan.');
     }
   };
 
@@ -358,7 +438,17 @@ function App() {
 
   const handleLogout = async () => {
     setAuthError(null);
-    await signOut(auth);
+    setUserProfile(null);
+    setSessions([]);
+    setTrending([]);
+    setActiveSessionId(null);
+    setActiveSessionDetail(null);
+    setAgentEvents([]);
+    setIsAgentEventsLoading(false);
+    setSessionMessages(null);
+    setPendingMessages([]);
+    setIsMessagesLoading(false);
+    setIsSendingMessage(false);
     setAppState('landing');
   };
 
@@ -374,22 +464,32 @@ function App() {
       setIsDashboardLoading(true);
       await loadSession(sessionId);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to load session');
+      setAuthError(error instanceof Error ? error.message : 'Could not load this forecast.');
     } finally {
       setIsDashboardLoading(false);
     }
   };
 
-  const handleCreateSession = async (question: string) => {
+  const handleCreateSession = async (question: string, idempotencyKey: string) => {
     try {
       setAuthError(null);
       setIsDashboardLoading(true);
-      const created = await createSession({ question });
+      const created = await createSession({ question, idempotencyKey });
       const sessionsData = await fetchSessions();
       setSessions(sessionsData);
       await loadSession(created.id);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to create session');
+      const message = error instanceof Error ? error.message : 'Could not create the forecast.';
+      if (error instanceof ApiError && error.code === 'PLAN_LIMIT_EXCEEDED') {
+        const details = error.details as { used?: number } | undefined;
+        if (typeof details?.used === 'number') {
+          const used = details.used;
+          setUserProfile((current) => current ? { ...current, monthlyForecastsUsed: used } : current);
+        }
+      } else {
+        setAuthError(message);
+      }
+      throw error instanceof Error ? error : new Error(message);
     } finally {
       setIsDashboardLoading(false);
     }
@@ -398,7 +498,7 @@ function App() {
   const handleSendMessage = async (message: string) => {
     const sessionId = activeSessionId;
     if (!sessionId) {
-      setAuthError('No active session selected.');
+      setAuthError('Select a forecast before sending a follow-up.');
       return;
     }
 
@@ -407,15 +507,59 @@ function App() {
       return;
     }
 
+    const optimisticMessage: ChatMessage = {
+      id: `pending-${Date.now()}`,
+      role: 'user',
+      content,
+      timestamp: new Date(),
+      status: 'pending',
+    };
+
     try {
       setAuthError(null);
-      await addSessionMessage(sessionId, {
+      setPendingMessages((current) => [...current, optimisticMessage]);
+      setIsSendingMessage(true);
+
+      const createdMessage = await addSessionMessage(sessionId, {
         role: 'user',
         content,
       });
+
+      setActiveSessionDetail((current) => {
+        if (!current || current.session.id !== sessionId) {
+          return current;
+        }
+
+        const nextMessages = current.messages.some((existing) => existing.id === createdMessage.id)
+          ? current.messages
+          : [...current.messages, createdMessage];
+
+        return {
+          ...current,
+          messages: nextMessages,
+        };
+      });
+    } catch (error) {
+      setPendingMessages((current) => current.filter((item) => item.id !== optimisticMessage.id));
+      setAuthError(error instanceof Error ? error.message : 'Could not save your follow-up.');
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
+  const handleClarifySession = async (sessionId: string, chosenCandidateId: string | null) => {
+    try {
+      setAuthError(null);
+      setIsDashboardLoading(true);
+      await clarifySession(sessionId, { chosenCandidateId });
+      const sessionsData = await fetchSessions();
+      setSessions(sessionsData);
       await loadSession(sessionId);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to save message');
+      setAuthError(error instanceof Error ? error.message : 'Could not update the clarification choice.');
+      throw error instanceof Error ? error : new Error('Could not update the clarification choice.');
+    } finally {
+      setIsDashboardLoading(false);
     }
   };
 
@@ -442,23 +586,73 @@ function App() {
         setActiveSessionDetail(null);
       }
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : 'Failed to delete session');
+      setAuthError(error instanceof Error ? error.message : 'Could not delete the forecast.');
     } finally {
       setIsDashboardLoading(false);
     }
   };
 
+  const handleRetrySession = async (sessionId: string) => {
+    const detail = activeSessionDetail;
+    if (!detail || detail.session.id !== sessionId) {
+      throw new Error('Open the failed forecast before retrying.');
+    }
+
+    const originalQuestion = detail.session.question.trim();
+    if (!originalQuestion) {
+      throw new Error('This forecast cannot be retried because the original question is missing.');
+    }
+
+    await handleCreateSession(originalQuestion, crypto.randomUUID());
+  };
+
   const sidebarSessions = useMemo(() => sessions.map(toSidebarSession), [sessions]);
+  const activeSessionState = useMemo(() => toActiveSessionState(activeSessionDetail), [activeSessionDetail]);
   const prediction = useMemo(() => toPrediction(activeSessionDetail), [activeSessionDetail]);
   const sentimentData = useMemo(() => toSentimentPoints(activeSessionDetail), [activeSessionDetail]);
   const timelineEvents = useMemo(() => toTimelineEvents(activeSessionDetail), [activeSessionDetail]);
-  const messages = useMemo(() => toChatMessages(activeSessionDetail), [activeSessionDetail]);
+  const messages = useMemo(() => {
+    const persistedMessages = sessionMessages ?? toChatMessages(activeSessionDetail);
+    const unreconciledPending = pendingMessages.filter((pendingMessage) => {
+      return !persistedMessages.some((message) => (
+        message.role === pendingMessage.role &&
+        message.content === pendingMessage.content &&
+        Math.abs(message.timestamp.getTime() - pendingMessage.timestamp.getTime()) <= 120000
+      ));
+    });
+
+    return [...persistedMessages, ...unreconciledPending].sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+    );
+  }, [activeSessionDetail, pendingMessages, sessionMessages]);
+  const isAwaitingAssistantResponse = useMemo(() => {
+    let lastUserTimestamp: number | null = null;
+    let lastAssistantTimestamp: number | null = null;
+
+    for (const message of messages) {
+      const timestamp = message.timestamp.getTime();
+      if (message.role === 'user') {
+        lastUserTimestamp = timestamp;
+      } else if (message.role === 'assistant') {
+        lastAssistantTimestamp = timestamp;
+      }
+    }
+
+    return lastUserTimestamp !== null && (lastAssistantTimestamp === null || lastUserTimestamp > lastAssistantTimestamp);
+  }, [messages]);
   const trendingItems = useMemo(() => toTrendingView(trending), [trending]);
 
   if (isHydratingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-gray-600">
-        Initializing authentication...
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-sm">
+          <StateMessage
+            variant="loading"
+            align="center"
+            title="Preparing workspace"
+            description="Checking your session and loading forecasts."
+          />
+        </div>
       </div>
     );
   }
@@ -477,8 +671,9 @@ function App() {
     return (
       <>
         {authError ? (
-          <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700 shadow">
-            {authError}
+          <div className="fixed top-4 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow">
+            <p className="font-semibold text-red-800">Action failed</p>
+            <p className="mt-0.5">{authError}</p>
           </div>
         ) : null}
         <LoginPage
@@ -495,8 +690,9 @@ function App() {
     return (
       <>
         {authError ? (
-          <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700 shadow">
-            {authError}
+          <div className="fixed top-4 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow">
+            <p className="font-semibold text-red-800">Action failed</p>
+            <p className="mt-0.5">{authError}</p>
           </div>
         ) : null}
         <SignupPage
@@ -558,17 +754,23 @@ function App() {
   return (
     <>
       {authError ? (
-        <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700 shadow">
-          {authError}
+        <div className="fixed top-4 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 shadow">
+          <p className="font-semibold text-red-800">Action failed</p>
+          <p className="mt-0.5">{authError}</p>
         </div>
       ) : null}
       <DashboardPage
         sessions={sidebarSessions}
         activeSessionId={activeSessionId}
+        activeSessionState={activeSessionState}
         prediction={prediction}
         sentimentData={sentimentData}
         timelineEvents={timelineEvents}
+        agentEvents={agentEvents}
         messages={messages}
+        isMessagesLoading={isMessagesLoading}
+        isSendingMessage={isSendingMessage}
+        isAwaitingAssistantResponse={isAwaitingAssistantResponse}
         trendingForecasts={trendingItems}
         userDisplayName={userProfile?.displayName}
         userPlan={userProfile?.plan}
@@ -577,11 +779,14 @@ function App() {
           void handleSessionSelect(sessionId);
         }}
         onCreateSession={handleCreateSession}
+        onRetrySession={handleRetrySession}
+        onClarifySession={handleClarifySession}
         onSendMessage={handleSendMessage}
         onDeleteSession={handleDeleteSession}
         onLogout={handleLogout}
         onGoHome={handleBackToLanding}
         isLoading={isDashboardLoading}
+        isAgentEventsLoading={isAgentEventsLoading}
         onPlanChange={setUserProfile}
       />
     </>

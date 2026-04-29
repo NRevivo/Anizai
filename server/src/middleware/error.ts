@@ -10,7 +10,8 @@ export class AppError extends Error {
     constructor(
         message: string,
         public statusCode: number = 500,
-        public code?: string
+        public code?: string,
+        public details?: unknown
     ) {
         super(message);
         this.name = 'AppError';
@@ -47,6 +48,7 @@ export function errorMiddleware(
         error: {
             message: isProd && statusCode === 500 ? 'Internal server error' : err.message,
             code,
+            details: err instanceof AppError ? err.details : undefined,
         },
         meta: {
             requestId: req.requestId,

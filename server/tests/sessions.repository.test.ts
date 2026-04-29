@@ -4,7 +4,22 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // vi.hoisted runs before imports and is the supported way to share mocks
 // between the factory and the test body.
 const mocks = vi.hoisted(() => {
-    const mockSessionRef = { id: 'session-abc-123' };
+    const mockMessagesDocRef = { id: 'message-doc-123' };
+    const mockMessagesCollection = {
+        doc: vi.fn(() => mockMessagesDocRef),
+    };
+    const mockSessionRef: {
+        id: string;
+        collection: ReturnType<typeof vi.fn>;
+    } = {
+        id: 'session-abc-123',
+        collection: vi.fn((name: string) => {
+            if (name === 'messages') {
+                return mockMessagesCollection;
+            }
+            throw new Error(`Unexpected subcollection in test: ${name}`);
+        }),
+    };
     const mockForecastQueryRef = { id: 'forecast-query-ref' };
 
     const mockSessionsCollection = {
@@ -41,6 +56,8 @@ const mocks = vi.hoisted(() => {
     return {
         mockSessionRef,
         mockForecastQueryRef,
+        mockMessagesDocRef,
+        mockMessagesCollection,
         mockSessionsCollection,
         mockForecastQueriesCollection,
         setMock,
@@ -75,11 +92,16 @@ describe('sessionRepository.createSession', () => {
         mocks.batchMock.mockClear();
         mocks.mockSessionsCollection.doc.mockClear();
         mocks.mockForecastQueriesCollection.doc.mockClear();
+        mocks.mockMessagesCollection.doc.mockClear();
         mocks.collectionRefMock.mockClear();
+        mocks.mockSessionRef.collection.mockClear();
     });
 
     it('writes a session doc with status "queued" and null error/clarification fields', async () => {
-        await sessionRepository.createSession('user-1', { question: 'Will X happen?' });
+        await sessionRepository.createSession('user-1', {
+            question: 'Will X happen?',
+            idempotencyKey: '11111111-1111-4111-8111-111111111111',
+        });
 
         expect(mocks.setMock).toHaveBeenCalledTimes(2);
 
@@ -92,6 +114,7 @@ describe('sessionRepository.createSession', () => {
             userId: 'user-1',
             question: 'Will X happen?',
             title: null,
+            idempotencyKey: '11111111-1111-4111-8111-111111111111',
             status: 'queued',
             errorCode: null,
             errorMessage: null,
@@ -105,7 +128,10 @@ describe('sessionRepository.createSession', () => {
     });
 
     it('writes a forecastQueries doc with exact spec shape and no extra fields', async () => {
-        await sessionRepository.createSession('user-42', { question: 'Will rates fall?' });
+        await sessionRepository.createSession('user-42', {
+            question: 'Will rates fall?',
+            idempotencyKey: '22222222-2222-4222-8222-222222222222',
+        });
 
         expect(mocks.setMock).toHaveBeenCalledTimes(2);
 
@@ -151,7 +177,10 @@ describe('sessionRepository.createSession', () => {
     });
 
     it('queryId is a UUID v4 distinct from sessionId', async () => {
-        await sessionRepository.createSession('user-1', { question: 'q' });
+        await sessionRepository.createSession('user-1', {
+            question: 'q',
+            idempotencyKey: '33333333-3333-4333-8333-333333333333',
+        });
 
         const forecastQueryData = mocks.setMock.mock.calls[1][1];
         const uuidV4Regex =
@@ -163,7 +192,10 @@ describe('sessionRepository.createSession', () => {
     });
 
     it('commits exactly once after both set calls', async () => {
-        await sessionRepository.createSession('user-1', { question: 'q' });
+        await sessionRepository.createSession('user-1', {
+            question: 'q',
+            idempotencyKey: '44444444-4444-4444-8444-444444444444',
+        });
 
         expect(mocks.commitMock).toHaveBeenCalledTimes(1);
         expect(mocks.setMock).toHaveBeenCalledTimes(2);
@@ -175,5 +207,36 @@ describe('sessionRepository.createSession', () => {
 
         expect(firstSetOrder).toBeLessThan(commitOrder);
         expect(secondSetOrder).toBeLessThan(commitOrder);
+    });
+
+    it('writes follow-up messages with user metadata into the session messages subcollection', async () => {
+        await sessionRepository.addMessage('session-abc-123', 'user-99', {
+            role: 'user',
+            content: 'What changed after the last update?',
+            meta: {
+                runId: 'run-1',
+            },
+        });
+
+        expect(mocks.mockSessionRef.collection).toHaveBeenCalledWith('messages');
+        expect(mocks.mockMessagesCollection.doc).toHaveBeenCalledTimes(1);
+
+        const firstSetCall = mocks.setMock.mock.calls[0];
+        expect(firstSetCall[0]).toBe(mocks.mockMessagesDocRef);
+        expect(firstSetCall[1]).toMatchObject({
+            userId: 'user-99',
+            role: 'user',
+            content: 'What changed after the last update?',
+            status: 'sent',
+            meta: {
+                runId: 'run-1',
+            },
+        });
+
+        expect(mocks.updateMock).toHaveBeenCalledWith(mocks.mockSessionRef, expect.objectContaining({
+            lastActivityAt: mocks.fixedTimestamp,
+            updatedAt: mocks.fixedTimestamp,
+        }));
+        expect(mocks.commitMock).toHaveBeenCalledTimes(1);
     });
 });

@@ -4,6 +4,7 @@ import type {
     CreateSessionInput, CreateMessageInput
 } from '../services/sessions.service.js';
 import { batch, collectionRef, now, toISOString } from '../services/firebase.service.js';
+import { Timestamp } from 'firebase-admin/firestore';
 import { randomUUID } from 'node:crypto';
 
 function isFailedPrecondition(error: unknown): boolean {
@@ -72,6 +73,45 @@ async function deleteSubcollectionDocs(
 }
 
 export const sessionRepository = {
+    async findRecentSessionByIdempotencyKey(
+        userId: string,
+        idempotencyKey: string,
+        windowMs = 60_000
+    ): Promise<Session | null> {
+        const cutoff = Timestamp.fromDate(new Date(Date.now() - windowMs));
+
+        try {
+            const snapshot = await collectionRef('sessions')
+                .where('userId', '==', userId)
+                .where('idempotencyKey', '==', idempotencyKey)
+                .where('createdAt', '>=', cutoff)
+                .orderBy('createdAt', 'desc')
+                .limit(1)
+                .get();
+
+            return snapshot.empty ? null : mapSessionDoc(snapshot.docs[0]);
+        } catch (error) {
+            if (!isFailedPrecondition(error)) {
+                throw error;
+            }
+
+            const snapshot = await collectionRef('sessions')
+                .where('userId', '==', userId)
+                .where('idempotencyKey', '==', idempotencyKey)
+                .get();
+
+            const matchingDoc = snapshot.docs
+                .map(mapSessionDoc)
+                .filter((session) => {
+                    const createdAtMs = new Date(session.createdAt).getTime();
+                    return Number.isFinite(createdAtMs) && createdAtMs >= cutoff.toDate().getTime();
+                })
+                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+            return matchingDoc ?? null;
+        }
+    },
+
     async listSessions(userId: string, limit = 50): Promise<Session[]> {
         try {
             const snapshot = await collectionRef('sessions')
@@ -154,6 +194,13 @@ export const sessionRepository = {
             marketComparisonInsight: data.marketComparisonInsight ?? null,
             sentimentAnalysisInsight: data.sentimentAnalysisInsight ?? null,
             evidenceFeedSummary: data.evidenceFeedSummary ?? null,
+            keyFactors: data.keyFactors ?? [],
+            whatIDidntFind: data.whatIDidntFind ?? [],
+            reasoningChain: data.reasoningChain ?? [],
+            suggestedActions: data.suggestedActions ?? [],
+            generatedAt: toISOString(data.generatedAt),
+            agentVersion: data.agentVersion ?? null,
+            tier: data.tier ?? null,
         };
     },
 
@@ -166,6 +213,7 @@ export const sessionRepository = {
                 content: data.content,
                 createdAt: toISOString(data.createdAt) ?? '',
                 status: data.status ?? null,
+                userId: data.userId ?? null,
                 meta: data.meta ?? null,
             };
         };
@@ -231,12 +279,25 @@ export const sessionRepository = {
             return {
                 id: doc.id,
                 type: data.type,
+                evidenceId: data.evidenceId ?? null,
+                sourceType: data.sourceType ?? null,
+                origin: data.origin ?? null,
                 title: data.title,
                 snippet: data.snippet,
                 url: data.url ?? null,
+                source: data.source ?? null,
+                sourceDomain: data.sourceDomain ?? null,
                 publishedAt: toISOString(data.publishedAt),
+                fetchedAt: toISOString(data.fetchedAt),
                 sourceId: data.sourceId ?? null,
                 score: data.score,
+                relevanceScore: data.relevanceScore ?? null,
+                credibilityTier: data.credibilityTier ?? null,
+                recencyWeight: data.recencyWeight ?? null,
+                usedInAnswer: data.usedInAnswer ?? null,
+                impactOnForecast: data.impactOnForecast ?? null,
+                justification: data.justification ?? null,
+                rank: data.rank ?? null,
                 createdAt: toISOString(data.createdAt) ?? '',
                 impact: data.impact ?? null,
                 impactLabel: data.impactLabel ?? null,
@@ -318,6 +379,7 @@ export const sessionRepository = {
             userId,
             question: input.question,
             title: input.title ?? null,
+            idempotencyKey: input.idempotencyKey,
             status: 'queued' as const,
             latestProbability: null,
             latestConfidence: null,
@@ -357,10 +419,54 @@ export const sessionRepository = {
         };
     },
 
-    async addMessage(sessionId: string, input: CreateMessageInput): Promise<SessionMessage> {
+    async requeueClarifiedSession(
+        session: Session,
+        selectedCandidate: ClarificationCandidate | null
+    ): Promise<Session> {
+        const updatedAt = now();
+        const sessionRef = collectionRef('sessions').doc(session.id);
+        const forecastQueryRef = collectionRef('forecastQueries').doc();
+        const writeBatch = batch();
+
+        const sessionUpdate = {
+            status: 'queued' as const,
+            canonicalKey: selectedCandidate?.id ?? session.canonicalKey ?? null,
+            errorCode: null,
+            errorMessage: null,
+            clarificationCandidates: null,
+            updatedAt,
+            lastActivityAt: updatedAt,
+        };
+
+        const forecastQueryData = {
+            queryId: randomUUID(),
+            sessionId: session.id,
+            userId: session.userId,
+            question: session.question,
+            status: 'pending' as const,
+            createdAt: updatedAt,
+            claimedAt: null,
+            claimedBy: null,
+        };
+
+        writeBatch.update(sessionRef, sessionUpdate);
+        writeBatch.set(forecastQueryRef, forecastQueryData);
+
+        await writeBatch.commit();
+
+        return {
+            ...session,
+            ...sessionUpdate,
+            updatedAt: updatedAt.toDate().toISOString(),
+            lastActivityAt: updatedAt.toDate().toISOString(),
+        };
+    },
+
+    async addMessage(sessionId: string, userId: string, input: CreateMessageInput): Promise<SessionMessage> {
         const createdAt = now();
 
         const messageData = {
+            userId,
             role: input.role,
             content: input.content,
             createdAt,

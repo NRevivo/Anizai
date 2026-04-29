@@ -44,6 +44,7 @@ export interface SessionMessage {
     content: string;
     createdAt: string;
     status: 'sent' | 'failed' | null;
+    userId?: string | null;
     meta: {
         model?: string;
         tokensIn?: number;
@@ -64,12 +65,25 @@ export interface PredictionPoint {
 export interface Evidence {
     id: string;
     type: 'news' | 'social' | 'expert' | 'market';
+    evidenceId: string | null;
+    sourceType: string | null;
+    origin: string | null;
     title: string;
     snippet: string;
     url: string | null;
+    source: string | null;
+    sourceDomain: string | null;
     publishedAt: string | null;
+    fetchedAt: string | null;
     sourceId: string | null;
     score: number;
+    relevanceScore: number | null;
+    credibilityTier: string | null;
+    recencyWeight: number | null;
+    usedInAnswer: boolean | null;
+    impactOnForecast: string | null;
+    justification: string | null;
+    rank: number | null;
     createdAt: string;
     // New: Impact classification
     impact: 'positive' | 'negative' | 'neutral' | null;
@@ -100,6 +114,34 @@ export interface SessionResult {
     sentimentAnalysisInsight: string | null;
     // New: Evidence feed insights
     evidenceFeedSummary: string | null;
+    keyFactors: KeyFactor[];
+    whatIDidntFind: string[];
+    reasoningChain: ReasoningStep[];
+    suggestedActions: SuggestedAction[];
+    generatedAt: string | null;
+    agentVersion: string | null;
+    tier: 'tier_1' | 'tier_2' | null;
+}
+
+export interface KeyFactor {
+    rank: number;
+    title: string;
+    explanation: string;
+    direction: 'supports' | 'opposes' | 'uncertain';
+    weight: number;
+    supportingEvidenceIds: string[];
+}
+
+export interface ReasoningStep {
+    sequence: number;
+    description: string;
+    outcome: string;
+}
+
+export interface SuggestedAction {
+    id: string;
+    label: string;
+    prompt: string;
 }
 
 export interface SentimentDataPoint {
@@ -126,12 +168,17 @@ export interface SessionDetail {
 export interface CreateSessionInput {
     question: string;
     title?: string;
+    idempotencyKey: string;
 }
 
 export interface CreateMessageInput {
     role: 'user' | 'assistant' | 'system';
     content: string;
     meta?: SessionMessage['meta'];
+}
+
+export interface ClarifySessionInput {
+    chosenCandidateId: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -219,9 +266,51 @@ export async function getSessionDetail(sessionId: string, userId: string): Promi
  * Create a new session
  */
 export async function createSession(userId: string, input: CreateSessionInput): Promise<Session> {
+    const existing = await sessionRepository.findRecentSessionByIdempotencyKey(
+        userId,
+        input.idempotencyKey
+    );
+
+    if (existing) {
+        return existing;
+    }
+
     // Check and commit increment usage synchronously prior to document writing
     await usersService.incrementUsage(userId);
+
+    const existingAfterUsage = await sessionRepository.findRecentSessionByIdempotencyKey(
+        userId,
+        input.idempotencyKey
+    );
+
+    if (existingAfterUsage) {
+        return existingAfterUsage;
+    }
+
     return sessionRepository.createSession(userId, input);
+}
+
+export async function clarifySession(
+    sessionId: string,
+    userId: string,
+    input: ClarifySessionInput
+): Promise<Session> {
+    const session = await getSession(sessionId, userId);
+
+    if (session.status !== 'awaiting_clarification') {
+        throw new AppError('Session is not awaiting clarification', 409, 'INVALID_SESSION_STATUS');
+    }
+
+    const candidates = session.clarificationCandidates ?? [];
+    const selectedCandidate = input.chosenCandidateId === null
+        ? null
+        : candidates.find((candidate) => candidate.id === input.chosenCandidateId) ?? null;
+
+    if (input.chosenCandidateId !== null && !selectedCandidate) {
+        throw new AppError('Chosen clarification candidate is invalid', 400, 'INVALID_CLARIFICATION_CANDIDATE');
+    }
+
+    return sessionRepository.requeueClarifiedSession(session, selectedCandidate);
 }
 
 /**
@@ -235,7 +324,7 @@ export async function addMessage(
     // Verify ownership first
     await getSession(sessionId, userId);
 
-    return sessionRepository.addMessage(sessionId, input);
+    return sessionRepository.addMessage(sessionId, userId, input);
 }
 
 /**

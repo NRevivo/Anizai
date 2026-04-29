@@ -1,6 +1,6 @@
 import { auth } from './firebase';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 interface ApiSuccessResponse<T> {
     data: T;
@@ -10,6 +10,7 @@ interface ApiErrorResponse {
     error?: {
         message?: string;
         code?: string;
+        details?: unknown;
     };
 }
 
@@ -23,18 +24,20 @@ function getErrorPayload(body: ApiSuccessResponse<unknown> | ApiErrorResponse | 
 export class ApiError extends Error {
     status: number;
     code?: string;
+    details?: unknown;
 
-    constructor(message: string, status: number, code?: string) {
+    constructor(message: string, status: number, code?: string, details?: unknown) {
         super(message);
         this.name = 'ApiError';
         this.status = status;
         this.code = code;
+        this.details = details;
     }
 }
 
 export class ApiAuthError extends ApiError {
-    constructor(message: string, status = 401, code?: string) {
-        super(message, status, code);
+    constructor(message: string, status = 401, code?: string, details?: unknown) {
+        super(message, status, code, details);
         this.name = 'ApiAuthError';
     }
 }
@@ -70,6 +73,12 @@ async function buildHeaders(requireAuth: boolean): Promise<HeadersInit> {
     return headers;
 }
 
+function buildApiUrl(path: string): string {
+    const base = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    return `${base}${normalizedPath}`;
+}
+
 export async function apiRequest<T>(
     path: string,
     options: ApiRequestOptions = {}
@@ -81,7 +90,7 @@ export async function apiRequest<T>(
         signal,
     } = options;
 
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(buildApiUrl(path), {
         method,
         headers: await buildHeaders(requireAuth),
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -100,12 +109,13 @@ export async function apiRequest<T>(
             errorPayload?.message ??
             `Request failed: ${response.status} ${response.statusText}`;
         const code = errorPayload?.code;
+        const details = errorPayload?.details;
 
         if (response.status === 401 || response.status === 403) {
-            throw new ApiAuthError(message, response.status, code);
+            throw new ApiAuthError(message, response.status, code, details);
         }
 
-        throw new ApiError(message, response.status, code);
+        throw new ApiError(message, response.status, code, details);
     }
 
     return (parsedBody as ApiSuccessResponse<T>).data;

@@ -17,9 +17,9 @@ export function SecuritySettings() {
         setStatus(null);
         try {
             await signInWithPopup(auth, googleProvider);
-            setStatus({ type: 'success', text: 'Re-authentication successful.' });
+            setStatus({ type: 'success', text: 'Session re-authenticated.' });
         } catch (err: any) {
-            setStatus({ type: 'error', text: err.message ?? 'Re-authentication failed.' });
+            setStatus({ type: 'error', text: err.message ?? 'Could not re-authenticate your session.' });
         } finally {
             setIsReauthing(false);
         }
@@ -33,11 +33,11 @@ export function SecuritySettings() {
         try {
             const cred = EmailAuthProvider.credential(user.email, emailPassword);
             await reauthenticateWithCredential(user, cred);
-            setStatus({ type: 'success', text: 'Re-authentication successful.' });
+            setStatus({ type: 'success', text: 'Session re-authenticated.' });
             setShowEmailInput(false);
             setEmailPassword('');
         } catch (err: any) {
-            setStatus({ type: 'error', text: err.message ?? 'Re-authentication failed.' });
+            setStatus({ type: 'error', text: err.message ?? 'Could not re-authenticate your session.' });
         } finally {
             setIsReauthing(false);
         }
@@ -49,7 +49,7 @@ export function SecuritySettings() {
         <div className="space-y-8">
             <div>
                 <h2 className="text-xl font-semibold text-gray-900">Security</h2>
-                <p className="mt-1 text-sm text-gray-500">Manage authentication and account security.</p>
+                <p className="mt-1 text-sm text-gray-500">Review sign-in method and session security.</p>
             </div>
 
             {/* Provider info */}
@@ -74,7 +74,7 @@ export function SecuritySettings() {
                     </div>
                     <div className="px-5 py-3.5 flex items-center justify-between">
                         <span className="text-sm text-gray-500">Signed in as</span>
-                        <span className="text-sm font-medium text-gray-900 break-all text-right">{user?.email ?? '—'}</span>
+                        <span className="text-sm font-medium text-gray-900 break-all text-right">{user?.email ?? 'Not available'}</span>
                     </div>
                 </div>
             </div>
@@ -93,7 +93,7 @@ export function SecuritySettings() {
                 </div>
                 <div className="px-5 py-4 space-y-4">
                     <p className="text-sm text-gray-500">
-                        Re-authenticate your session if you've been inactive or need to perform sensitive operations.
+                        Re-authenticate when a sensitive account action requires a fresh sign-in.
                     </p>
 
                     {isGoogleAuth && (
@@ -108,7 +108,7 @@ export function SecuritySettings() {
                                 <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
                                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                             </svg>
-                            {isReauthing ? 'Re-authenticating…' : 'Re-authenticate with Google'}
+                            {isReauthing ? 'Re-authenticating...' : 'Re-authenticate with Google'}
                         </button>
                     )}
 
@@ -127,7 +127,7 @@ export function SecuritySettings() {
                                 type="password"
                                 value={emailPassword}
                                 onChange={e => setEmailPassword(e.target.value)}
-                                placeholder="Enter your password"
+                                placeholder="Password"
                                 required
                                 className="flex-1 h-9 px-3 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-anizai-blue-500"
                             />
@@ -136,7 +136,7 @@ export function SecuritySettings() {
                                 disabled={isReauthing || !emailPassword}
                                 className="px-3 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 disabled:opacity-60 transition-colors"
                             >
-                                {isReauthing ? '…' : 'Confirm'}
+                                {isReauthing ? '...' : 'Confirm'}
                             </button>
                             <button type="button" onClick={() => { setShowEmailInput(false); setEmailPassword(''); }} className="text-sm text-gray-400 hover:text-gray-600">
                                 Cancel

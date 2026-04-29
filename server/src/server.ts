@@ -1,7 +1,7 @@
 import express from 'express';
 import pinoHttp from 'pino-http';
 import { logger } from './lib/logger.js';
-import { isDev } from './config/env.js';
+import { env, isDev } from './config/env.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 import { errorMiddleware, notFoundMiddleware } from './middleware/error.js';
 import rootRoutes from './routes/root.js';
@@ -67,7 +67,7 @@ export async function createApp() {
     // Demo Routes (dev only)
     // ─────────────────────────────────────────────────────────────
 
-    if (isDev) {
+    if (isDev && env.ALLOW_DEMO_ROUTES) {
         const demoRoutes = await import('./routes/demo.js');
         app.use(demoRoutes.default);
         logger.info('Demo routes enabled (development mode)');

@@ -1,31 +1,76 @@
 import { useState, useEffect } from 'react';
 import { Button } from '../components/ui/button';
+import { StateMessage } from '../components/ui/StateMessage';
+import { ApiError } from '../lib/api';
 
 interface CreateForecastViewProps {
-    onSubmit: (question: string) => void;
+    onSubmit: (question: string, idempotencyKey: string) => Promise<void>;
+    onOpenSubscription?: () => void;
 }
 
-export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
+interface PlanLimitDetails {
+    used?: number;
+    limit?: number;
+    planTier?: string;
+    resetAt?: string;
+}
+
+function getPlanLimitDetails(error: unknown): PlanLimitDetails | null {
+    if (!(error instanceof ApiError) || error.code !== 'PLAN_LIMIT_EXCEEDED') {
+        return null;
+    }
+
+    if (!error.details || typeof error.details !== 'object') {
+        return {};
+    }
+
+    return error.details as PlanLimitDetails;
+}
+
+function formatResetDate(resetAt?: string): string | null {
+    if (!resetAt) {
+        return null;
+    }
+
+    const parsed = new Date(resetAt);
+    if (Number.isNaN(parsed.getTime())) {
+        return null;
+    }
+
+    return parsed.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+    });
+}
+
+export function CreateForecastView({ onSubmit, onOpenSubscription }: CreateForecastViewProps) {
     const [question, setQuestion] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [formError, setFormError] = useState<string | null>(null);
+    const [planLimitDetails, setPlanLimitDetails] = useState<PlanLimitDetails | null>(null);
+    const [showValidation, setShowValidation] = useState(false);
     const [hints, setHints] = useState<string[]>([]);
 
-    // Dynamic placeholders
     const placeholders = [
-        "Will the ECB cut interest rates before Q3 2026?",
-        "Probability of Bitcoin reaching $150k before 2027",
-        "Will SpaceX complete a crewed Mars landing by 2026?",
-        "Will the US inflation rate drop below 2.5% in 2026?",
-        "Likelihood of semantic search replacing keyword search by 2027"
+        "Will the ECB cut rates before July 2026?",
+        "Will Bitcoin trade above $150k before January 2027?",
+        "Will SpaceX complete a crewed Mars landing before 2030?",
+        "Will US inflation fall below 2.5% in 2026?",
+        "Will semantic search overtake keyword search by 2027?"
     ];
     const [placeholderIndex, setPlaceholderIndex] = useState(0);
     const [fade, setFade] = useState(true);
+    const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
 
     const minLength = 10;
     const maxLength = 500;
-    const isValid = question.trim().length >= minLength && question.trim().length <= maxLength;
+    const trimmedQuestion = question.trim();
+    const isEmpty = trimmedQuestion.length === 0;
+    const isTooShort = !isEmpty && trimmedQuestion.length < minLength;
+    const isTooLong = trimmedQuestion.length > maxLength;
+    const isValid = !isEmpty && !isTooShort && !isTooLong;
 
-    // Rotate placeholders
     useEffect(() => {
         if (question) return;
 
@@ -40,49 +85,106 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
         return () => clearInterval(interval);
     }, [question]);
 
-    // Intelligent feedback
     useEffect(() => {
         const newHints: string[] = [];
         const q = question.toLowerCase();
 
         if (q.match(/\d{4}|q[1-4]|january|february|march|april|may|june|july|august|september|october|november|december/)) {
-            newHints.push('Clear timeframe detected');
+            newHints.push('Timeframe included');
         }
 
         if (q.startsWith('will ') || q.includes('yes or no')) {
-            newHints.push('Binary outcome detected');
+            newHints.push('Clear yes/no outcome');
         }
 
         setHints(newHints);
     }, [question]);
 
-    const handleSubmit = async () => {
-        if (!isValid) return;
-        setIsSubmitting(true);
-        await new Promise(resolve => setTimeout(resolve, 500));
-        onSubmit(question.trim());
-        setIsSubmitting(false);
+    const validationMessage = isEmpty
+        ? 'Enter a forecast question to continue.'
+        : isTooShort
+            ? `Use at least ${minLength} characters so the forecast is specific enough.`
+            : isTooLong
+                ? `Keep the forecast under ${maxLength} characters.`
+                : null;
+
+    const displayError = formError ?? (showValidation ? validationMessage : null);
+
+    const getErrorMessage = (error: unknown): string => {
+        const planLimit = getPlanLimitDetails(error);
+        if (planLimit) {
+            return "You've used your free forecasts this month.";
+        }
+
+        if (error instanceof Error) {
+            const message = error.message.toLowerCase();
+            if (message.includes('limit') || message.includes('upgrade') || message.includes('premium')) {
+                return 'You have reached your forecast limit. Upgrade to Premium or wait for your monthly limit to reset.';
+            }
+            return error.message;
+        }
+        return 'Could not start the forecast. Please try again.';
     };
 
+    const handleSubmit = async () => {
+        if (isSubmitting) return;
+        setFormError(null);
+        setPlanLimitDetails(null);
+        setShowValidation(true);
+
+        if (!isValid) {
+            setFormError(validationMessage);
+            return;
+        }
+
+        setShowValidation(false);
+        setIsSubmitting(true);
+        try {
+            await onSubmit(trimmedQuestion, idempotencyKey);
+            setIdempotencyKey(crypto.randomUUID());
+        } catch (error) {
+            setPlanLimitDetails(getPlanLimitDetails(error));
+            setFormError(getErrorMessage(error));
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const resetDateLabel = formatResetDate(planLimitDetails?.resetAt);
+    const planLimitDescription = planLimitDetails
+        ? [
+            typeof planLimitDetails.used === 'number' && typeof planLimitDetails.limit === 'number'
+                ? `${planLimitDetails.used} of ${planLimitDetails.limit} forecasts used`
+                : null,
+            planLimitDetails.planTier ? `Plan: ${planLimitDetails.planTier}` : null,
+            resetDateLabel ? `Resets on ${resetDateLabel}` : null,
+        ].filter(Boolean).join(' • ')
+        : null;
+
     return (
-        <div className="h-full flex flex-col justify-center px-8 lg:px-12 max-w-4xl mx-auto w-full font-sans">
-            <div className="space-y-8 -mt-20">
-                {/* Clean Header */}
+        <div className="min-h-full flex flex-col justify-center px-4 sm:px-6 lg:px-8 py-5 sm:py-6 max-w-3xl mx-auto w-full max-w-full overflow-x-hidden font-sans">
+            <div className="space-y-5 sm:space-y-6 min-w-0">
                 <div className="space-y-2 animate-fadeIn">
-                    <h1 className="text-3xl font-bold text-gray-900 tracking-tight">What do you want to forecast?</h1>
-                    <p className="text-lg text-gray-500 max-w-xl leading-relaxed">
-                        Ask about a future event to receive a detailed probability analysis and evidence timeline.
+                    <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 tracking-tight leading-tight">Create a forecast</h1>
+                    <p className="text-base text-gray-500 max-w-xl leading-relaxed">
+                        Ask a specific future-facing question. Anizai will estimate probability, confidence, and supporting evidence.
                     </p>
                 </div>
 
-                {/* Hero Question Input */}
                 <div className="relative group animate-fadeIn" style={{ animationDelay: '100ms' }}>
                     <div className="relative">
                         <textarea
                             value={question}
-                            onChange={(e) => setQuestion(e.target.value)}
+                            onChange={(e) => {
+                                setQuestion(e.target.value);
+                                if (formError) {
+                                    setFormError(null);
+                                }
+                            }}
                             placeholder={placeholders[placeholderIndex]}
-                            className={`w-full min-h-[160px] bg-transparent text-2xl lg:text-3xl font-medium text-gray-900 placeholder-gray-300 border-none focus:ring-0 p-0 resize-none transition-all duration-300 ${!question && !fade ? 'placeholder-opacity-0' : 'placeholder-opacity-100'}`}
+                            disabled={isSubmitting}
+                            aria-invalid={Boolean(displayError)}
+                            className={`w-full min-h-[116px] sm:min-h-[132px] bg-transparent text-lg sm:text-xl lg:text-2xl font-medium text-gray-900 placeholder-gray-300 border-none focus:ring-0 p-0 resize-none transition-all duration-300 disabled:cursor-wait disabled:opacity-60 ${!question && !fade ? 'placeholder-opacity-0' : 'placeholder-opacity-100'}`}
                             style={{ lineHeight: '1.4' }}
                             maxLength={maxLength}
                             autoFocus
@@ -93,8 +195,8 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
                     </div>
 
                     {/* Intelligent Feedback & Counter */}
-                    <div className="flex items-center justify-between mt-4 h-6">
-                        <div className="flex gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mt-4 min-h-6">
+                        <div className="flex flex-wrap gap-2">
                             {hints.map((hint, index) => (
                                 <span key={index} className="inline-flex items-center gap-1.5 text-sm font-medium text-anizai-teal-600 animate-fadeIn">
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -104,31 +206,57 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
                                 </span>
                             ))}
                         </div>
-                        <span className={`text-sm font-medium transition-colors ${question.length > maxLength * 0.9 ? 'text-amber-500' : 'text-gray-300'}`}>
-                            {question.length}/{maxLength}
+                        <span className={`text-sm font-medium transition-colors ${trimmedQuestion.length > maxLength * 0.9 ? 'text-amber-500' : 'text-gray-300'}`}>
+                            {trimmedQuestion.length}/{maxLength}
                         </span>
                     </div>
+
+                    {displayError ? (
+                        <div className="mt-3">
+                            <StateMessage
+                                compact
+                                variant={planLimitDetails ? 'warning' : 'error'}
+                                title={planLimitDetails ? 'Free forecast limit reached' : (formError ? 'Forecast was not started' : 'Check the question')}
+                                description={planLimitDescription ? `${displayError} ${planLimitDescription}` : displayError}
+                                action={planLimitDetails && onOpenSubscription ? (
+                                    <button
+                                        type="button"
+                                        onClick={onOpenSubscription}
+                                        className="inline-flex min-h-10 items-center justify-center rounded-md bg-gray-900 px-4 text-sm font-semibold text-white hover:bg-gray-800"
+                                    >
+                                        Review plans
+                                    </button>
+                                ) : null}
+                            />
+                        </div>
+                    ) : null}
                 </div>
 
-                {/* Action Area */}
-                <div className="pt-4 flex items-center gap-4 animate-fadeIn" style={{ animationDelay: '200ms' }}>
+                <div className="pt-2 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 animate-fadeIn" style={{ animationDelay: '200ms' }}>
                     <Button
                         onClick={handleSubmit}
-                        disabled={!isValid || isSubmitting}
-                        className="h-12 px-8 bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 hover:opacity-90 text-white text-base font-semibold rounded-lg transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed border-0"
+                        disabled={isSubmitting}
+                        className="h-12 w-full sm:w-auto px-6 sm:px-8 bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 hover:opacity-90 text-white text-base font-semibold rounded-lg transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed border-0"
                     >
-                        {isSubmitting ? 'Analyzing...' : 'Analyze Forecast'}
+                        {isSubmitting ? (
+                            <span className="inline-flex items-center gap-2">
+                                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                                </svg>
+                                <span className="truncate">Starting forecast...</span>
+                            </span>
+                        ) : 'Start forecast'}
                     </Button>
 
                     <span className="text-sm text-gray-400 font-medium">
-                        Uses 1 of 3 free forecasts
+                        {isSubmitting ? 'Creating the forecast workspace...' : 'Uses 1 free forecast'}
                     </span>
                 </div>
 
-                {/* Minimal "What You Get" Icons */}
-                <div className="pt-8 border-t border-gray-100 animate-fadeIn" style={{ animationDelay: '300ms' }}>
-                    <div className="flex gap-8 text-gray-400">
-                        <div className="group flex items-center gap-2 cursor-help" title="Probability Estimate">
+                <div className="pt-5 border-t border-gray-100 animate-fadeIn" style={{ animationDelay: '300ms' }}>
+                    <div className="flex flex-wrap gap-4 sm:gap-6 text-gray-400">
+                        <div className="group flex items-center gap-2 cursor-help" title="Probability estimate">
                             <span className="p-2 rounded-full bg-gray-50 group-hover:bg-anizai-teal-50 group-hover:text-anizai-teal-600 transition-colors">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -136,7 +264,7 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
                             </span>
                             <span className="text-sm font-medium hidden group-hover:inline-block text-gray-600">Probability</span>
                         </div>
-                        <div className="group flex items-center gap-2 cursor-help" title="Confidence Score">
+                        <div className="group flex items-center gap-2 cursor-help" title="Confidence score">
                             <span className="p-2 rounded-full bg-gray-50 group-hover:bg-anizai-teal-50 group-hover:text-anizai-teal-600 transition-colors">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -144,13 +272,13 @@ export function CreateForecastView({ onSubmit }: CreateForecastViewProps) {
                             </span>
                             <span className="text-sm font-medium hidden group-hover:inline-block text-gray-600">Confidence</span>
                         </div>
-                        <div className="group flex items-center gap-2 cursor-help" title="Evidence Timeline">
+                        <div className="group flex items-center gap-2 cursor-help" title="Evidence timeline">
                             <span className="p-2 rounded-full bg-gray-50 group-hover:bg-anizai-teal-50 group-hover:text-anizai-teal-600 transition-colors">
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                             </span>
-                            <span className="text-sm font-medium hidden group-hover:inline-block text-gray-600">Timeline</span>
+                            <span className="text-sm font-medium hidden group-hover:inline-block text-gray-600">Evidence</span>
                         </div>
                     </div>
                 </div>

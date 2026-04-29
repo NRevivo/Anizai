@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { PredictionSession } from '../types';
 import { Button } from './ui/button';
+import { StateMessage } from './ui/StateMessage';
 import { formatProbability, formatRelativeTime } from '../lib/utils';
 
 interface SidebarProps {
@@ -36,22 +37,41 @@ export function Sidebar({
         .slice(0, 2)
         .map((part) => part[0]?.toUpperCase() ?? '')
         .join('') || 'U';
-    const membershipLabel = userPlan === 'premium' ? 'Premium Plan' : 'Free Plan';
+    const membershipLabel = userPlan === 'premium' ? 'Premium plan' : 'Free plan';
+    const getStatusView = (status: PredictionSession['status']) => {
+        if (status === 'queued') {
+            return { label: 'Queued', dot: 'bg-slate-400', text: 'text-slate-600' };
+        }
+        if (status === 'claimed') {
+            return { label: 'Claimed', dot: 'bg-indigo-500', text: 'text-indigo-700' };
+        }
+        if (status === 'running') {
+            return { label: 'Running', dot: 'bg-amber-500', text: 'text-amber-700' };
+        }
+        if (status === 'failed') {
+            return { label: 'Failed', dot: 'bg-red-500', text: 'text-red-700' };
+        }
+        if (status === 'awaiting_clarification') {
+            return { label: 'Needs clarification', dot: 'bg-violet-500', text: 'text-violet-700' };
+        }
+
+        return { label: 'Done', dot: 'bg-green-500', text: 'text-green-700' };
+    };
 
     return (
         <div className="w-full h-full bg-slate-50 border-r border-gray-200 flex flex-col overflow-hidden font-sans">
             {/* Logo area */}
-            <button onClick={onGoHome} className="w-full text-left px-5 py-5 flex items-center gap-3 border-b border-gray-100 bg-white hover:bg-gray-50 transition-colors cursor-pointer decoration-transparent focus:outline-none">
+            <button onClick={onGoHome} className="w-full min-w-0 text-left px-4 sm:px-5 py-4 sm:py-5 flex items-center gap-3 border-b border-gray-100 bg-white hover:bg-gray-50 transition-colors cursor-pointer decoration-transparent focus:outline-none">
                 <img
                     src="/logo-brain.png"
                     alt="Anizai"
                     className="h-8 w-auto"
                 />
-                <span className="text-xl font-semibold text-gray-900 tracking-tight">Anizai</span>
+                <span className="min-w-0 truncate text-xl font-semibold text-gray-900 tracking-tight">Anizai</span>
             </button>
 
             {/* Actions & Search */}
-            <div className="p-4 bg-white border-b border-gray-100 space-y-3">
+            <div className="p-3 sm:p-4 bg-white border-b border-gray-100 space-y-3">
                 <Button
                     className="w-full justify-start bg-gray-900 text-white hover:bg-gray-800 shadow-sm transition-all"
                     onClick={onNewPrediction}
@@ -59,7 +79,7 @@ export function Sidebar({
                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    New Forecast
+                    New forecast
                 </Button>
 
                 <div className="relative">
@@ -68,7 +88,7 @@ export function Sidebar({
                     </svg>
                     <input
                         type="text"
-                        placeholder="Search predictions..."
+                        placeholder="Search forecasts..."
                         className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-anizai-blue-500/20 focus:border-anizai-blue-500 transition-all placeholder-gray-400 text-gray-700"
                     />
                 </div>
@@ -76,13 +96,23 @@ export function Sidebar({
 
             {/* Sessions List - Scrollable */}
             <div className="flex-1 overflow-y-auto bg-white">
-                <div className="px-4 py-2">
-                    <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3 mt-4 px-2">Active Forecasts</h3>
+                <div className="px-3 sm:px-4 py-2">
+                    <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3 mt-4 px-2">Forecasts</h3>
                     <div className="space-y-1">
-                        {sessions.map((session) => (
+                        {sessions.length === 0 ? (
+                            <StateMessage
+                                compact
+                                title="No forecasts yet"
+                                description="Create a forecast and it will appear here."
+                            />
+                        ) : null}
+                        {sessions.map((session) => {
+                            const statusView = getStatusView(session.status);
+
+                            return (
                             <div
                                 key={session.id}
-                                className={`relative w-full text-left px-3 py-3 rounded-md transition-all duration-200 group border ${activeSessionId === session.id
+                                className={`relative w-full min-w-0 text-left px-3 py-3 rounded-md transition-all duration-200 group border ${activeSessionId === session.id
                                     ? 'bg-anizai-blue-50 border-anizai-blue-100 shadow-sm'
                                     : 'hover:bg-gray-50 border-transparent hover:border-gray-100'
                                     }`}
@@ -92,19 +122,19 @@ export function Sidebar({
                                     className="w-full text-left"
                                 >
                                     <div className="flex items-start justify-between gap-2">
-                                        <p className={`text-sm leading-snug line-clamp-2 ${activeSessionId === session.id ? 'font-medium text-gray-900' : 'text-gray-600'}`}>
+                                        <p className={`min-w-0 break-words text-sm leading-snug line-clamp-2 ${activeSessionId === session.id ? 'font-medium text-gray-900' : 'text-gray-600'}`}>
                                             {session.question}
                                         </p>
                                         <span className={`text-xs font-semibold shrink-0 ${activeSessionId === session.id ? 'text-anizai-blue-600' : 'text-gray-400'}`}>
-                                            {formatProbability(session.probability)}
+                                            {session.probability === null ? '—' : formatProbability(session.probability)}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-2">
                                         <div className="flex items-center gap-1.5">
-                                            <div className={`w-1.5 h-1.5 rounded-full ${session.status === 'volatile' ? 'bg-amber-500' : 'bg-green-500'}`} />
-                                            <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">{session.status}</span>
+                                            <div className={`w-1.5 h-1.5 rounded-full ${statusView.dot}`} />
+                                            <span className={`text-[10px] font-medium uppercase tracking-wide ${statusView.text}`}>{statusView.label}</span>
                                         </div>
-                                        <span className="text-[10px] text-gray-300">•</span>
+                                        <span className="text-[10px] text-gray-300">/</span>
                                         <span className="text-[10px] text-gray-400">{formatRelativeTime(session.lastUpdated)}</span>
                                     </div>
                                 </button>
@@ -114,7 +144,7 @@ export function Sidebar({
                                             e.stopPropagation();
                                             onDeleteSession(session.id);
                                         }}
-                                        className="absolute bottom-2 right-2 p-1 rounded-md bg-white/90 border border-gray-200 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:border-red-300 transition-all shadow-sm"
+                                        className="absolute bottom-1.5 right-1.5 sm:bottom-2 sm:right-2 p-2 sm:p-1 rounded-md bg-white/90 border border-gray-200 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-red-50 hover:border-red-300 transition-all shadow-sm"
                                         title="Delete forecast"
                                     >
                                         <svg className="w-3 h-3 text-gray-400 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -123,13 +153,14 @@ export function Sidebar({
                                     </button>
                                 )}
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             </div>
 
             {/* User Profile Footer with Dropdown */}
-            <div className="p-4 border-t border-gray-200 bg-gray-50 relative">
+            <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50 relative">
                 <button
                     onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
                     className="w-full flex items-center gap-3 hover:bg-gray-100 p-2 rounded-lg transition-colors"
