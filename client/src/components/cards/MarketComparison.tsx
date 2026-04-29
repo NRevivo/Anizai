@@ -4,11 +4,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 
 interface MarketComparisonProps {
     anizaiProbability: number;
-    marketProbability?: number;
+    marketProbability?: number | null;
+    tier?: 'tier_1' | 'tier_2' | null;
 }
 
-export function MarketComparison({ anizaiProbability, marketProbability }: MarketComparisonProps) {
+export function MarketComparison({ anizaiProbability, marketProbability, tier = null }: MarketComparisonProps) {
     const hasMarketProbability = marketProbability != null;
+    const isFreeformTier = tier === 'tier_2';
     const anizaiPct = anizaiProbability * 100;
     const marketPct = hasMarketProbability ? marketProbability * 100 : 0;
     const data = [
@@ -27,6 +29,10 @@ export function MarketComparison({ anizaiProbability, marketProbability }: Marke
         : isBullish
             ? `Anizai is ${difference.toFixed(1)} points above the market benchmark`
             : `Anizai is ${Math.abs(difference).toFixed(1)} points below the market benchmark`;
+
+    const emptyDescription = isFreeformTier
+        ? 'No market benchmark available for this freeform forecast.'
+        : 'Comparable market probability data is not available for this forecast.';
 
     const CustomTooltip = ({ active, payload }: any) => {
         if (active && payload && payload.length) {
@@ -110,7 +116,7 @@ export function MarketComparison({ anizaiProbability, marketProbability }: Marke
                     <StateMessage
                         compact
                         title="No market benchmark"
-                        description="Comparable market probability data is not available for this forecast."
+                        description={emptyDescription}
                     />
                 )}
 

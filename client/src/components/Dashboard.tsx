@@ -51,6 +51,7 @@ export function Dashboard({ prediction, sentimentData, timelineEvents, agentEven
                         <MarketComparison
                             anizaiProbability={prediction.probability}
                             marketProbability={prediction.marketProbability}
+                            tier={prediction.tier}
                         />
                         <SentimentAnalysis data={sentimentData} />
                     </div>

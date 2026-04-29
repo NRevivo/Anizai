@@ -116,7 +116,7 @@ function toPrediction(detail: SessionDetail | null): Prediction | null {
     confidenceIndex: confidence,
     status: detail.session.status,
     explanation,
-    marketProbability: detail.result?.marketProbability ?? undefined,
+    marketProbability: detail.result?.marketProbability ?? null,
     errorMessage: detail.session.errorMessage,
     clarificationCandidates: detail.session.clarificationCandidates,
     keyFactors: detail.result?.keyFactors ?? [],

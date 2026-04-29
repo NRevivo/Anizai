@@ -16,7 +16,7 @@ export interface Prediction {
     confidenceIndex: number; // 0-1 float
     status: SessionStatus;
     explanation: string;
-    marketProbability?: number;
+    marketProbability?: number | null;
     errorMessage?: string | null;
     clarificationCandidates?: ClarificationCandidate[] | null;
     keyFactors?: KeyFactor[];
