@@ -149,6 +149,15 @@ langgraph==0.2.39
 # already pinned above and with langgraph 0.2.x.
 langchain-openai==0.2.8
 
+# LangChain (core meta-package) — pinned to the 0.3.x line that pairs
+# with langchain-core 0.3.x. Without an explicit pin, pip resolved
+# langchain 1.x, whose `langchain.debug` attribute was removed and which
+# langchain-core 0.3.x's callback manager still reads on every
+# `graph.invoke()` — surfaces as `AttributeError: module 'langchain' has
+# no attribute 'debug'` (T19.13 / KG-PHASE8-5 third symptom). Pinning
+# here keeps the worker's graph path runnable.
+langchain>=0.3,<0.4
+
 
 # ----------------------------------------------------------
 # Testing (Section 9.3)
