@@ -45,7 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
 from agent.config import settings
-from agent.process_query import AGENT_VERSION
+from agent.nodes.synthesize import AGENT_VERSION
 
 logger = logging.getLogger(__name__)
 

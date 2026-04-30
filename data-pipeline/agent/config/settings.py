@@ -151,3 +151,16 @@ OPENAI_MODEL_SUGGESTED_ACTIONS = os.getenv(
     "OPENAI_MODEL_SUGGESTED_ACTIONS", "gpt-4o-mini"
 )
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+
+# ==========================================================
+# 11. Logging (T19.14 — closes KG-PHASE8-7)
+# ==========================================================
+# Worker-entry log level. Without `logging.basicConfig()` at startup, the
+# root logger has no handlers and INFO-level lines from every agent
+# module disappear (only WARNING+ surfaces, and those go to stderr with
+# the bare-default format). KG-PHASE8-7 was raised at the Sprint 18
+# closeout when log output was missing despite `logger.info(...)` calls
+# throughout worker.py. T19.14 wires basicConfig(level=settings.LOG_LEVEL)
+# at the top of `agent/worker.py:main()`. Default INFO matches the
+# pipeline-side producers; flip to DEBUG via env var for local triage.
+LOG_LEVEL = os.getenv("AGENT_LOG_LEVEL", "INFO")

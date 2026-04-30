@@ -152,6 +152,21 @@ def main() -> None:
       7. Exit non-zero if a fatal listener error happened so the
          container restart policy reacts.
     """
+    # Fix for KG-PHASE8-7: configure the root logger before any logger.info
+    # call. Without this, INFO-level lines from every agent module are
+    # silently dropped — Python's root logger has no handlers by default,
+    # so the existing `logger.info(...)` calls throughout worker.py and
+    # the agent nodes were never reaching stdout. Format string matches
+    # the pipeline-side producer convention (e.g., orchestration/
+    # ingestion_trigger_consumer.py:356, ingestion/hackernews_producer.py:691).
+    # stream=sys.stdout is intentional for containerized log capture —
+    # docker/k8s tail stdout, not stderr.
+    logging.basicConfig(
+        level=settings.LOG_LEVEL,
+        format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+        stream=sys.stdout,
+    )
+
     worker_id = settings.AGENT_WORKER_ID
     logger.info("worker: starting, worker_id=%s", worker_id)
 
