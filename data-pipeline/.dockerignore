@@ -39,6 +39,7 @@ orchestration/
 # Local data and log files
 data/
 logs/
+firestore-debug.log
 
 # Documentation
 *.md
@@ -46,6 +47,7 @@ logs/
 # IDE metadata
 .idea/
 .vscode/
+
 
 # Git history — not needed in runtime image
 .git/

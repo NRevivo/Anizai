@@ -13,6 +13,7 @@ __pycache__/
 
 # Logs
 logs/
+firestore-debug.log
 
 # Telegram Session Files
 *.session
@@ -27,6 +28,7 @@ logs/
 /docs/agentic_hub_spec.md
 /docs/agentic_hub_spec_patch.md
 /docs/anizai_handoff_consolidated.md
+/docs/sprint19_persistence_audit.md
 
 /task_plan.md
 /task_plan_archive.md
