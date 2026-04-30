@@ -165,7 +165,7 @@ def test_happy_path_stub_result_shape(mocked_firestore):
 
     # Metadata
     assert result["tier"] == "tier_1"
-    assert result["agentVersion"] == "0.1.0-sprint18-stub"
+    assert result["agentVersion"] == "0.2.0-sprint19-retrieval-stub-synthesis"
     assert result["generatedAt"] is firestore_client.SERVER_TIMESTAMP
 
     # Narrative fields — every one must be a non-empty string so the
