@@ -90,6 +90,12 @@ def test_knowledge_similarity_search_returns_list_with_similarity_key(unit_vecto
         assert "similarity" in row, "knowledge_vectors persistence already returns 'similarity'"
         assert "source_platform" in row
         assert "canonical_event_id" in row
+        # silver_data_ref required for Researcher drill-down (spec §8.4.1 step 3).
+        # Restored to the SELECT in T19.2 — guard against regression.
+        assert "silver_data_ref" in row, (
+            "knowledge_vectors.similarity_search must expose silver_data_ref "
+            "for the Researcher drill-down to knowledge_vault"
+        )
 
 
 def test_knowledge_fetch_full_text_returns_seed_row():

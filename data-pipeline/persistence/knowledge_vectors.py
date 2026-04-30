@@ -398,10 +398,15 @@ def similarity_search(
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
+    # silver_data_ref is the knowledge_vault.doc_id linkage — required by
+    # the Researcher agent's drill-down step (spec §8.4.1 step 3).
+    # Parity with social_vectors.similarity_search, which has always
+    # exposed it. Restored in T19.2 (correction to Sprint 19 audit §3.1).
     sql = f"""
         SELECT
             kv.signal_id::text,
             kv.canonical_event_id,
+            kv.silver_data_ref::text,
             kv.source_platform,
             kv.entry_type,
             kv.published_at,
