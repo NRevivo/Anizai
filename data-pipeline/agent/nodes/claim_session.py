@@ -22,12 +22,11 @@ Why `query_doc_id == session_id`:
 
 Race-loss semantics:
     `claim_query` returns None when another worker already claimed the doc
-    or the doc no longer exists. In Sprint 18 the runner treats this as a
-    silent no-op (the worker moves on). In Sprint 19 we surface it as
-    `AgentProcessingError` so the graph runner has a single error type to
-    catch — T19.11 will translate "claim lost" into the same quiet skip
-    the Sprint 18 runner does, but at the runner level rather than buried
-    inside the graph.
+    or the doc no longer exists. The Sprint 18 procedural runner treated
+    this as a silent no-op. T19.11's thin graph runner catches the typed
+    `SessionClaimRaceLostError` and reproduces that quiet-skip behaviour
+    at the runner boundary — distinct from real processing failures, which
+    raise plain `AgentProcessingError` and are escalated to `failed` writes.
 
 Service isolation (CLAUDE.md §3.3):
     Talks only to `firestore_client`. No vault, no OpenAI.
@@ -43,7 +42,7 @@ from __future__ import annotations
 import logging
 
 from agent.config import settings
-from agent.errors import AgentProcessingError
+from agent.errors import AgentProcessingError, SessionClaimRaceLostError
 from agent import firestore_client
 
 logger = logging.getLogger(__name__)
@@ -66,8 +65,11 @@ def run(state: dict) -> dict:
         `session_id` (echoed back for explicitness).
 
     Raises:
-        AgentProcessingError: when session_id is missing, the claim is
-            lost (race or doc gone), or a Firestore status update fails.
+        AgentProcessingError: when session_id is missing or a Firestore
+            status update fails.
+        SessionClaimRaceLostError: when `claim_query` returns None
+            (another worker already claimed the doc, or the doc is gone).
+            The runner catches this as a quiet no-op rather than a failure.
     """
     session_id = state.get("session_id")
     if not session_id:
@@ -85,7 +87,7 @@ def run(state: dict) -> dict:
         ) from exc
 
     if claimed is None:
-        raise AgentProcessingError(
+        raise SessionClaimRaceLostError(
             f"claim_session: session not claimable (race lost or doc missing) "
             f"session_id={session_id}"
         )
