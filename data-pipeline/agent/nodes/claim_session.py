@@ -71,8 +71,8 @@ def run(state: dict) -> dict:
             (another worker already claimed the doc, or the doc is gone).
             The runner catches this as a quiet no-op rather than a failure.
     """
-    session_id = state.get("session_id")
-    if not session_id:
+    session_id = state.get("session_id") or ""
+    if not session_id.strip():
         raise AgentProcessingError("claim_session: missing session_id in state")
 
     worker_id = settings.AGENT_WORKER_ID
