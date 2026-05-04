@@ -546,3 +546,37 @@ def test_top_level_state_fields_surfaced_alongside_session_result():
     assert out["tier"] == "tier_1"
     assert out["confidence_score"] == out["synthesis_result"]["confidence"]
     assert "evidence_trail" in out
+
+
+# ==========================================================
+# reasoningChain regression — Q3 of Sprint 20 plan
+# ==========================================================
+def test_reasoning_chain_passed_through_as_non_empty_list():
+    """Per Q3 of the Sprint 20 plan: reasoningChain is populated by
+    synthesis as 4-6 prompt-generated post-hoc steps, NOT [] or null.
+
+    Defense in depth: the synthesis_lead JSON schema sets
+    minItems=REASONING_STEPS_MIN(4) which OpenAI's strict mode enforces
+    at the API level — production responses can never be empty. This
+    test pins the pass-through (`reasoningChain` field of SessionResult
+    matches the LLM's reasoning_chain output) so a future refactor that
+    drops the list, renames the field, or relaxes the schema doesn't
+    slip past test_synthesize.
+
+    Frontend renders this field on the chat panel; silent skip would
+    visibly degrade UX."""
+    out = synthesize.run(
+        _state(),
+        client=_client_returning(_make_response(output=_make_synthesis_output())),
+    )
+    chain = out["synthesis_result"]["reasoningChain"]
+    assert isinstance(chain, list)
+    assert len(chain) >= 4, f"reasoningChain has {len(chain)} entries; expected >= 4"
+    for entry in chain:
+        # Each entry conforms to the ReasoningStep schema (schemas.py)
+        assert "step" in entry
+        assert "title" in entry
+        assert "description" in entry
+        assert entry["step"] >= 1
+        assert isinstance(entry["title"], str) and entry["title"]
+        assert isinstance(entry["description"], str) and entry["description"]
