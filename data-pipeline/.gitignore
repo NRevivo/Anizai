@@ -12,8 +12,9 @@ __pycache__/
 *.pyc
 
 # Logs
-logs/
+.logs/
 firestore-debug.log
+worker.log
 
 # Telegram Session Files
 *.session
