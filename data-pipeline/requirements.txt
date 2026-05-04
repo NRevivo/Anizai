@@ -137,6 +137,15 @@ python-json-logger==2.0.7
 # JSON via GOOGLE_APPLICATION_CREDENTIALS in prod.
 firebase-admin==6.5.0
 
+# Google Cloud client libraries — used directly by agent/firestore_client.py
+# (google.cloud.firestore_v1 Client/Transaction/FieldFilter) and by tests +
+# scripts (google.auth.credentials for the emulator wrapper). These currently
+# arrive as transitives of firebase-admin; declaring them explicitly insulates
+# the agent from firebase-admin transitive-pin churn on patch releases
+# (KG-PHASE8-5 closure, Sprint 19 closeout 2026-05-01).
+google-cloud-firestore>=2.27,<3.0
+google-auth>=2.49,<3.0
+
 # LangGraph — StateGraph orchestration for the forecast pipeline
 # (Section 8.3). Sprint 18 stub: claim -> running -> write stub -> done.
 # Later sprints (19-25) add real nodes: query_understand, vault_query,
@@ -157,6 +166,16 @@ langchain-openai==0.2.8
 # no attribute 'debug'` (T19.13 / KG-PHASE8-5 third symptom). Pinning
 # here keeps the worker's graph path runnable.
 langchain>=0.3,<0.4
+
+# LangChain ecosystem siblings — currently transitive of langchain /
+# langchain-openai. Declared explicitly so a future langchain or
+# langchain-openai patch can't silently bump these into incompatible
+# minor lines. langchain-core in particular is the package whose callback
+# manager triggered the T19.13 / KG-PHASE8-5 third symptom; pinning the
+# minor line forecloses that class of regression
+# (KG-PHASE8-5 closure, Sprint 19 closeout 2026-05-01).
+langchain-core>=0.3,<0.4
+langchain-text-splitters>=0.3,<0.4
 
 
 # ----------------------------------------------------------
