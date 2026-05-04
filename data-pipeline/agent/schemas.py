@@ -147,6 +147,88 @@ class EvidenceItem(BaseModel):
 
 
 # ==========================================================
+# KeyFactor — one driver in SessionResult.keyFactors (Sprint 20 T20.3)
+# ==========================================================
+class KeyFactor(BaseModel):
+    """
+    One ranked driver of the forecast, surfaced in SessionResult.keyFactors.
+
+    Spec §8.7.2: "3-5 drivers, ranked." Synthesis (T20.3) produces these
+    from the rated evidence pool — each KeyFactor cites one or more
+    evidence items by id so the frontend's "Most Influential Drivers"
+    panel can link back to the chain-of-thought.
+
+    Why direction is enum (not free text):
+        Frontend renders an arrow / color based on direction. Enum
+        prevents the model from emitting "slightly-up" or "neutral-ish"
+        and breaking the render path.
+
+    Why no "neutral" in direction:
+        A key factor is by definition INFLUENTIAL. Neutral context goes
+        into EvidenceItem.impact_on_forecast="neutral" but doesn't earn
+        a key_factors slot. (Per evidence-handling skill: key_factors
+        are the top 3-5 by impact_magnitude — neutrals don't qualify.)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(
+        description="Short headline rendered as the driver title (3-7 words).",
+    )
+    description: str = Field(
+        description="One-sentence user-facing explanation of why this factor "
+                    "matters for the forecast.",
+    )
+    weight: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Relative influence on the forecast probability. "
+                    "Synthesis ranks key_factors by this; the frontend "
+                    "uses it for sort order and bar-chart sizing.",
+    )
+    direction: Literal["increases", "decreases"] = Field(
+        description="Whether this factor pushes the forecast probability up or down.",
+    )
+    evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="EvidenceItem.evidence_id values that support this factor. "
+                    "Frontend uses these to highlight matching evidence rows "
+                    "when the driver is clicked.",
+    )
+
+
+# ==========================================================
+# ReasoningStep — one step in SessionResult.reasoningChain
+# ==========================================================
+class ReasoningStep(BaseModel):
+    """
+    One step in the persistent reasoning chain that synthesis produces
+    as a post-hoc summary.
+
+    Distinct from `agentEvents` (which is real-time chain-of-thought
+    streamed during the run, deferred to Sprint 25): reasoningChain is
+    a static 4-6-step summary written into SessionResult and rendered
+    on the chat panel for users to scan after the forecast lands.
+
+    Step numbering is 1-based to match how the frontend renders.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    step: int = Field(
+        ge=1,
+        description="1-based ordinal. Frontend sorts ascending and renders.",
+    )
+    title: str = Field(
+        description="Short header for the step (3-7 words).",
+    )
+    description: str = Field(
+        description="One-sentence user-facing explanation of what the agent "
+                    "did at this step.",
+    )
+
+
+# ==========================================================
 # Frontend display-type mapping (§8.5.5 + frontend-integration skill)
 # ==========================================================
 # Used by write_to_firestore (Sprint 20 T20.5) when populating the

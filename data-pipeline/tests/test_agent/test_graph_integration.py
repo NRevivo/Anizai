@@ -102,6 +102,58 @@ def _make_embedding_response(*, dim: int = 1536, total_tokens: int = 8):
     )
 
 
+def _make_synthesis_response(
+    *,
+    final_probability: float = 0.7,
+    confidence: float = 0.65,
+    consensus_score: float = 0.6,
+    total_tokens: int = 1500,
+):
+    """openai>=1.x ChatCompletion shape with a synthesize.run-compatible
+    payload. The full SynthesisOutput schema is enforced upstream by
+    `agent.prompts.synthesis_lead.RESPONSE_SCHEMA`; here we hand-build a
+    minimum-valid object."""
+    payload = {
+        "final_probability": final_probability,
+        "confidence": confidence,
+        "consensus_score": consensus_score,
+        "bottom_line_answer": "Forecast: likely yes.",
+        "detailed_explanation": "Detailed explanation here.",
+        "summary_markdown": "**Forecast:** likely yes.",
+        "market_comparison_insight": "Markets agree.",
+        "sentiment_analysis_insight": "Sentiment is positive.",
+        "evidence_feed_summary": "Evidence reviewed.",
+        "what_i_didnt_find": [],
+        "key_factors": [
+            {"label": "Factor A", "description": "Drives up.",
+             "weight": 0.4, "direction": "increases", "evidence_ids": []},
+            {"label": "Factor B", "description": "Mild down.",
+             "weight": 0.2, "direction": "decreases", "evidence_ids": []},
+            {"label": "Factor C", "description": "Drives up.",
+             "weight": 0.3, "direction": "increases", "evidence_ids": []},
+        ],
+        "reasoning_chain": [
+            {"step": 1, "title": "Identify question",
+             "description": "Parsed the resolution criterion."},
+            {"step": 2, "title": "Review evidence",
+             "description": "Evaluated retrieved evidence."},
+            {"step": 3, "title": "Weigh factors",
+             "description": "Identified the key drivers."},
+            {"step": 4, "title": "Produce forecast",
+             "description": "Calibrated final probability."},
+        ],
+        "evidence_overlay": [],
+    }
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=json.dumps(payload))
+            )
+        ],
+        usage=SimpleNamespace(total_tokens=total_tokens),
+    )
+
+
 # ==========================================================
 # Fixtures
 # ==========================================================
@@ -117,8 +169,14 @@ def mocked_boundaries():
       - query_understand client returns a single high-confidence candidate
         (auto-pick path)
       - build_embedding client returns a 1536-dim embedding
-      - all three agents return empty evidence dicts (shape doesn't matter
-        — synthesize doesn't read them in Sprint 19)
+      - all three agents return empty evidence dicts
+      - synthesize client returns a minimum-valid SynthesisOutput
+        (Sprint 20: synthesize is now LLM-driven; pre-Sprint 20 it was
+        stub mode and didn't need a client mock)
+
+    Sprint 20 note: `evidence_trail` is empty because rate_evidence is
+    not in the graph until Bundle C / T20.7. Synthesize handles this as
+    the cold-start path (its prompt has Example 2 for sparse evidence).
     """
     with (
         patch("agent.firestore_client.claim_query") as mock_claim,
@@ -129,6 +187,9 @@ def mocked_boundaries():
         patch(
             "agent.nodes.build_embedding._get_default_client"
         ) as mock_emb_factory,
+        patch(
+            "agent.nodes.synthesize._get_default_client"
+        ) as mock_synth_factory,
         patch("agent.agents.researcher.run") as mock_researcher,
         patch("agent.agents.pulse_analyst.run") as mock_pulse,
         patch("agent.agents.market_bridge.run") as mock_market,
@@ -146,6 +207,10 @@ def mocked_boundaries():
         emb_client = MagicMock()
         emb_client.embeddings.create.return_value = _make_embedding_response()
         mock_emb_factory.return_value = emb_client
+
+        synth_client = MagicMock()
+        synth_client.chat.completions.create.return_value = _make_synthesis_response()
+        mock_synth_factory.return_value = synth_client
 
         mock_researcher.return_value = {
             "evidence_pieces": [],
@@ -171,6 +236,7 @@ def mocked_boundaries():
             status=mock_status,
             qu_client=qu_client,
             emb_client=emb_client,
+            synth_client=synth_client,
             researcher=mock_researcher,
             pulse=mock_pulse,
             market=mock_market,
@@ -186,16 +252,19 @@ def test_invoke_happy_path_produces_8_7_2_synthesis_result(mocked_boundaries):
     Gate 1's job (test_synthesize.py); here we just confirm the wiring:
     state flows through every node, and synthesize's output is in the
     final merged state."""
+    from agent.nodes import synthesize  # local import to avoid module-level coupling
+
     final = graph.invoke({"session_id": "doc1"})
 
     assert "synthesis_result" in final
     result = final["synthesis_result"]
     # Sentinel fields proving synthesize.run actually executed (vs.
-    # short-circuiting somewhere upstream)
-    assert result["finalProbability"] == 0.5
-    assert result["confidence"] == 0.5
+    # short-circuiting somewhere upstream). Values come from the
+    # default _make_synthesis_response in the fixture.
+    assert result["finalProbability"] == 0.7
+    assert result["confidence"] == 0.65
     assert result["tier"] == "tier_1"
-    assert result["agentVersion"] == "0.2.0-sprint19-retrieval-stub-synthesis"
+    assert result["agentVersion"] == synthesize.AGENT_VERSION
 
 
 # ==========================================================
@@ -217,10 +286,16 @@ def test_invoke_propagates_question_and_user_through_state(mocked_boundaries):
     assert final["session_id"] == "s99"
     assert final["raw_question"] == "Will BTC hit 100k by EOY 2026?"
     assert final["user_id"] == "user-abc"
-    # synthesize embeds raw_question into the markdown summary
-    assert "Will BTC hit 100k by EOY 2026?" in (
-        final["synthesis_result"]["summaryMarkdown"]
+    # synthesize forwards raw_question into the LLM user message (Sprint
+    # 20 onward — Sprint 19 stub embedded the question into
+    # summaryMarkdown directly; Sprint 20 lets the model produce
+    # summaryMarkdown so the question→prose path is asserted at the
+    # call boundary instead).
+    user_msg = (
+        mocked_boundaries.synth_client.chat.completions.create.call_args
+        .kwargs["messages"][1]["content"]
     )
+    assert "Will BTC hit 100k by EOY 2026?" in user_msg
 
 
 # ==========================================================
@@ -242,6 +317,7 @@ def test_invoke_calls_every_boundary_node_in_order(mocked_boundaries):
     mocked_boundaries.researcher.assert_called_once()
     mocked_boundaries.pulse.assert_called_once()
     mocked_boundaries.market.assert_called_once()
+    mocked_boundaries.synth_client.chat.completions.create.assert_called_once()
 
 
 # ==========================================================
@@ -314,6 +390,7 @@ def test_invoke_surfaces_race_lost_as_typed_exception(mocked_boundaries):
     mocked_boundaries.researcher.assert_not_called()
     mocked_boundaries.pulse.assert_not_called()
     mocked_boundaries.market.assert_not_called()
+    mocked_boundaries.synth_client.chat.completions.create.assert_not_called()
 
 
 # ==========================================================
