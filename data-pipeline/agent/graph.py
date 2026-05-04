@@ -1,36 +1,50 @@
 """
-agent/graph.py — LangGraph compilation for the forecast pipeline (T19.9).
+agent/graph.py — LangGraph compilation for the forecast pipeline.
 
-Compiles a partial StateGraph for Sprint 19's linear retrieval path:
+Sprint 20 T20.7 — extends the Sprint 19 retrieval graph with
+`rate_evidence` (between vault_query and synthesize) and
+`write_to_firestore` (after synthesize). The full Tier 1 path now
+runs end-to-end inside the graph; `process_query.py` (the runner)
+shrinks to claim/invoke/cleanup-on-failure only.
 
     START → claim_session → query_understand → build_embedding
-          → vault_query → synthesize → END
+          → vault_query → rate_evidence → synthesize
+          → write_to_firestore → END
 
-Sprint 19 deliberate omissions (filled in by later sprints):
-    - Conditional clarification edge from query_understand (Sprint 21+ when
-      a clarification node exists to route to). The `awaiting_clarification`
-      flag set by query_understand is logged but not branched on.
-    - Reactive-search loop (sufficiency_check → vault_query_2 → reactive_search
-      → rate_evidence). Sprint 22.
-    - `write_to_firestore` Node 7 (Sprint 20+). Until then the runner
-      (T19.11) does the sessionResults / status writes after `graph.invoke()`
-      returns.
+Sprint 20 deliberate omissions (filled in by later sprints):
+    - Conditional clarification edge from query_understand (Sprint 21+
+      when a clarification node exists to route to). The
+      `awaiting_clarification` flag set by query_understand is logged
+      but not branched on.
+    - Reactive-search loop (sufficiency_check → vault_query_2 →
+      reactive_search). Sprint 22.
+    - agentEvents writes throughout the graph. Sprint 25.
 
-Why module-level singleton compile:
+Why the success-path Firestore writes moved into the graph (D9):
+    Sprint 18/19 had process_query.py do `write_session_result →
+    update_session_status('done') → update_query_status('done')` after
+    `graph.invoke()` returned. T20.5 introduces a dedicated Node 7
+    that does those writes inside the graph. Two reasons:
+      1. Single introspectable lifecycle — the full forecast (claim →
+         retrieve → rate → synthesize → persist) is one LangGraph
+         object, useful for tracing and for the eventual reactive-
+         search loop that may want to revisit persistence state.
+      2. The runner becomes purely an exception-handling thin wrapper
+         (claim race, mark-failed cleanup), which is easier to reason
+         about than orchestration plumbing scattered across nodes and
+         the runner.
+
+Why module-level singleton compile (unchanged from Sprint 19):
     StateGraph compilation is cheap (<10ms) but does graph validation
     (cycle/edge checks). Doing it once at import time means the worker
-    process surfaces a malformed graph at startup rather than on the first
-    request. Tests introspect the uncompiled builder via `_build_graph()`.
-
-Why claim_session is inside the graph (not in the runner):
-    Spec §8.3.2 lists it as Node 0. Keeping it inside the graph means the
-    full lifecycle is one introspectable LangGraph object — useful for
-    tracing and for the eventual reactive-search loop that may want to
-    revisit the claim state. T19.11 will replace `process_query.py` with a
-    thin runner that just calls `graph.invoke({"session_id": query_doc_id})`.
+    process surfaces a malformed graph at startup rather than on the
+    first request. Tests introspect the uncompiled builder via
+    `_build_graph()`.
 
 Spec references:
     - data-pipeline/docs/agentic_hub_spec.md §8.3.2 (Graph Topology)
+    - data-pipeline/docs/agentic_hub_spec_patch.md Patch 7 (rate_evidence
+      between vault_query and synthesize; write_to_firestore as Node 7)
 """
 
 from __future__ import annotations
@@ -43,8 +57,10 @@ from agent.nodes import (
     build_embedding,
     claim_session,
     query_understand,
+    rate_evidence,
     synthesize,
     vault_query,
+    write_to_firestore,
 )
 from agent.state import ForecastState
 
@@ -58,7 +74,9 @@ NODE_CLAIM_SESSION = "claim_session"
 NODE_QUERY_UNDERSTAND = "query_understand"
 NODE_BUILD_EMBEDDING = "build_embedding"
 NODE_VAULT_QUERY = "vault_query"
+NODE_RATE_EVIDENCE = "rate_evidence"
 NODE_SYNTHESIZE = "synthesize"
+NODE_WRITE_TO_FIRESTORE = "write_to_firestore"
 
 
 # ==========================================================
@@ -68,9 +86,9 @@ def _build_graph() -> StateGraph:
     """
     Construct the uncompiled StateGraph.
 
-    Exposed (private) for tests that want to introspect node/edge structure
-    without invoking the full graph. Production code should use the
-    module-level `graph` singleton.
+    Exposed (private) for tests that want to introspect node/edge
+    structure without invoking the full graph. Production code should
+    use the module-level `graph` singleton.
     """
     builder = StateGraph(ForecastState)
 
@@ -78,14 +96,18 @@ def _build_graph() -> StateGraph:
     builder.add_node(NODE_QUERY_UNDERSTAND, query_understand.run)
     builder.add_node(NODE_BUILD_EMBEDDING, build_embedding.run)
     builder.add_node(NODE_VAULT_QUERY, vault_query.run)
+    builder.add_node(NODE_RATE_EVIDENCE, rate_evidence.run)
     builder.add_node(NODE_SYNTHESIZE, synthesize.run)
+    builder.add_node(NODE_WRITE_TO_FIRESTORE, write_to_firestore.run)
 
     builder.add_edge(START, NODE_CLAIM_SESSION)
     builder.add_edge(NODE_CLAIM_SESSION, NODE_QUERY_UNDERSTAND)
     builder.add_edge(NODE_QUERY_UNDERSTAND, NODE_BUILD_EMBEDDING)
     builder.add_edge(NODE_BUILD_EMBEDDING, NODE_VAULT_QUERY)
-    builder.add_edge(NODE_VAULT_QUERY, NODE_SYNTHESIZE)
-    builder.add_edge(NODE_SYNTHESIZE, END)
+    builder.add_edge(NODE_VAULT_QUERY, NODE_RATE_EVIDENCE)
+    builder.add_edge(NODE_RATE_EVIDENCE, NODE_SYNTHESIZE)
+    builder.add_edge(NODE_SYNTHESIZE, NODE_WRITE_TO_FIRESTORE)
+    builder.add_edge(NODE_WRITE_TO_FIRESTORE, END)
 
     return builder
 

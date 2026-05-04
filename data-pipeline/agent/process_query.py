@@ -1,43 +1,51 @@
 """
-Thin graph runner for the Agentic Hub (Sprint 19, T19.11).
+Thin graph runner for the Agentic Hub (Sprint 20 T20.7).
 
-Replaces the Sprint 18 procedural flow with a wrapper that just invokes
-the compiled LangGraph (`agent.graph.graph`) and writes the synthesis
-result + final status transitions to Firestore.
+Sprint 18/19 history: this module used to orchestrate the post-graph
+Firestore writes itself (write_session_result → session 'done' → query
+'done'). Sprint 20 T20.5 + T20.7 moved those writes into the graph
+proper as Node 7 (`write_to_firestore`). The runner is now purely a
+lifecycle wrapper around `graph.invoke()` — claim race handling and
+cleanup-on-failure, nothing else.
 
 Flow:
     graph.invoke({"session_id": query_doc_id})
-        → claim_session  (Firestore: claimed → running, returns question)
+        → claim_session       (Firestore: claimed → running)
         → query_understand
         → build_embedding
         → vault_query
-        → synthesize     (returns SessionResult dict in state)
+        → rate_evidence       (Sprint 20 T20.1)
+        → synthesize          (Sprint 20 T20.3, GPT-4o)
+        → write_to_firestore  (Sprint 20 T20.5: subcollections →
+                               sessionResults → status='done')
     runner:
-        → write_session_result
-        → sessions/{id}: done
-        → forecastQueries/{id}: done
+        (no further writes — happy path is fully done by the graph)
 
-Why this is thin:
-    Every Firestore touch that the graph itself owns (claim, status →
-    claimed/running) lives inside `claim_session`. The runner is left with
-    only the post-graph writes — the result + the two `done` transitions —
-    plus the `_mark_failed` cleanup path. T19.11 / D5: the procedural
-    helpers and stub builders moved out in T19.10; the runner now exists
-    purely to orchestrate the graph from the worker boundary.
+Why the success-path writes moved out of the runner (T20.7 / D9):
+    The Sprint 19 runner held three Firestore calls (write result,
+    session 'done', query 'done') after `graph.invoke()` returned.
+    Splitting graph + runner across the persistence boundary made
+    introspection awkward (the lifecycle was half in the graph, half
+    in the runner). Moving the writes into Node 7 collapses the full
+    forecast into one introspectable LangGraph object and frees the
+    runner to be a pure exception-handler.
 
 Why _mark_failed stays in the runner:
-    Cleanup-on-failure is a runner concern — it wraps both the session
-    and the queue doc in `failed` state, which neither the graph nor the
-    nodes know about. Keeping it here keeps node code free of orchestration
-    plumbing.
+    Cleanup-on-failure is fundamentally a runner concern — it wraps
+    both the session and the queue doc in `failed` state, which
+    neither the graph nor any individual node knows about. The graph
+    can't `_mark_failed` itself because the failure scenarios include
+    "Node 7 itself raised mid-batch": you cannot recover-by-running-
+    Node-7 if Node 7 was the failure. Keeping cleanup outside the
+    graph makes it the always-safe fallback.
 
 Race-loss handling:
-    `claim_session` raises `SessionClaimRaceLostError` (typed subclass of
-    `AgentProcessingError`) when another worker already won the claim. The
-    runner catches that subclass first and returns quietly — no `failed`
-    writes, no traceback. Any other `AgentProcessingError` (or any other
-    exception) goes through `_mark_failed` and is re-raised so the worker
-    log shows the cause.
+    `claim_session` raises `SessionClaimRaceLostError` (typed subclass
+    of `AgentProcessingError`) when another worker already won the
+    claim. The runner catches that subclass first and returns quietly
+    — no `failed` writes, no traceback. Any other `AgentProcessingError`
+    (or any other exception) goes through `_mark_failed` and is
+    re-raised so the worker log shows the cause.
 
 Spec references:
     - data-pipeline/docs/agentic_hub_spec.md §8.3.2 (Graph Topology)
@@ -54,7 +62,6 @@ from agent.errors import AgentProcessingError, SessionClaimRaceLostError
 from agent.firestore_client import (
     update_query_status,
     update_session_status,
-    write_session_result,
 )
 from agent.graph import graph
 
@@ -76,12 +83,20 @@ def _mark_failed(
     Each cleanup write is wrapped in its own try/except so a failure on
     the session-side update does not skip the queue-side update. The
     original processing exception has already been logged by the runner;
-    cleanup failures are logged here and swallowed so the worker sees the
-    real cause when the runner re-raises.
+    cleanup failures are logged here and swallowed so the worker sees
+    the real cause when the runner re-raises.
 
     `session_id` is `None` when the failure happened before claim_session
     populated it (e.g., the `session_id` validation inside claim_session
-    itself fails). In that case only the queue doc gets the failure stamp.
+    itself fails). In that case only the queue doc gets the failure
+    stamp.
+
+    Sprint 20 covers a new failure mode: write_to_firestore (Node 7)
+    raising mid-batch. The session may have a partial sessionResults
+    doc and partial subcollections. _mark_failed flips status='failed'
+    on both docs; the frontend's "render-on-done" contract means the
+    half-written sessionResults isn't rendered. Acceptable cleanup
+    state for V1; Sprint 22+ may add transactional rollback.
     """
     if session_id is not None:
         try:
@@ -116,9 +131,15 @@ def process_query(query_doc_id: str) -> None:
     """
     Process one claimed forecastQueries doc end-to-end via the graph.
 
+    The graph runs the full pipeline including Node 7
+    (write_to_firestore), so on the happy path no Firestore writes
+    happen here in the runner — graph.invoke returns and the runner
+    just exits.
+
     Args:
-        query_doc_id: doc id under forecastQueries/. Equals sessionId per
-                      the server-side write at session.repository.ts:347.
+        query_doc_id: doc id under forecastQueries/. Equals sessionId
+                      per the server-side write at
+                      session.repository.ts:347.
     """
     logger.info(
         "process_query: starting graph processing query_doc_id=%s",
@@ -126,11 +147,12 @@ def process_query(query_doc_id: str) -> None:
     )
 
     try:
-        final_state = graph.invoke({"session_id": query_doc_id})
+        graph.invoke({"session_id": query_doc_id})
     except SessionClaimRaceLostError:
-        # Another worker won the claim, or the doc is gone. Quiet no-op —
-        # the sibling worker (or the absent doc) is responsible for any
-        # state transition. claim_session already logged the details.
+        # Another worker won the claim, or the doc is gone. Quiet
+        # no-op — the sibling worker (or the absent doc) is responsible
+        # for any state transition. claim_session already logged the
+        # details.
         logger.info(
             "process_query: claim race lost or doc missing query_doc_id=%s",
             query_doc_id,
@@ -138,9 +160,9 @@ def process_query(query_doc_id: str) -> None:
         return
     except Exception as exc:
         # session_id == query_doc_id by server contract, so we can pass
-        # query_doc_id straight through as the session id. We don't have a
-        # separate session_id from the graph state because the failure may
-        # have happened before claim_session returned.
+        # query_doc_id straight through as the session id. We don't
+        # have a separate session_id from the graph state because the
+        # failure may have happened before claim_session returned.
         logger.exception(
             "process_query: graph processing failed query_doc_id=%s",
             query_doc_id,
@@ -148,23 +170,7 @@ def process_query(query_doc_id: str) -> None:
         _mark_failed(query_doc_id, query_doc_id, str(exc))
         raise
 
-    session_id = final_state["session_id"]
-    synthesis_result = final_state["synthesis_result"]
-
-    try:
-        write_session_result(session_id, synthesis_result)
-        update_session_status(session_id, "done")
-        update_query_status(query_doc_id, "done")
-    except Exception as exc:
-        logger.exception(
-            "process_query: post-graph write failed session_id=%s "
-            "query_doc_id=%s",
-            session_id, query_doc_id,
-        )
-        _mark_failed(session_id, query_doc_id, str(exc))
-        raise
-
     logger.info(
-        "process_query: completed graph processing session_id=%s",
-        session_id,
+        "process_query: completed graph processing query_doc_id=%s",
+        query_doc_id,
     )

@@ -354,6 +354,176 @@ def write_session_result(session_id: str, result: dict) -> None:
 
 
 # ==========================================================
+# Subcollection Writes — Sprint 20 T20.5 (write_to_firestore node)
+# ==========================================================
+
+# Firestore WriteBatch caps at 500 ops per commit. For Sprint 20 the
+# realistic evidence count per session is ~30-50 so one batch suffices,
+# but the helper slices into 500-doc chunks defensively for forward
+# compatibility.
+FIRESTORE_BATCH_MAX_DOCS = 500
+
+
+def write_evidence_batch(session_id: str, evidence_items: list[dict]) -> int:
+    """
+    Write the per-session evidence subcollection at
+    sessions/{session_id}/evidence/{evidence_id} in batched transactions.
+
+    Each item dict is expected to be a fully-rated EvidenceItem
+    (post-rate_evidence + post-synthesize-overlay) plus a frontend
+    `type` field — the caller (write_to_firestore node) does the
+    source_type → frontend type mapping before passing here.
+
+    Args:
+        session_id:      doc id under sessions/.
+        evidence_items:  list of dicts to write under
+                         sessions/{session_id}/evidence/. Each item MUST
+                         have an `evidence_id` key — that becomes the
+                         subcollection doc id (so reruns overwrite the
+                         same row deterministically).
+
+    Returns:
+        Count of items written. Zero is acceptable (no evidence retrieved
+        is a valid cold-start outcome).
+
+    Why batched commits, not one .set() per doc:
+        Per-doc writes round-trip to Firestore. A 30-item evidence
+        subcollection at 30 RTTs vs 1 batched commit is a ~30x latency
+        difference. The 500-cap is a Firestore hard limit, not advisory.
+
+    Why explicit doc id from evidence_id:
+        Auto-id would make reruns produce duplicate evidence rows.
+        Using evidence_id as the doc id makes the write idempotent —
+        a retry overwrites the same row.
+    """
+    if not evidence_items:
+        return 0
+
+    db = get_db()
+    evidence_collection = (
+        db.collection("sessions").document(session_id).collection("evidence")
+    )
+
+    written = 0
+    for chunk_start in range(0, len(evidence_items), FIRESTORE_BATCH_MAX_DOCS):
+        chunk = evidence_items[chunk_start: chunk_start + FIRESTORE_BATCH_MAX_DOCS]
+        batch = db.batch()
+        for item in chunk:
+            evidence_id = item.get("evidence_id")
+            if not evidence_id:
+                logger.warning(
+                    "write_evidence_batch: skipping item with missing "
+                    "evidence_id (session_id=%s)", session_id,
+                )
+                continue
+            ref = evidence_collection.document(evidence_id)
+            batch.set(ref, item)
+            written += 1
+        batch.commit()
+
+    logger.info(
+        "write_evidence_batch: session_id=%s items=%d batches=%d",
+        session_id, written,
+        (len(evidence_items) + FIRESTORE_BATCH_MAX_DOCS - 1) // FIRESTORE_BATCH_MAX_DOCS,
+    )
+    return written
+
+
+def write_prediction_series(session_id: str, points: list[dict]) -> int:
+    """
+    Write the per-session predictionSeries subcollection at
+    sessions/{session_id}/predictionSeries/{auto_id}.
+
+    Sprint 20 contract: empty list is the typical case. With KG-PHASE8-12
+    deferring the polymarket auto-pick resolver, no time-series data is
+    available — the synthesis node leaves `predictionSeries` empty in
+    its output. The PredictionOverview BI card renders an empty state.
+    Sprint 22+ may populate per-day points from reactive search.
+
+    Each point is an arbitrary dict the frontend's `mapPredictionDoc`
+    decoder accepts — shape is the partner's schema, not specified here.
+
+    Args:
+        session_id: doc id under sessions/.
+        points:     list of point dicts. Empty list = no writes.
+
+    Returns:
+        Count of points written. Zero is the Sprint 20 default.
+
+    Why auto-id (not explicit):
+        Time-series points are append-only and don't have a natural
+        idempotency key. Auto-id is fine — reruns overwrite the
+        sessionResults doc, and a partial subcollection is cleared by
+        operations team if it ever matters.
+    """
+    if not points:
+        return 0
+
+    db = get_db()
+    prediction_collection = (
+        db.collection("sessions").document(session_id).collection("predictionSeries")
+    )
+
+    written = 0
+    for chunk_start in range(0, len(points), FIRESTORE_BATCH_MAX_DOCS):
+        chunk = points[chunk_start: chunk_start + FIRESTORE_BATCH_MAX_DOCS]
+        batch = db.batch()
+        for point in chunk:
+            ref = prediction_collection.document()  # auto-id
+            batch.set(ref, point)
+            written += 1
+        batch.commit()
+
+    logger.info(
+        "write_prediction_series: session_id=%s points=%d",
+        session_id, written,
+    )
+    return written
+
+
+def write_sentiment_time_series(session_id: str, points: list[dict]) -> int:
+    """
+    Write the per-session sentimentTimeSeries subcollection at
+    sessions/{session_id}/sentimentTimeSeries/{auto_id}.
+
+    Sprint 20 contract: empty list per Q5 of the implementation plan
+    (sentiment time series isn't derivable from current Sprint 19/20
+    evidence packages). The frontend's SentimentAnalysis BI card
+    renders an empty state. Sprint 22+ reactive search may add points.
+
+    Args:
+        session_id: doc id under sessions/.
+        points:     list of point dicts. Empty list = no writes.
+
+    Returns:
+        Count of points written.
+    """
+    if not points:
+        return 0
+
+    db = get_db()
+    sentiment_collection = (
+        db.collection("sessions").document(session_id).collection("sentimentTimeSeries")
+    )
+
+    written = 0
+    for chunk_start in range(0, len(points), FIRESTORE_BATCH_MAX_DOCS):
+        chunk = points[chunk_start: chunk_start + FIRESTORE_BATCH_MAX_DOCS]
+        batch = db.batch()
+        for point in chunk:
+            ref = sentiment_collection.document()  # auto-id
+            batch.set(ref, point)
+            written += 1
+        batch.commit()
+
+    logger.info(
+        "write_sentiment_time_series: session_id=%s points=%d",
+        session_id, written,
+    )
+    return written
+
+
+# ==========================================================
 # Snapshot Listener — forecastQueries where status == 'pending'
 # ==========================================================
 

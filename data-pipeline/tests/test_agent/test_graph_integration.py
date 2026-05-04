@@ -1,7 +1,9 @@
 """
-Gate 2 subgraph integration tests for `agent.graph` (T19.13).
+Gate 2 subgraph integration tests for `agent.graph` (T19.13 + Sprint 20
+T20.7/T20.9 extensions).
 
-Runs the compiled LangGraph end-to-end with mocks at the system boundaries:
+Runs the compiled LangGraph end-to-end with mocks at the system
+boundaries:
 
     - agent.firestore_client.{claim_query, update_session_status}
         — for claim_session
@@ -10,16 +12,24 @@ Runs the compiled LangGraph end-to-end with mocks at the system boundaries:
     - agent.nodes.build_embedding._get_default_client
         — for build_embedding (OpenAI embeddings)
     - agent.agents.{researcher, pulse_analyst, market_bridge}.run
-        — for vault_query (per OQ-8: same boundary as vault_query Gate 1
-          unit tests; deeper than agent/tools/ boundary)
+        — for vault_query
+    - agent.nodes.rate_evidence._get_default_client
+        — for rate_evidence (gpt-4o-mini batch rating; Sprint 20 T20.1)
+    - agent.nodes.synthesize._get_default_client
+        — for synthesize (gpt-4o synthesis; Sprint 20 T20.3)
+    - agent.firestore_client.{write_evidence_batch,
+        write_prediction_series, write_sentiment_time_series,
+        write_session_result, update_query_status}
+        — for write_to_firestore (Sprint 20 T20.5)
 
 Gate 1 unit tests already cover each node's internal logic. Gate 2 here
 proves the wiring: state field names line up between nodes, ordering
-matches the spec, exceptions propagate through `graph.invoke()` cleanly,
-and the final state has the §8.7.2-compliant `synthesis_result`.
+matches the spec, exceptions propagate through `graph.invoke()`
+cleanly, and the full Tier 1 graph end-to-end produces the §8.7.2
+SessionResult AND triggers the persistence side effects.
 
-Real-OpenAI / real-Firestore fallback is explicitly out of scope (per
-OQ-10) — that's a separate gate (Gate 3 / E2E).
+Real-OpenAI / real-Firestore fallback is explicitly out of scope —
+that's a separate gate (Gate 3 / E2E, T20.10/T20.11).
 
 Spec references:
     - data-pipeline/docs/agentic_hub_spec.md §8.3.2 (Graph Topology)
@@ -174,19 +184,35 @@ def mocked_boundaries():
         (Sprint 20: synthesize is now LLM-driven; pre-Sprint 20 it was
         stub mode and didn't need a client mock)
 
-    Sprint 20 note: `evidence_trail` is empty because rate_evidence is
-    not in the graph until Bundle C / T20.7. Synthesize handles this as
-    the cold-start path (its prompt has Example 2 for sparse evidence).
+    Sprint 20 note: `evidence_trail` is non-existent at vault_query
+    output because the agents return empty packages by default —
+    rate_evidence's normalize step produces zero items and short-
+    circuits without calling its LLM. Synthesize then runs in
+    cold-start mode (Example 2 in its prompt). Tests that need
+    populated evidence configure the agents to return non-empty
+    packages.
     """
     with (
         patch("agent.firestore_client.claim_query") as mock_claim,
+        # Both claim_session AND write_to_firestore call this — single
+        # patch, single receiver. Tests that need to distinguish the
+        # 'claimed'/'running' calls (claim_session) from the 'done'
+        # call (write_to_firestore) inspect call_args_list.
         patch("agent.firestore_client.update_session_status") as mock_status,
+        patch("agent.firestore_client.update_query_status") as mock_query_status,
+        patch("agent.firestore_client.write_session_result") as mock_write_result,
+        patch("agent.firestore_client.write_evidence_batch") as mock_write_evidence,
+        patch("agent.firestore_client.write_prediction_series") as mock_write_prediction,
+        patch("agent.firestore_client.write_sentiment_time_series") as mock_write_sentiment,
         patch(
             "agent.nodes.query_understand._get_default_client"
         ) as mock_qu_factory,
         patch(
             "agent.nodes.build_embedding._get_default_client"
         ) as mock_emb_factory,
+        patch(
+            "agent.nodes.rate_evidence._get_default_client"
+        ) as mock_rate_factory,
         patch(
             "agent.nodes.synthesize._get_default_client"
         ) as mock_synth_factory,
@@ -208,38 +234,65 @@ def mocked_boundaries():
         emb_client.embeddings.create.return_value = _make_embedding_response()
         mock_emb_factory.return_value = emb_client
 
+        # rate_evidence client — only invoked when there's evidence to
+        # rate; default agent packages are empty so this typically
+        # never runs. Provided so tests with non-empty evidence work
+        # without per-test setup.
+        rate_client = MagicMock()
+        rate_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(content=json.dumps({"ratings": []}))
+            )],
+            usage=SimpleNamespace(total_tokens=50),
+        )
+        mock_rate_factory.return_value = rate_client
+
         synth_client = MagicMock()
         synth_client.chat.completions.create.return_value = _make_synthesis_response()
         mock_synth_factory.return_value = synth_client
 
+        # write_to_firestore helper return values (counts of items written)
+        mock_write_evidence.return_value = 0
+        mock_write_prediction.return_value = 0
+        mock_write_sentiment.return_value = 0
+        mock_write_result.return_value = None
+        mock_query_status.return_value = None
+
         mock_researcher.return_value = {
-            "evidence_pieces": [],
-            "drill_down_evidence": [],
+            "articles": [],
             "source_diversity": {},
-            "recency_range_iso8601": [None, None],
+            "recency_range": None,
+            "empty": True,
         }
         mock_pulse.return_value = {
-            "evidence_pieces": [],
-            "drill_down_evidence": [],
-            "source_diversity": {},
-            "recency_range_iso8601": [None, None],
+            "market_consensus": [],
+            "community_discussion": [],
+            "overall_sentiment": 0.0,
+            "empty": True,
         }
         mock_market.return_value = {
             "polymarket": None,
+            "linked_sources": [],
             "fred_anomalies": [],
-            "trends": [],
-            "entity_metadata": {},
+            "google_trends": [],
+            "empty": True,
         }
 
         yield SimpleNamespace(
             claim=mock_claim,
-            status=mock_status,
+            status=mock_status,           # all session-status writes (3 on happy path)
+            query_status=mock_query_status,  # forecastQueries 'done' from write_to_firestore
             qu_client=qu_client,
             emb_client=emb_client,
+            rate_client=rate_client,
             synth_client=synth_client,
             researcher=mock_researcher,
             pulse=mock_pulse,
             market=mock_market,
+            write_evidence=mock_write_evidence,
+            write_prediction=mock_write_prediction,
+            write_sentiment=mock_write_sentiment,
+            write_result=mock_write_result,
         )
 
 
@@ -310,14 +363,29 @@ def test_invoke_calls_every_boundary_node_in_order(mocked_boundaries):
     graph.invoke({"session_id": "doc1"})
 
     mocked_boundaries.claim.assert_called_once()
-    # update_session_status fires twice from claim_session (claimed, running)
-    assert mocked_boundaries.status.call_count == 2
+    # update_session_status fires THREE times on a happy run:
+    # claim_session writes ('claimed', 'running'); write_to_firestore
+    # writes ('done'). Pin the count and the per-call args.
+    assert mocked_boundaries.status.call_count == 3
+    statuses_written = [c.args for c in mocked_boundaries.status.call_args_list]
+    assert ("doc1", "claimed") in statuses_written
+    assert ("doc1", "running") in statuses_written
+    assert ("doc1", "done") in statuses_written
     mocked_boundaries.qu_client.chat.completions.create.assert_called_once()
     mocked_boundaries.emb_client.embeddings.create.assert_called_once()
     mocked_boundaries.researcher.assert_called_once()
     mocked_boundaries.pulse.assert_called_once()
     mocked_boundaries.market.assert_called_once()
+    # rate_evidence's LLM client is only invoked when there's evidence
+    # to rate; default packages are empty so it short-circuits without
+    # an LLM call. Synthesize ALWAYS runs (cold-start handles empty).
     mocked_boundaries.synth_client.chat.completions.create.assert_called_once()
+    # write_to_firestore (Sprint 20 T20.5) — full persistence sequence
+    mocked_boundaries.write_evidence.assert_called_once()
+    mocked_boundaries.write_prediction.assert_called_once()
+    mocked_boundaries.write_sentiment.assert_called_once()
+    mocked_boundaries.write_result.assert_called_once()
+    mocked_boundaries.query_status.assert_called_once_with("doc1", "done")
 
 
 # ==========================================================
@@ -391,6 +459,10 @@ def test_invoke_surfaces_race_lost_as_typed_exception(mocked_boundaries):
     mocked_boundaries.pulse.assert_not_called()
     mocked_boundaries.market.assert_not_called()
     mocked_boundaries.synth_client.chat.completions.create.assert_not_called()
+    # write_to_firestore never reached
+    mocked_boundaries.write_evidence.assert_not_called()
+    mocked_boundaries.write_result.assert_not_called()
+    mocked_boundaries.query_status.assert_not_called()
 
 
 # ==========================================================
@@ -449,20 +521,28 @@ def test_invoke_surfaces_retrieval_agent_failure(mocked_boundaries):
         graph.invoke({"session_id": "doc1"})
 
     assert "researcher failed" in str(exc_info.value)
-    # Synthesize never ran — final state has no synthesis_result.
-    # We can't introspect final state on an exception, but if synthesize
-    # had run the exception would have been swallowed.
+    # Synthesize and write_to_firestore never ran. We can't introspect
+    # final state on an exception, but the LLM and persistence mocks
+    # tell us nothing fired downstream of vault_query. status was
+    # called for claim_session's 'claimed'/'running' but not 'done'.
+    mocked_boundaries.synth_client.chat.completions.create.assert_not_called()
+    mocked_boundaries.write_evidence.assert_not_called()
+    mocked_boundaries.write_result.assert_not_called()
+    mocked_boundaries.query_status.assert_not_called()
+    statuses_written = [c.args for c in mocked_boundaries.status.call_args_list]
+    assert ("doc1", "done") not in statuses_written
 
 
 # ==========================================================
-# 10. Clarification flag flows through — does NOT short-circuit in Sprint 19
+# 10. Clarification flag flows through — does NOT short-circuit in Sprint 20
 # ==========================================================
-def test_invoke_continues_through_clarification_in_sprint19(mocked_boundaries):
+def test_invoke_continues_through_clarification_in_sprint20(mocked_boundaries):
     """When query_understand sets `awaiting_clarification=True` (low
-    confidence or narrow margin), Sprint 21+ will route to a clarification
-    node. Sprint 19 has no such edge — the graph runs straight through.
-    Pin that the flag is set in final state but the synthesis_result is
-    still produced (so frontend always gets *something* to render)."""
+    confidence or narrow margin), Sprint 21+ will route to a
+    clarification node. Sprint 20 has no such edge — the graph runs
+    straight through. Pin that the flag is set in final state but the
+    synthesis_result is still produced AND write_to_firestore still
+    persists, so the frontend always gets *something* to render."""
     mocked_boundaries.qu_client.chat.completions.create.return_value = (
         _make_chat_response(
             candidates=[
@@ -475,10 +555,75 @@ def test_invoke_continues_through_clarification_in_sprint19(mocked_boundaries):
     final = graph.invoke({"session_id": "doc1"})
 
     assert final["awaiting_clarification"] is True
-    # Despite ambiguity, the full pipeline completed and synthesize built
-    # a placeholder result. Sprint 21 will reroute this case via a
-    # clarification edge.
+    # Despite ambiguity, the full pipeline completed and persisted.
+    # Sprint 21 will reroute this case via a clarification edge.
     assert "synthesis_result" in final
     mocked_boundaries.researcher.assert_called_once()
     mocked_boundaries.pulse.assert_called_once()
     mocked_boundaries.market.assert_called_once()
+    mocked_boundaries.write_result.assert_called_once()
+    statuses_written = [c.args for c in mocked_boundaries.status.call_args_list]
+    assert ("doc1", "done") in statuses_written
+
+
+# ==========================================================
+# 11. Bundle C T20.9 — full Tier 1 graph end-to-end persistence
+# ==========================================================
+def test_invoke_persists_full_session_with_correct_session_id(mocked_boundaries):
+    """End-to-end Gate 2 for Sprint 20: when a non-default session_id
+    flows in via the claim payload, every write_to_firestore-side
+    helper must use that exact session_id. This is the headline
+    integration assertion for T20.5+T20.7 — proves the session_id
+    threads from claim_session through every node into the
+    persistence boundary unchanged."""
+    mocked_boundaries.claim.return_value = _claim_payload(
+        session_id="end-to-end-99",
+        question="Will the Fed cut rates?",
+        user_id="u-1",
+    )
+
+    graph.invoke({"session_id": "end-to-end-99"})
+
+    # Every persistence helper called with session_id from claim payload
+    assert mocked_boundaries.write_evidence.call_args.args[0] == "end-to-end-99"
+    assert mocked_boundaries.write_prediction.call_args.args[0] == "end-to-end-99"
+    assert mocked_boundaries.write_sentiment.call_args.args[0] == "end-to-end-99"
+    assert mocked_boundaries.write_result.call_args.args[0] == "end-to-end-99"
+    # status writes: 3 calls total (claimed, running, done) all with same session_id
+    statuses_written = [c.args for c in mocked_boundaries.status.call_args_list]
+    assert ("end-to-end-99", "done") in statuses_written
+    mocked_boundaries.query_status.assert_called_once_with("end-to-end-99", "done")
+
+
+def test_invoke_writes_synthesis_result_payload_to_session_results(mocked_boundaries):
+    """The dict written to sessionResults must be the synthesis_result
+    the synthesize node produced — pin that the persistence boundary
+    doesn't drop or mangle fields between synthesize and Firestore."""
+    graph.invoke({"session_id": "doc1"})
+
+    written_session_id, written_payload = mocked_boundaries.write_result.call_args.args
+    assert written_session_id == "doc1"
+    # Sentinel checks: §8.7.2 fields synthesize.run produces are present
+    assert "finalProbability" in written_payload
+    assert "agentVersion" in written_payload
+    assert written_payload["tier"] == "tier_1"
+
+
+def test_invoke_persistence_failure_propagates(mocked_boundaries):
+    """write_to_firestore raising mid-batch must propagate through
+    graph.invoke so process_query._mark_failed can clean up. Pin the
+    headline failure path the user explicitly required as a Bundle B
+    addition."""
+    mocked_boundaries.write_evidence.side_effect = RuntimeError(
+        "firestore batch commit failed"
+    )
+
+    with pytest.raises(RuntimeError, match="firestore batch commit failed"):
+        graph.invoke({"session_id": "doc1"})
+
+    # Status='done' transitions never happen on failure. claim_session's
+    # 'claimed'/'running' writes did fire before the failure, so we
+    # check call_args_list rather than asserting not_called.
+    statuses_written = [c.args for c in mocked_boundaries.status.call_args_list]
+    assert ("doc1", "done") not in statuses_written
+    mocked_boundaries.query_status.assert_not_called()

@@ -266,3 +266,167 @@ def test_update_session_status_writes_clarification_candidates_when_provided():
     sent = mock_session_ref.update.call_args[0][0]
     assert sent["status"] == "awaiting_clarification"
     assert sent["clarificationCandidates"] == candidates
+
+
+# ==========================================================
+# Subcollection writes — Sprint 20 T20.5 helpers
+# ==========================================================
+
+def _make_subcollection_db_mock():
+    """Build a get_db mock that returns a `db` whose chained
+    collection/document/collection calls reach the per-session
+    subcollection. Also exposes db.batch() for the batched writes.
+
+    Returns (mock_db, mock_subcollection_ref, mock_batch).
+    """
+    mock_db = MagicMock()
+    # The chain for sessions/{id}/<sub>: collection → document → collection
+    mock_subcollection = MagicMock()
+    mock_db.collection.return_value.document.return_value.collection.return_value = (
+        mock_subcollection
+    )
+    mock_batch = MagicMock()
+    mock_db.batch.return_value = mock_batch
+    return mock_db, mock_subcollection, mock_batch
+
+
+# ---------------- write_evidence_batch ----------------
+
+def test_write_evidence_batch_returns_zero_for_empty_list():
+    """Cold-start: vault returned no evidence. Helper short-circuits
+    with zero return and never calls Firestore."""
+    mock_db = MagicMock()
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        n = firestore_client.write_evidence_batch("s1", [])
+    assert n == 0
+    mock_db.collection.assert_not_called()
+    mock_db.batch.assert_not_called()
+
+
+def test_write_evidence_batch_uses_evidence_id_as_doc_id():
+    """Reruns must overwrite the same row, not duplicate. Doc id
+    comes from the item's evidence_id field."""
+    mock_db, mock_subcoll, mock_batch = _make_subcollection_db_mock()
+    items = [
+        {"evidence_id": "ev-A", "title": "A", "type": "news"},
+        {"evidence_id": "ev-B", "title": "B", "type": "social"},
+    ]
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        n = firestore_client.write_evidence_batch("s1", items)
+
+    assert n == 2
+    # Each item's evidence_id used as the subcollection doc id
+    doc_call_ids = [c.args[0] for c in mock_subcoll.document.call_args_list]
+    assert doc_call_ids == ["ev-A", "ev-B"]
+    # batch.set called once per item, batch.commit called once
+    assert mock_batch.set.call_count == 2
+    assert mock_batch.commit.call_count == 1
+
+
+def test_write_evidence_batch_subcollection_path_is_sessions_id_evidence():
+    """Subcollection path must be sessions/{id}/evidence — not the
+    older Sprint 18 'evidence' top-level layout, not nested any
+    deeper. Pin the chain."""
+    mock_db, mock_subcoll, _ = _make_subcollection_db_mock()
+    items = [{"evidence_id": "ev-A"}]
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        firestore_client.write_evidence_batch("session-xyz", items)
+
+    # Outer sessions collection
+    mock_db.collection.assert_called_once_with("sessions")
+    # Document under sessions
+    sessions_ref = mock_db.collection.return_value
+    sessions_ref.document.assert_called_once_with("session-xyz")
+    # Inner evidence subcollection
+    sessions_ref.document.return_value.collection.assert_called_once_with("evidence")
+
+
+def test_write_evidence_batch_skips_items_missing_evidence_id():
+    """Defensive: an item without evidence_id is logged + skipped
+    (not raised). Other items still write."""
+    mock_db, mock_subcoll, mock_batch = _make_subcollection_db_mock()
+    items = [
+        {"evidence_id": "ev-good", "title": "good"},
+        {"title": "no id here"},  # missing evidence_id
+        {"evidence_id": "ev-good-2", "title": "another good"},
+    ]
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        n = firestore_client.write_evidence_batch("s1", items)
+
+    assert n == 2
+    assert mock_batch.set.call_count == 2
+
+
+def test_write_evidence_batch_splits_into_500_doc_batches():
+    """501 items must commit twice (500 + 1) per the Firestore
+    WriteBatch hard cap."""
+    mock_db, _, mock_batch = _make_subcollection_db_mock()
+    items = [{"evidence_id": f"ev-{i}"} for i in range(501)]
+    # Each db.batch() call in the helper should return a fresh batch;
+    # easier to assert: the helper called db.batch() twice.
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        firestore_client.write_evidence_batch("s1", items)
+
+    assert mock_db.batch.call_count == 2
+
+
+# ---------------- write_prediction_series ----------------
+
+def test_write_prediction_series_returns_zero_for_empty():
+    """Sprint 20 default: empty list → zero writes (KG-PHASE8-12)."""
+    mock_db = MagicMock()
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        n = firestore_client.write_prediction_series("s1", [])
+    assert n == 0
+    mock_db.collection.assert_not_called()
+
+
+def test_write_prediction_series_subcollection_path():
+    """Path: sessions/{id}/predictionSeries with auto-id docs."""
+    mock_db, mock_subcoll, mock_batch = _make_subcollection_db_mock()
+    points = [{"timestamp": "2026-05-04T12:00:00Z", "probability": 0.5}]
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        n = firestore_client.write_prediction_series("session-1", points)
+
+    assert n == 1
+    mock_db.collection.assert_called_once_with("sessions")
+    sessions_ref = mock_db.collection.return_value
+    sessions_ref.document.assert_called_once_with("session-1")
+    sessions_ref.document.return_value.collection.assert_called_once_with(
+        "predictionSeries"
+    )
+    # Auto-id: subcollection.document() called with no args
+    mock_subcoll.document.assert_called_once_with()
+
+
+# ---------------- write_sentiment_time_series ----------------
+
+def test_write_sentiment_time_series_returns_zero_for_empty():
+    """Sprint 20 default: empty per Q5."""
+    mock_db = MagicMock()
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        n = firestore_client.write_sentiment_time_series("s1", [])
+    assert n == 0
+
+
+def test_write_sentiment_time_series_subcollection_path():
+    """Path: sessions/{id}/sentimentTimeSeries with auto-id docs."""
+    mock_db, mock_subcoll, _ = _make_subcollection_db_mock()
+    points = [
+        {"timestamp": "2026-05-04T12:00:00Z", "expertSentiment": 0.5},
+        {"timestamp": "2026-05-04T13:00:00Z", "expertSentiment": 0.6},
+    ]
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        n = firestore_client.write_sentiment_time_series("session-1", points)
+
+    assert n == 2
+    mock_db.collection.assert_called_once_with("sessions")
+    sessions_ref = mock_db.collection.return_value
+    sessions_ref.document.assert_called_once_with("session-1")
+    sessions_ref.document.return_value.collection.assert_called_once_with(
+        "sentimentTimeSeries"
+    )
+    # Auto-id: two calls with no args (one per point)
+    assert mock_subcoll.document.call_count == 2
+    for c in mock_subcoll.document.call_args_list:
+        assert c.args == () and c.kwargs == {}
