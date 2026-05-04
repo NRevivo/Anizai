@@ -28,8 +28,18 @@
 --       DELETE FROM mapping_dict      WHERE canonical_event_id LIKE 'sprint19_smoke_%';
 --
 -- IDEMPOTENCY
---   Every INSERT uses literal PK UUIDs and `ON CONFLICT DO NOTHING`, so
---   re-running this script is safe.
+--   Knowledge_vault, knowledge_vectors, social_vault, social_vectors,
+--   and mapping_dict rows use literal PK UUIDs and `ON CONFLICT DO NOTHING`
+--   for re-run safety.
+--
+--   The two momentum_vault rows (polymarket + fred) use DELETE-before-INSERT
+--   instead of ON CONFLICT, because their timestamp_utc is NOW()-relative
+--   (refreshed on every re-seed run to keep within the 720h / 14d query
+--   windows the smoke tests use — see KG-PHASE8-5 closure 2026-05-04).
+--   The PK is composite (metric_id, timestamp_utc), so a NOW() insert
+--   never matches the prior run's PK; without the DELETE, re-runs would
+--   accumulate duplicate rows. The DELETE keys on the literal metric_id
+--   UUID, so each re-seed produces exactly one fresh row per smoke target.
 --
 -- EMBEDDINGS
 --   Every pgvector embedding is the deterministic unit vector e_0
@@ -173,6 +183,27 @@ ON CONFLICT (signal_id) DO NOTHING;
 -- momentum_vault — query target for market_tools.fetch_latest /
 -- market_tools.fetch_time_series  (polymarket row)
 -- ---------------------------------------------------------------------------
+-- DELETE-before-INSERT for idempotency with relative timestamps.
+--
+-- Why: the polymarket row's timestamp_utc must stay within the 720h
+-- (30-day) window queried by `market_tools.fetch_time_series`. The FRED
+-- row must stay within the 14-day window queried by
+-- `market_tools.fetch_fred_anomalies`. Hardcoded dates (originally
+-- '2026-04-01' and '2026-04-29') age out of these windows over time —
+-- KG-PHASE8-5 closure surfaced this when the polymarket smoke
+-- test_market_fetch_time_series_returns_list_with_explicit_hours
+-- failed at 33 days post-seed (Sprint 20 closeout, 2026-05-04).
+--
+-- Fix: use NOW()-relative timestamps so the rows are always fresh.
+-- The PK is composite (metric_id, timestamp_utc), so a NOW() value
+-- never matches the prior INSERT's timestamp — ON CONFLICT DO NOTHING
+-- doesn't help here. Instead, DELETE by the literal smoke metric_id
+-- before each INSERT, then re-insert with a fresh timestamp. This is
+-- idempotent across re-seed runs and never accumulates duplicate rows.
+-- ---------------------------------------------------------------------------
+DELETE FROM momentum_vault
+    WHERE metric_id = '00000000-0000-0000-0000-000000000e01'::uuid;
+
 INSERT INTO momentum_vault (
     metric_id,
     canonical_event_id,
@@ -195,20 +226,23 @@ INSERT INTO momentum_vault (
     0.42,
     'probability',
     'active',
-    '2026-04-01 00:00:00+00',
+    NOW() - INTERVAL '12 hours',
     0.01,
     0.05,
     0.10,
     false,
     '{}'::jsonb
-)
-ON CONFLICT (metric_id, timestamp_utc) DO NOTHING;
+);
 
 -- ---------------------------------------------------------------------------
 -- momentum_vault — query target for market_tools.fetch_fred_anomalies
 -- (fred row carrying anomaly_flags so the wrapper has at least one row to
---  return; smoke test asserts shape only, not membership)
+--  return; smoke test asserts shape only, not membership). Same DELETE-
+-- before-INSERT pattern as the polymarket row above for the same reason.
 -- ---------------------------------------------------------------------------
+DELETE FROM momentum_vault
+    WHERE metric_id = '00000000-0000-0000-0000-000000000e02'::uuid;
+
 INSERT INTO momentum_vault (
     metric_id,
     canonical_event_id,
@@ -231,14 +265,13 @@ INSERT INTO momentum_vault (
     3.14,
     'index',
     'active',
-    '2026-04-29 00:00:00+00',
+    NOW() - INTERVAL '12 hours',
     NULL,
     NULL,
     NULL,
     false,
     '{"anomaly_flags": {"is_anomaly": true, "z_score": 4.2, "direction": "up"}}'::jsonb
-)
-ON CONFLICT (metric_id, timestamp_utc) DO NOTHING;
+);
 
 -- ---------------------------------------------------------------------------
 -- mapping_dict — query target for mapping_tools.lookup_by_canonical
