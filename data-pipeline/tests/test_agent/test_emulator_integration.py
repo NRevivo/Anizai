@@ -269,8 +269,9 @@ def test_round_trip_writes_session_result(emulator_db, emulator_test_id):
     user_msg = synth_client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
     assert question in user_msg
 
-    # Metadata — version is shape only (starts with semver-ish prefix)
-    assert result["tier"] == "tier_1"
+    # Metadata — tier is tier_2 because the mock returns polymarket=None
+    # (KG-PHASE8-12 still deferred; Sprint 21 tier inference uses market_evidence).
+    assert result["tier"] == "tier_2"
     assert isinstance(result["agentVersion"], str)
     assert result["agentVersion"].startswith("0."), (
         "agentVersion is semver-ish; pin shape, not the literal Sprint 20 "
@@ -393,3 +394,177 @@ def test_claim_already_claimed_returns_none(emulator_db, emulator_test_id):
     fq = db.collection("forecastQueries").document(session_id).get().to_dict()
     assert fq["status"] == "claimed"
     assert fq["claimedBy"] == "someone-else"  # untouched
+
+
+# ==========================================================
+# Sprint 21 T21.11 — Gate 3 emulator tests for clarification flow
+# ==========================================================
+
+def _seed_pending_query_with_chosen_candidate(
+    db, session_id: str, candidates: list, chosen_candidate_id
+) -> None:
+    """Simulate the state after write_clarification ran + user picked a candidate.
+
+    Writes:
+      - sessions/{id}: status=awaiting_clarification, clarificationCandidates
+      - forecastQueries/{id}: status=pending, chosenCandidateId (resume doc)
+    """
+    db.collection("sessions").document(session_id).set({
+        "status": "awaiting_clarification",
+        "clarificationCandidates": candidates,
+        "createdAt": fb_firestore.SERVER_TIMESTAMP,
+        "updatedAt": fb_firestore.SERVER_TIMESTAMP,
+    })
+    db.collection("forecastQueries").document(session_id).set({
+        "queryId": f"q_{session_id}",
+        "sessionId": session_id,
+        "userId": "test-user",
+        "question": "Will the Fed cut rates in 2026?",
+        "chosenCandidateId": chosen_candidate_id,
+        "status": "pending",
+        "createdAt": fb_firestore.SERVER_TIMESTAMP,
+        "claimedAt": None,
+        "claimedBy": None,
+    })
+
+
+def test_sprint21_gate3_clarification_path_writes_awaiting_status(
+    emulator_db, emulator_test_id
+):
+    """Ambiguous question → write_clarification → real Firestore emulator.
+
+    Verifies:
+    - sessions/{id}.status == 'awaiting_clarification'
+    - sessions/{id}.clarificationCandidates has shaped candidates (UUID id, source=polymarket)
+    - forecastQueries/{id}.status == 'awaiting_clarification'
+    - sessionResults/{id} does NOT exist (synthesis never ran)
+    """
+    db = emulator_db
+    session_id = f"{emulator_test_id}_clarification"
+    _seed_pending_query(db, session_id, "What will happen in the Middle East?")
+
+    qu_client, emb_client, rate_client, synth_client = _build_llm_mocks()
+    # Override: return ambiguous candidates (margin = 0.78 - 0.74 = 0.04 < 0.10)
+    payload_ambiguous = {"candidates": [
+        {"intent": "forecast", "domain": "geopolitics",
+         "entities": ["Iran", "Israel"], "polymarket_search_terms": ["iran israel conflict"],
+         "has_market_question_intent": True, "confidence": 0.78,
+         "too_broad": False, "rejected": False},
+        {"intent": "forecast", "domain": "geopolitics",
+         "entities": ["Gaza", "Hamas"], "polymarket_search_terms": ["gaza ceasefire"],
+         "has_market_question_intent": True, "confidence": 0.74,
+         "too_broad": False, "rejected": False},
+    ]}
+    qu_client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(
+            content=json.dumps(payload_ambiguous)
+        ))],
+        usage=SimpleNamespace(total_tokens=150),
+    )
+
+    with (
+        patch("agent.nodes.claim_session.settings.AGENT_WORKER_ID", "worker-test"),
+        patch("agent.nodes.query_understand._get_default_client", return_value=qu_client),
+        patch("agent.nodes.build_embedding._get_default_client", return_value=emb_client),
+        patch("agent.nodes.rate_evidence._get_default_client", return_value=rate_client),
+        patch("agent.nodes.synthesize._get_default_client", return_value=synth_client),
+        patch("agent.agents.researcher.run") as mock_researcher,
+        patch("agent.agents.pulse_analyst.run") as mock_pulse,
+        patch("agent.agents.market_bridge.run") as mock_market,
+    ):
+        mock_researcher.return_value = {"articles": [], "source_diversity": {}, "recency_range": None, "empty": True}
+        mock_pulse.return_value = {"market_consensus": [], "community_discussion": [], "overall_sentiment": 0.0, "empty": True}
+        mock_market.return_value = {"polymarket": None, "linked_sources": [], "fred_anomalies": [], "google_trends": [], "empty": True}
+
+        process_query(session_id)
+
+    # Session doc must have awaiting_clarification + candidates
+    session = db.collection("sessions").document(session_id).get().to_dict()
+    assert session["status"] == "awaiting_clarification"
+    candidates = session.get("clarificationCandidates")
+    assert candidates is not None
+    assert len(candidates) == 2
+    for c in candidates:
+        assert "id" in c
+        assert "label" in c
+        assert c.get("source") == "polymarket"
+        assert "matchConfidence" in c
+
+    # Queue doc must also have awaiting_clarification
+    fq = db.collection("forecastQueries").document(session_id).get().to_dict()
+    assert fq["status"] == "awaiting_clarification"
+
+    # No sessionResults — synthesis never ran
+    result_doc = db.collection("sessionResults").document(session_id).get()
+    assert not result_doc.exists, "SessionResult must NOT exist on clarification path"
+
+    # Vault agents must NOT have run (graph exited at write_clarification)
+    mock_researcher.assert_not_called()
+
+
+def test_sprint21_gate3_tier2_resume_freeform_completes_forecast(
+    emulator_db, emulator_test_id
+):
+    """Resume-on-clarify with chosenCandidateId=null (freeform) → full Tier 2 forecast.
+
+    Verifies:
+    - process_query reads chosenCandidateId=null from real Firestore emulator
+    - skip_matching_step short-circuits query_understand
+    - Full pipeline runs and produces sessionResults with tier='tier_2'
+    - session.status == 'done'
+    """
+    db = emulator_db
+    session_id = f"{emulator_test_id}_tier2_resume"
+
+    # Seed state: session has clarification candidates from prior run;
+    # forecastQueries has chosenCandidateId=None (user clicked "freeform").
+    candidates = [
+        {"id": "uuid-iran-israel", "label": "Iran, Israel", "source": "polymarket",
+         "description": "Forecast question about Iran Israel", "matchConfidence": 0.78,
+         "intent": "forecast", "domain": "geopolitics",
+         "entities": ["Iran", "Israel"], "polymarket_search_terms": ["iran israel conflict"]},
+        {"id": "uuid-gaza-hamas", "label": "Gaza, Hamas", "source": "polymarket",
+         "description": "Forecast question about Gaza Hamas", "matchConfidence": 0.74,
+         "intent": "forecast", "domain": "geopolitics",
+         "entities": ["Gaza", "Hamas"], "polymarket_search_terms": ["gaza ceasefire"]},
+    ]
+    _seed_pending_query_with_chosen_candidate(db, session_id, candidates, chosen_candidate_id=None)
+
+    qu_client, emb_client, rate_client, synth_client = _build_llm_mocks()
+
+    with (
+        patch("agent.nodes.claim_session.settings.AGENT_WORKER_ID", "worker-test"),
+        patch("agent.nodes.query_understand._get_default_client", return_value=qu_client),
+        patch("agent.nodes.build_embedding._get_default_client", return_value=emb_client),
+        patch("agent.nodes.rate_evidence._get_default_client", return_value=rate_client),
+        patch("agent.nodes.synthesize._get_default_client", return_value=synth_client),
+        patch("agent.agents.researcher.run") as mock_researcher,
+        patch("agent.agents.pulse_analyst.run") as mock_pulse,
+        patch("agent.agents.market_bridge.run") as mock_market,
+    ):
+        mock_researcher.return_value = {"articles": [], "source_diversity": {}, "recency_range": None, "empty": True}
+        mock_pulse.return_value = {"market_consensus": [], "community_discussion": [], "overall_sentiment": 0.0, "empty": True}
+        mock_market.return_value = {"polymarket": None, "linked_sources": [], "fred_anomalies": [], "google_trends": [], "empty": True}
+
+        process_query(session_id)
+
+        # query_understand must NOT have called the LLM (skip_matching_step path)
+        qu_client.chat.completions.create.assert_not_called()
+
+    # sessionResults must exist with tier_2
+    result_doc = db.collection("sessionResults").document(session_id).get()
+    assert result_doc.exists
+    result = result_doc.to_dict()
+    assert result["tier"] == "tier_2"
+    assert result["marketProbability"] is None
+    assert result["marketComparison"] == []
+    assert result["marketComparisonInsight"] == "No canonical market available — freeform analysis."
+
+    # Session doc must be done
+    session = db.collection("sessions").document(session_id).get().to_dict()
+    assert session["status"] == "done"
+    assert session["tier"] == "tier_2"  # T21.8: tier written to session doc
+
+    # forecastQueries also done
+    fq = db.collection("forecastQueries").document(session_id).get().to_dict()
+    assert fq["status"] == "done"
