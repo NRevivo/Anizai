@@ -534,15 +534,20 @@ def test_invoke_surfaces_retrieval_agent_failure(mocked_boundaries):
 
 
 # ==========================================================
-# 10. Clarification flag flows through — does NOT short-circuit in Sprint 20
+# 10. Sprint 21 T21.3 — ambiguous questions route to write_clarification
 # ==========================================================
-def test_invoke_continues_through_clarification_in_sprint20(mocked_boundaries):
-    """When query_understand sets `awaiting_clarification=True` (low
-    confidence or narrow margin), Sprint 21+ will route to a
-    clarification node. Sprint 20 has no such edge — the graph runs
-    straight through. Pin that the flag is set in final state but the
-    synthesis_result is still produced AND write_to_firestore still
-    persists, so the frontend always gets *something* to render."""
+def test_invoke_routes_ambiguous_to_write_clarification(mocked_boundaries):
+    """Sprint 21: when query_understand sets awaiting_clarification=True,
+    the graph routes to write_clarification and terminates at END without
+    running vault_query, synthesize, or write_to_firestore.
+
+    Verified behavior:
+    - awaiting_clarification=True in final state
+    - synthesis_result NOT in final state (graph ended early)
+    - vault agents NOT called (no evidence retrieval)
+    - write_to_firestore side effects NOT triggered (no 'done' status)
+    - update_session_status called with 'awaiting_clarification'
+    """
     mocked_boundaries.qu_client.chat.completions.create.return_value = (
         _make_chat_response(
             candidates=[
@@ -554,16 +559,20 @@ def test_invoke_continues_through_clarification_in_sprint20(mocked_boundaries):
 
     final = graph.invoke({"session_id": "doc1"})
 
+    # Graph terminates at write_clarification → END (not write_to_firestore → END).
     assert final["awaiting_clarification"] is True
-    # Despite ambiguity, the full pipeline completed and persisted.
-    # Sprint 21 will reroute this case via a clarification edge.
-    assert "synthesis_result" in final
-    mocked_boundaries.researcher.assert_called_once()
-    mocked_boundaries.pulse.assert_called_once()
-    mocked_boundaries.market.assert_called_once()
-    mocked_boundaries.write_result.assert_called_once()
-    statuses_written = [c.args for c in mocked_boundaries.status.call_args_list]
-    assert ("doc1", "done") in statuses_written
+    assert "synthesis_result" not in final or final.get("synthesis_result") is None
+
+    # Vault agents and Firestore persistence must NOT have run.
+    mocked_boundaries.researcher.assert_not_called()
+    mocked_boundaries.pulse.assert_not_called()
+    mocked_boundaries.market.assert_not_called()
+    mocked_boundaries.write_result.assert_not_called()
+
+    # 'done' status must NOT be written; 'awaiting_clarification' must be.
+    statuses_written = [c.args[1] for c in mocked_boundaries.status.call_args_list]
+    assert "done" not in statuses_written
+    assert "awaiting_clarification" in statuses_written
 
 
 # ==========================================================

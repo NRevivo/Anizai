@@ -128,6 +128,22 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
             the OpenAI call itself fails. process_query.py (T19.11) catches
             and writes `failed` to Firestore.
     """
+    # Sprint 21 T21.5 — resume-on-clarify fast path.
+    # When process_query pre-populates skip_matching_step=True and
+    # structured_intent (T21.4), skip the OpenAI call entirely.
+    # structured_intent is already in state; just signal "not ambiguous"
+    # so the graph takes the build_embedding → forecast path.
+    if state.get("skip_matching_step"):
+        logger.info(
+            "query_understand: skip_matching_step=True — resume-on-clarify path, "
+            "using pre-populated structured_intent, no LLM call"
+        )
+        return {
+            "awaiting_clarification": False,
+            "clarification_needed": None,
+            "clarification_candidates": None,
+        }
+
     raw_question = state.get("raw_question") or ""
     if not raw_question.strip():
         raise AgentProcessingError("query_understand: empty raw_question in state")

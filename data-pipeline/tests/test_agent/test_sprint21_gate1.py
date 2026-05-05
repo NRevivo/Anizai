@@ -4,15 +4,15 @@ Gate 1 unit tests for Sprint 21 — Tier 2 + Clarification Flow (T21.9).
 Grows with each bundle. All tests use pure mocks at the SDK boundary;
 no real OpenAI, Firestore, or network calls.
 
-Bundle A (T21.1, T21.2) — in this initial commit:
+Bundle A (T21.1, T21.2):
   - MARGIN_THRESHOLD adjusted to 0.10 (OQ-1)
   - ClarificationCandidate shaping via the ambiguous run() return path
   - write_clarification node: success path, missing inputs, Firestore mock
 
-Bundle B (T21.3, T21.4, T21.5) — tests added after bundle lands:
+Bundle B (T21.3, T21.4, T21.5):
   - _route_after_query_understand routing function
-  - process_query chosenCandidateId read paths (non-null + null)
-  - skip_matching_step early return in query_understand
+  - process_query _build_initial_state: non-null + null chosenCandidateId paths
+  - skip_matching_step early return in query_understand (no LLM call)
 
 Bundle C (T21.6, T21.7, T21.8) — tests added after bundle lands:
   - synthesize tier inference from market_evidence.polymarket
@@ -432,3 +432,161 @@ def test_write_clarification_no_agentevents_written(mock_fc):
     # No evidence writes, no session result writes, no agentEvents
     assert mock_fc.write_evidence_batch.call_count == 0
     assert mock_fc.write_session_result.call_count == 0
+
+
+# ==========================================================
+# T21.3 — _route_after_query_understand routing function
+# ==========================================================
+
+from agent.graph import _route_after_query_understand, NODE_WRITE_CLARIFICATION, NODE_BUILD_EMBEDDING  # noqa: E402
+
+
+def test_routing_fn_returns_write_clarification_when_ambiguous():
+    assert _route_after_query_understand({"awaiting_clarification": True}) == NODE_WRITE_CLARIFICATION
+
+
+def test_routing_fn_returns_build_embedding_when_clear():
+    assert _route_after_query_understand({"awaiting_clarification": False}) == NODE_BUILD_EMBEDDING
+
+
+def test_routing_fn_returns_build_embedding_when_flag_absent():
+    """Flag absent defaults to non-ambiguous (normal first-time runs)."""
+    assert _route_after_query_understand({}) == NODE_BUILD_EMBEDDING
+
+
+def test_routing_fn_reads_only_state_no_side_effects():
+    """Routing functions must not mutate state or call external services."""
+    state = {"awaiting_clarification": True, "some_other_field": "value"}
+    _route_after_query_understand(state)
+    assert state == {"awaiting_clarification": True, "some_other_field": "value"}
+
+
+# ==========================================================
+# T21.5 — skip_matching_step early return in query_understand
+# ==========================================================
+
+def test_skip_matching_step_returns_without_llm_call():
+    """When skip_matching_step=True, run() returns without calling OpenAI."""
+    client = MagicMock()
+    state = {
+        "skip_matching_step": True,
+        "structured_intent": {"intent": "forecast", "entities": ["Fed"]},
+    }
+    out = query_understand.run(state, client=client)
+    client.chat.completions.create.assert_not_called()
+    assert out["awaiting_clarification"] is False
+
+
+def test_skip_matching_step_clears_clarification_fields():
+    """Resume path returns None for clarification fields so the graph stays clean."""
+    client = MagicMock()
+    out = query_understand.run({"skip_matching_step": True}, client=client)
+    assert out["clarification_candidates"] is None
+    assert out["clarification_needed"] is None
+
+
+def test_skip_matching_step_false_still_calls_llm():
+    """When skip_matching_step=False, the normal LLM path runs."""
+    import json
+    from types import SimpleNamespace
+
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(
+            content=json.dumps({"candidates": [_make_candidate(confidence=0.9)]})
+        ))],
+        usage=SimpleNamespace(total_tokens=100),
+    )
+    client = MagicMock()
+    client.chat.completions.create.return_value = response
+
+    query_understand.run(
+        {"skip_matching_step": False, "raw_question": "Will the Fed cut rates?"},
+        client=client,
+    )
+    client.chat.completions.create.assert_called_once()
+
+
+# ==========================================================
+# T21.4 — process_query._build_initial_state chosenCandidateId paths
+# ==========================================================
+
+from agent.process_query import _build_initial_state  # noqa: E402
+
+
+def _stored_candidate(*, id_val="uuid-abc", entities=None, search_terms=None):
+    return {
+        "id": id_val,
+        "label": "Federal Reserve, Rates",
+        "source": "polymarket",
+        "description": "Forecast about Fed rates",
+        "matchConfidence": 0.82,
+        "intent": "forecast",
+        "domain": "macro",
+        "entities": entities or ["Federal Reserve"],
+        "polymarket_search_terms": search_terms or ["fed rate cut"],
+    }
+
+
+@patch("agent.process_query.get_query_doc")
+@patch("agent.process_query.get_session_doc")
+def test_build_initial_state_normal_run_no_chosen_id(mock_session, mock_query):
+    """No chosenCandidateId in doc → plain initial state with just session_id."""
+    mock_query.return_value = {"status": "pending", "question": "q"}
+    result = _build_initial_state("session-1")
+    assert result == {"session_id": "session-1"}
+    mock_session.assert_not_called()
+
+
+@patch("agent.process_query.get_query_doc")
+@patch("agent.process_query.get_session_doc")
+def test_build_initial_state_doc_missing(mock_session, mock_query):
+    """get_query_doc returns None → safe fallback to plain state."""
+    mock_query.return_value = None
+    result = _build_initial_state("session-1")
+    assert result == {"session_id": "session-1"}
+
+
+@patch("agent.process_query.get_query_doc")
+@patch("agent.process_query.get_session_doc")
+def test_build_initial_state_null_chosen_id_means_freeform(mock_session, mock_query):
+    """chosenCandidateId=null → skip_matching_step=True, has_market_question_intent=False."""
+    mock_query.return_value = {"chosenCandidateId": None}
+    result = _build_initial_state("session-1")
+    assert result["skip_matching_step"] is True
+    assert result["chosen_candidate_id"] is None
+    assert result["structured_intent"]["has_market_question_intent"] is False
+    mock_session.assert_not_called()
+
+
+@patch("agent.process_query.get_query_doc")
+@patch("agent.process_query.get_session_doc")
+def test_build_initial_state_non_null_chosen_id_recovers_candidate(mock_session, mock_query):
+    """chosenCandidateId=UUID → reads session doc, recovers structured_intent."""
+    mock_query.return_value = {"chosenCandidateId": "uuid-abc"}
+    mock_session.return_value = {
+        "clarificationCandidates": [
+            _stored_candidate(id_val="uuid-abc", entities=["Fed"], search_terms=["rate cut"]),
+        ]
+    }
+    result = _build_initial_state("session-1")
+    assert result["skip_matching_step"] is True
+    assert result["chosen_candidate_id"] == "uuid-abc"
+    assert result["structured_intent"]["entities"] == ["Fed"]
+    assert result["structured_intent"]["polymarket_search_terms"] == ["rate cut"]
+    assert result["structured_intent"]["has_market_question_intent"] is True
+
+
+@patch("agent.process_query.get_query_doc")
+@patch("agent.process_query.get_session_doc")
+def test_build_initial_state_unknown_candidate_id_falls_back_to_freeform(mock_session, mock_query):
+    """chosenCandidateId not in stored candidates → freeform fallback (not a hard error)."""
+    mock_query.return_value = {"chosenCandidateId": "uuid-xyz"}
+    mock_session.return_value = {
+        "clarificationCandidates": [
+            _stored_candidate(id_val="uuid-abc"),  # different ID
+        ]
+    }
+    result = _build_initial_state("session-1")
+    assert result["skip_matching_step"] is True
+    assert result["chosen_candidate_id"] == "uuid-xyz"
+    assert result["structured_intent"]["has_market_question_intent"] is False

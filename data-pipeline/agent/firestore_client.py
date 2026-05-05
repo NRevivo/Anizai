@@ -524,6 +524,48 @@ def write_sentiment_time_series(session_id: str, points: list[dict]) -> int:
 
 
 # ==========================================================
+# Document Reads — for pre-graph state setup (Sprint 21 T21.4)
+# ==========================================================
+
+def get_query_doc(query_doc_id: str) -> Optional[dict]:
+    """
+    Read a forecastQueries/{query_doc_id} document and return its data dict.
+
+    Used by process_query.py (T21.4) before graph.invoke() to check for a
+    `chosenCandidateId` field on resume-on-clarify runs. The doc is also
+    claimed transactionally inside claim_session (Node 0); this read is a
+    separate pre-flight call that does NOT alter the doc's status.
+
+    Returns:
+        dict of field values if the document exists, else None.
+    """
+    db = get_db()
+    snap = db.collection("forecastQueries").document(query_doc_id).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+def get_session_doc(session_id: str) -> Optional[dict]:
+    """
+    Read a sessions/{session_id} document and return its data dict.
+
+    Used by process_query.py (T21.4) on resume-on-clarify runs to fetch the
+    stored `clarificationCandidates` array so the chosen candidate's
+    polymarket_search_terms and entities can be recovered for
+    structured_intent pre-population.
+
+    Returns:
+        dict of field values if the document exists, else None.
+    """
+    db = get_db()
+    snap = db.collection("sessions").document(session_id).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+# ==========================================================
 # Snapshot Listener — forecastQueries where status == 'pending'
 # ==========================================================
 
