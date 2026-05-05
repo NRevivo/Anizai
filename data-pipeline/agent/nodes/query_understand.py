@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid as _uuid_module
 from typing import Any, Optional
 
 from agent.config import settings
@@ -67,7 +68,9 @@ AUTO_PICK_THRESHOLD: float = 0.75
 
 # rank-1 must beat rank-2 by this margin to auto-pick. Tight margins indicate
 # the LLM couldn't separate two plausible interpretations — surface both.
-MARGIN_THRESHOLD: float = 0.15
+# Spec §8.2.3: "top match's confidence within 0.10 of second-place → clarify".
+# Sprint 19 used 0.15 (conservative); Sprint 21 aligns to spec per OQ-1.
+MARGIN_THRESHOLD: float = 0.10
 
 # Hard wall on the OpenAI call. Hub-level NFR (spec §8.7) gives 60s end-to-end;
 # Node 1 is the cheapest LLM call so we cap it well below the budget.
@@ -159,12 +162,16 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
             **metadata_patch,
         }
 
-    # Ambiguous path: surface up to MAX_CANDIDATES interpretations to the user.
+    # Ambiguous path: shape candidates into ClarificationCandidate format
+    # (spec §8.2.4, anizai_handoff_consolidated.md §6.3) and surface to user.
+    # UUIDs assigned here are stable within the session — process_query uses
+    # them to match chosenCandidateId on resume-on-clarify (T21.4).
+    shaped_candidates = _build_clarification_candidates(candidates)
     return {
         "structured_intent": _strip_meta(rank_1),
         "awaiting_clarification": True,
-        "clarification_needed": {"candidates": candidates},
-        "clarification_candidates": candidates,
+        "clarification_needed": {"candidates": shaped_candidates},
+        "clarification_candidates": shaped_candidates,
         **metadata_patch,
     }
 
@@ -284,3 +291,65 @@ def _strip_meta(candidate: dict) -> dict:
     `structured_intent`, this is where they get filtered out.
     """
     return dict(candidate)
+
+
+def _build_clarification_candidates(candidates: list[dict]) -> list[dict]:
+    """
+    Shape raw LLM candidate dicts into ClarificationCandidate format
+    (spec §8.2.4, anizai_handoff_consolidated.md §6.3) for Firestore
+    storage and frontend display.
+
+    Each candidate gets a stable UUID4 `id` so process_query can match
+    the user's `chosenCandidateId` back to the original candidate on
+    resume-on-clarify (T21.4). The ID is stable within the session
+    (assigned once here); reruns produce different UUIDs, which is
+    acceptable — each clarification flow is its own session.
+
+    Frontend-facing fields (ClarificationCandidate schema):
+        id               UUID4, returned as chosenCandidateId by Express
+        label            Human-readable from top 3 entities
+        source           "polymarket" — only platform pre-Phase-7
+        description      Derived from intent + search terms / entities
+        matchConfidence  LLM self-rated confidence (proxy for vault
+                         similarity; true vault resolution deferred per
+                         KG-PHASE8-12).
+
+    Hub-recovery fields (stored in Firestore, ignored by frontend,
+    consumed by process_query on resume to rebuild structured_intent):
+        intent, domain, entities, polymarket_search_terms
+
+    Why no vault lookup here:
+        A canonical Polymarket market ID requires the polymarket vector
+        index, which doesn't exist pre-Phase-7 (KG-PHASE8-12). The LLM
+        confidence is the available signal. Sprint 26 calibration can
+        revisit if empirical issues surface.
+    """
+    result = []
+    for candidate in candidates:
+        entities: list[str] = list(candidate.get("entities") or [])
+        search_terms: list[str] | None = candidate.get("polymarket_search_terms")
+        intent: str = str(candidate.get("intent") or "forecast")
+        domain: str = str(candidate.get("domain") or "general")
+        confidence: float = float(candidate.get("confidence") or 0.0)
+
+        label = ", ".join(entities[:3]) if entities else "Unknown market"
+
+        terms_display = (
+            ", ".join(search_terms[:3]) if search_terms else label
+        )
+        description = f"{intent.title()} question about {terms_display}"
+
+        result.append({
+            # Frontend-facing ClarificationCandidate fields (§8.2.4)
+            "id": str(_uuid_module.uuid4()),
+            "label": label,
+            "source": "polymarket",
+            "description": description,
+            "matchConfidence": confidence,
+            # Hub-recovery fields for T21.4 resume-on-clarify
+            "intent": intent,
+            "domain": domain,
+            "entities": entities,
+            "polymarket_search_terms": search_terms,
+        })
+    return result
