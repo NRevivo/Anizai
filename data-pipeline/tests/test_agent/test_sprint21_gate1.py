@@ -590,3 +590,124 @@ def test_build_initial_state_unknown_candidate_id_falls_back_to_freeform(mock_se
     assert result["skip_matching_step"] is True
     assert result["chosen_candidate_id"] == "uuid-xyz"
     assert result["structured_intent"]["has_market_question_intent"] is False
+
+
+# ==========================================================
+# T21.7 — synthesize.py tier inference from market_evidence
+# ==========================================================
+
+from agent.nodes import synthesize  # noqa: E402
+from agent import firestore_client as _fc  # noqa: E402
+
+
+def _synth_state(**overrides):
+    base = {"raw_question": "Will the Fed cut rates in 2026?"}
+    base.update(overrides)
+    return base
+
+
+def _mock_synth_client():
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    payload = {
+        "final_probability": 0.55,
+        "confidence": 0.65,
+        "consensus_score": 0.6,
+        "bottom_line_answer": "Moderate chance.",
+        "detailed_explanation": "Based on signals...",
+        "summary_markdown": "## Summary\nModerate.",
+        "market_comparison_insight": "Market suggests caution.",
+        "sentiment_analysis_insight": "Mixed sentiment.",
+        "evidence_feed_summary": "16 items analyzed.",
+        "key_factors": [],
+        "what_i_didnt_find": [],
+        "reasoning_chain": [],
+        "evidence_overlay": [],
+    }
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+        usage=SimpleNamespace(total_tokens=1500),
+    )
+    client = MagicMock()
+    client.chat.completions.create.return_value = response
+    return client
+
+
+def test_synthesize_infers_tier_2_when_market_evidence_polymarket_is_none():
+    """No polymarket in market_evidence → tier_2."""
+    state = _synth_state(market_evidence={"polymarket": None, "fred_anomalies": [], "empty": True})
+    out = synthesize.run(state, client=_mock_synth_client())
+    assert out["tier"] == "tier_2"
+    assert out["synthesis_result"]["tier"] == "tier_2"
+
+
+def test_synthesize_infers_tier_1_when_market_evidence_has_polymarket():
+    """Polymarket data present in market_evidence → tier_1."""
+    state = _synth_state(market_evidence={
+        "polymarket": {"current_odds": 0.72, "market_slug": "fed-cut"},
+        "fred_anomalies": [], "empty": False,
+    })
+    out = synthesize.run(state, client=_mock_synth_client())
+    assert out["tier"] == "tier_1"
+    assert out["synthesis_result"]["tier"] == "tier_1"
+
+
+def test_synthesize_infers_tier_2_when_market_evidence_absent():
+    """No market_evidence key in state → tier_2 (safe default for cold start)."""
+    out = synthesize.run(_synth_state(), client=_mock_synth_client())
+    assert out["tier"] == "tier_2"
+
+
+def test_synthesize_tier2_sets_spec_exact_caption():
+    """Tier 2 marketComparisonInsight is the spec-exact string (§8.2.2)."""
+    state = _synth_state(market_evidence={"polymarket": None, "empty": True})
+    out = synthesize.run(state, client=_mock_synth_client())
+    assert out["synthesis_result"]["marketComparisonInsight"] == (
+        "No canonical market available — freeform analysis."
+    )
+
+
+def test_synthesize_agent_version_bumped_to_sprint_21():
+    assert synthesize.AGENT_VERSION == "0.4.0-sprint21-clarification-tier2"
+
+
+# ==========================================================
+# T21.8 — write_to_firestore writes tier to session doc
+# ==========================================================
+
+from agent.nodes import write_to_firestore  # noqa: E402
+
+
+@patch("agent.nodes.write_to_firestore.firestore_client")
+def test_write_to_firestore_passes_tier_to_session_status_update(mock_fc):
+    """When state.tier is set, it is included in the session doc update."""
+    mock_fc.write_evidence_batch.return_value = 0
+    mock_fc.write_prediction_series.return_value = 0
+    mock_fc.write_sentiment_time_series.return_value = 0
+
+    state = {
+        "session_id": "s1",
+        "synthesis_result": {"finalProbability": 0.7, "tier": "tier_2"},
+        "tier": "tier_2",
+    }
+    write_to_firestore.run(state)
+
+    mock_fc.update_session_status.assert_called_once_with("s1", "done", tier="tier_2")
+
+
+@patch("agent.nodes.write_to_firestore.firestore_client")
+def test_write_to_firestore_passes_none_tier_when_tier_absent(mock_fc):
+    """When state has no tier field, tier=None is passed (safe default)."""
+    mock_fc.write_evidence_batch.return_value = 0
+    mock_fc.write_prediction_series.return_value = 0
+    mock_fc.write_sentiment_time_series.return_value = 0
+
+    state = {
+        "session_id": "s1",
+        "synthesis_result": {"finalProbability": 0.7},
+    }
+    write_to_firestore.run(state)
+
+    mock_fc.update_session_status.assert_called_once_with("s1", "done", tier=None)

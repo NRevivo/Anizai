@@ -316,7 +316,8 @@ def test_invoke_happy_path_produces_8_7_2_synthesis_result(mocked_boundaries):
     # default _make_synthesis_response in the fixture.
     assert result["finalProbability"] == 0.7
     assert result["confidence"] == 0.65
-    assert result["tier"] == "tier_1"
+    # mocked_boundaries fixture returns polymarket=None → tier inferred as "tier_2"
+    assert result["tier"] == "tier_2"
     assert result["agentVersion"] == synthesize.AGENT_VERSION
 
 
@@ -612,10 +613,11 @@ def test_invoke_writes_synthesis_result_payload_to_session_results(mocked_bounda
 
     written_session_id, written_payload = mocked_boundaries.write_result.call_args.args
     assert written_session_id == "doc1"
-    # Sentinel checks: §8.7.2 fields synthesize.run produces are present
+    # Sentinel checks: §8.7.2 fields synthesize.run produces are present.
+    # mocked_boundaries fixture returns polymarket=None → tier="tier_2".
     assert "finalProbability" in written_payload
     assert "agentVersion" in written_payload
-    assert written_payload["tier"] == "tier_1"
+    assert written_payload["tier"] == "tier_2"
 
 
 def test_invoke_persistence_failure_propagates(mocked_boundaries):

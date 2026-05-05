@@ -70,6 +70,7 @@ Spec references:
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from agent import firestore_client
 from agent.errors import AgentProcessingError
@@ -139,7 +140,11 @@ def run(state: dict) -> dict:
     firestore_client.write_session_result(session_id, synthesis_result)
 
     # 5. session.status = done (frontend's "render now" signal).
-    firestore_client.update_session_status(session_id, "done")
+    # Sprint 21 T21.8: include tier on the session doc so the frontend's
+    # session doc listener sees the tier without reading sessionResults.
+    # Per frontend-integration skill: sessions/{id}.tier is set by the hub.
+    tier: Optional[str] = state.get("tier")
+    firestore_client.update_session_status(session_id, "done", tier=tier)
 
     # 6. forecastQueries.status = done (clear out of the worker queue).
     # By server contract session_id == query_doc_id (session.repository.ts:347).

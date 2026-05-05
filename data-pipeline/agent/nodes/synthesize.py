@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 # Sprint 18: 0.1.0-sprint18-stub
 # Sprint 19: 0.2.0-sprint19-retrieval-stub-synthesis
 # Sprint 20: 0.3.0 — real synthesis + Firestore writes
-AGENT_VERSION = "0.3.0-sprint20-real-synthesis-and-firestore"
+AGENT_VERSION = "0.4.0-sprint21-clarification-tier2"
 
 
 # ==========================================================
@@ -112,17 +112,10 @@ MAX_TOKENS: int = 3000
 # uses 5 (top quintile of typical 20-30 item pools).
 KEY_EVIDENCE_TOP_N: int = 5
 
-# Tier label written into SessionResult.tier. Sprint 20 always tier_1
-# (per design D3 + KG-PHASE8-12 deferral). Sprint 21 introduces the
-# tier_2 freeform path.
-TIER_DEFAULT: str = "tier_1"
-
 # Caption for marketComparisonInsight when no canonical Polymarket
-# market is available. Triggers the Patch 4 frontend empty state.
-NO_MARKET_CAPTION: str = (
-    "No canonical prediction market available for this question — "
-    "analysis based on underlying signals."
-)
+# market is available. Spec-exact string per §8.2.2 + impl plan T21.7.
+# Triggers the Patch 4 frontend empty state in MarketComparison card.
+NO_MARKET_CAPTION: str = "No canonical market available — freeform analysis."
 
 
 # ==========================================================
@@ -191,9 +184,15 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
     evidence_trail: list[dict] = list(state.get("evidence_trail") or [])
     structured_intent: dict = state.get("structured_intent") or {}
     polymarket_market: Optional[dict] = state.get("polymarket_market")
-    # Sprint 20 D3: KG-PHASE8-12 means polymarket_market is always None.
-    # The arg is kept on the prompt builder for forward compatibility
-    # with Sprint 21+ when the resolver lands.
+    # KG-PHASE8-12: polymarket_market is always None until the polymarket
+    # vector resolver lands (Phase 7+). Kept for forward compatibility.
+
+    # Sprint 21 T21.7: infer tier from market_evidence.polymarket — the
+    # authoritative signal for whether vault_query matched a Polymarket
+    # market. Tier 1 = polymarket is not None; Tier 2 = polymarket is None.
+    # This replaces the hardcoded TIER_DEFAULT="tier_1" from Sprint 20.
+    market_evidence: dict = state.get("market_evidence") or {}
+    tier: str = "tier_1" if market_evidence.get("polymarket") else "tier_2"
 
     client = client or _get_default_client()
 
@@ -214,12 +213,13 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
         synthesis_output=output,
         evidence_trail=evidence_trail,
         polymarket_market=polymarket_market,
+        tier=tier,
     )
 
     logger.info(
-        "synthesize: built SessionResult agent_version=%s "
+        "synthesize: built SessionResult agent_version=%s tier=%s "
         "final_probability=%.3f confidence=%.3f n_evidence=%d",
-        AGENT_VERSION,
+        AGENT_VERSION, tier,
         synthesis_result["finalProbability"],
         synthesis_result["confidence"],
         len(evidence_trail),
@@ -230,7 +230,7 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
         "evidence_trail": evidence_trail,
         "key_factors": synthesis_result["keyFactors"],
         "what_i_didnt_find": synthesis_result["whatIDidntFind"],
-        "tier": TIER_DEFAULT,
+        "tier": tier,
         "confidence_score": synthesis_result["confidence"],
         "llm_calls_count": int(state.get("llm_calls_count") or 0) + 1,
         "total_tokens_used": int(state.get("total_tokens_used") or 0) + tokens_used,
@@ -385,6 +385,7 @@ def _build_session_result(
     synthesis_output: dict,
     evidence_trail: list[dict],
     polymarket_market: Optional[dict],
+    tier: str,
 ) -> dict:
     """
     Assemble the §8.7.2-compliant SessionResult dict from the LLM's
@@ -403,10 +404,10 @@ def _build_session_result(
         no-market caption to ensure the frontend renders the empty state.
       - keyFactors/reasoningChain/whatIDidntFind: passed through as
         produced by the prompt; their shapes are pinned by the schema.
-      - suggestedActions: [] for Sprint 20 per D8 (deferred to Sprint 25).
+      - suggestedActions: [] deferred to Sprint 25 per D8.
       - generatedAt: SERVER_TIMESTAMP. createdAt/updatedAt are added by
         firestore_client.write_session_result (KG-PHASE8-6 mitigation).
-      - tier: tier_1 always for Sprint 20 (D3).
+      - tier: passed in from caller (inferred from market_evidence T21.7).
     """
     used_count = sum(1 for item in evidence_trail if item.get("used_in_answer"))
 
@@ -449,5 +450,5 @@ def _build_session_result(
 
         "generatedAt": SERVER_TIMESTAMP,
         "agentVersion": AGENT_VERSION,
-        "tier": TIER_DEFAULT,
+        "tier": tier,
     }

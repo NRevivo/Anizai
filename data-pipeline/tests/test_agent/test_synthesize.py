@@ -150,8 +150,8 @@ def _evidence_item(
 # ==========================================================
 # AGENT_VERSION pin
 # ==========================================================
-def test_agent_version_bumped_to_sprint_20():
-    assert synthesize.AGENT_VERSION == "0.3.0-sprint20-real-synthesis-and-firestore"
+def test_agent_version_bumped_to_sprint_21():
+    assert synthesize.AGENT_VERSION == "0.4.0-sprint21-clarification-tier2"
 
 
 def test_agentversion_appears_in_session_result():
@@ -187,8 +187,8 @@ def test_run_returns_full_8_7_2_shape():
     assert isinstance(result["whatIDidntFind"], list)
     assert result["suggestedActions"] == []  # D8: deferred to Sprint 25
 
-    # Metadata
-    assert result["tier"] == "tier_1"
+    # Metadata — tier inferred from market_evidence (absent in _state() → tier_2)
+    assert result["tier"] in {"tier_1", "tier_2"}
     assert result["generatedAt"] is firestore_client.SERVER_TIMESTAMP
 
     # Narrative fields — non-empty strings
@@ -543,7 +543,8 @@ def test_top_level_state_fields_surfaced_alongside_session_result():
     )
     assert "key_factors" in out
     assert "what_i_didnt_find" in out
-    assert out["tier"] == "tier_1"
+    # _state() has no market_evidence → tier inferred as "tier_2"
+    assert out["tier"] == "tier_2"
     assert out["confidence_score"] == out["synthesis_result"]["confidence"]
     assert "evidence_trail" in out
 

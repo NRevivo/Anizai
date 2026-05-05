@@ -115,12 +115,15 @@ def test_writes_subcollections_before_session_result_before_done(mocked_firestor
 
     # Expected order: evidence → predictionSeries → sentimentTimeSeries
     # → sessionResults → session.status=done → forecastQueries.status=done
+    # Sprint 21 T21.8: session_status now receives tier=None since the
+    # test fixture has no top-level tier field in state (write_to_firestore
+    # reads state.get("tier"), which is None in _state() with no tier override).
     assert manager.method_calls == [
         call.evidence("s1", [{**_evidence_item(), "type": "news"}]),
         call.prediction_series("s1", []),
         call.sentiment_time_series("s1", []),
         call.session_result("s1", {"finalProbability": 0.7, "tier": "tier_1"}),
-        call.session_status("s1", "done"),
+        call.session_status("s1", "done", tier=None),
         call.query_status("s1", "done"),
     ]
 
@@ -226,7 +229,7 @@ def test_session_id_used_for_both_session_and_query_status(mocked_firestore):
     _, _, _, _, _, ss, qs = mocked_firestore
     write_to_firestore.run(_state(session_id="abc-123"))
 
-    ss.assert_called_once_with("abc-123", "done")
+    ss.assert_called_once_with("abc-123", "done", tier=None)
     qs.assert_called_once_with("abc-123", "done")
 
 

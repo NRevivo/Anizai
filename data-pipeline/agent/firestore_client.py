@@ -223,6 +223,7 @@ def update_session_status(
     error_code: Optional[str] = None,
     error_message: Optional[str] = None,
     clarification_candidates: Optional[list[dict]] = None,
+    tier: Optional[str] = None,
 ) -> None:
     """
     Update sessions/{session_id} for a status transition.
@@ -249,6 +250,9 @@ def update_session_status(
                                   'awaiting_clarification' (Sprint 21).
                                   Field name camelCase to match the
                                   server-side schema.
+        tier: written to tier on 'done' (Sprint 21 T21.8). Matches the
+              session doc schema (frontend-integration skill): 'tier_1' |
+              'tier_2' | null.
     """
     db = get_db()
     session_ref = db.collection("sessions").document(session_id)
@@ -264,6 +268,8 @@ def update_session_status(
         update_data["errorMessage"] = error_message
     if clarification_candidates is not None:
         update_data["clarificationCandidates"] = clarification_candidates
+    if tier is not None:
+        update_data["tier"] = tier
 
     session_ref.update(update_data)
     logger.info(

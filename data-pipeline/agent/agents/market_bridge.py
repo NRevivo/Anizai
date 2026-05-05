@@ -12,6 +12,18 @@ Sprint 19 scope (per `data-pipeline/docs/agentic_hub_implementation.md` T19.4):
     - Google Trends per entity
     - Weather + aviation are deferred to Sprint 21+ (impl. doc T21.6)
 
+Sprint 21 T21.6 audit:
+    Tier 2 path (polymarket_slug=None → polymarket=None) verified correct;
+    no changes needed. KG-PHASE8-12 (auto-pick resolver) still deferred.
+
+KG-PHASE8-18 investigation (T21.6):
+    KG-PHASE8-18 described "empty summary_text" on vault_market evidence
+    items. Investigation confirms this was a misnomer — the relevant field
+    is `snippet`, not `summary_text`, and it IS populated for vault_market
+    items (PulseEvidence.market_consensus rows carry `executive_summary`
+    which flows into rate_evidence's `snippet` via `_normalize_pulse()`).
+    No code change required. KG-PHASE8-18 is CLOSED.
+
 Algorithm (spec §8.4.3):
     1. If polymarket_slug provided (Tier 1):
        a. fetch_latest("polymarket", slug)               → current odds + momentum
