@@ -507,30 +507,40 @@ def test_skip_matching_step_false_still_calls_llm():
 
 
 # ==========================================================
-# T21.4 — process_query._build_initial_state chosenCandidateId paths
+# T21.4 — process_query._build_initial_state (G1-corrected)
+#
+# Production resume contract (server requeueClarifiedSession):
+#   - New forecastQueries doc has fresh UUID as doc id, sessionId = original id
+#   - session doc has canonicalKey set (chosen candidate id or null=freeform)
+#   - clarificationCandidates is CLEARED on the session doc
+#   - No chosenCandidateId field in the forecastQueries doc
 # ==========================================================
 
 from agent.process_query import _build_initial_state  # noqa: E402
 
-
-def _stored_candidate(*, id_val="uuid-abc", entities=None, search_terms=None):
-    return {
-        "id": id_val,
-        "label": "Federal Reserve, Rates",
-        "source": "polymarket",
-        "description": "Forecast about Fed rates",
-        "matchConfidence": 0.82,
-        "intent": "forecast",
-        "domain": "macro",
-        "entities": entities or ["Federal Reserve"],
-        "polymarket_search_terms": search_terms or ["fed rate cut"],
-    }
+ORIGINAL_SESSION_ID = "original-session-abc"
+FRESH_QUERY_DOC_ID = "fresh-uuid-xyz"  # new forecastQueries doc id on resume
 
 
 @patch("agent.process_query.get_query_doc")
 @patch("agent.process_query.get_session_doc")
-def test_build_initial_state_normal_run_no_chosen_id(mock_session, mock_query):
-    """No chosenCandidateId in doc → plain initial state with just session_id."""
+def test_build_initial_state_first_time_run_same_ids(mock_session, mock_query):
+    """First-time query: sessionId == query_doc_id → plain initial state, no skip."""
+    # Express writes forecastQueries/{session_id} — doc id IS the session id.
+    mock_query.return_value = {
+        "sessionId": "session-1",
+        "status": "pending",
+        "question": "Will the Fed cut rates?",
+    }
+    result = _build_initial_state("session-1")
+    assert result == {"session_id": "session-1"}
+    mock_session.assert_not_called()
+
+
+@patch("agent.process_query.get_query_doc")
+@patch("agent.process_query.get_session_doc")
+def test_build_initial_state_first_time_run_no_session_id_field(mock_session, mock_query):
+    """Legacy first-time query without sessionId field → plain state (safe fallback)."""
     mock_query.return_value = {"status": "pending", "question": "q"}
     result = _build_initial_state("session-1")
     assert result == {"session_id": "session-1"}
@@ -548,48 +558,53 @@ def test_build_initial_state_doc_missing(mock_session, mock_query):
 
 @patch("agent.process_query.get_query_doc")
 @patch("agent.process_query.get_session_doc")
-def test_build_initial_state_null_chosen_id_means_freeform(mock_session, mock_query):
-    """chosenCandidateId=null → skip_matching_step=True, has_market_question_intent=False."""
-    mock_query.return_value = {"chosenCandidateId": None}
-    result = _build_initial_state("session-1")
+def test_build_initial_state_resume_freeform_null_canonical_key(mock_session, mock_query):
+    """Resume with null canonicalKey (user chose freeform) → Tier 2 structured_intent."""
+    mock_query.return_value = {
+        "sessionId": ORIGINAL_SESSION_ID,  # different from the doc id → resume
+        "question": "Middle East question",
+    }
+    mock_session.return_value = {
+        "status": "queued",
+        "canonicalKey": None,           # user chose "None of these — freeform"
+        "clarificationCandidates": None,  # Express cleared it
+    }
+    result = _build_initial_state(FRESH_QUERY_DOC_ID)
     assert result["skip_matching_step"] is True
     assert result["chosen_candidate_id"] is None
     assert result["structured_intent"]["has_market_question_intent"] is False
-    mock_session.assert_not_called()
+    # Session doc is looked up using the actual session id, not the fresh query doc id
+    mock_session.assert_called_once_with(ORIGINAL_SESSION_ID)
 
 
 @patch("agent.process_query.get_query_doc")
 @patch("agent.process_query.get_session_doc")
-def test_build_initial_state_non_null_chosen_id_recovers_candidate(mock_session, mock_query):
-    """chosenCandidateId=UUID → reads session doc, recovers structured_intent."""
-    mock_query.return_value = {"chosenCandidateId": "uuid-abc"}
-    mock_session.return_value = {
-        "clarificationCandidates": [
-            _stored_candidate(id_val="uuid-abc", entities=["Fed"], search_terms=["rate cut"]),
-        ]
+def test_build_initial_state_resume_specific_candidate_canonical_key(mock_session, mock_query):
+    """Resume with non-null canonicalKey (user chose a specific candidate)."""
+    mock_query.return_value = {
+        "sessionId": ORIGINAL_SESSION_ID,
+        "question": "Middle East question",
     }
-    result = _build_initial_state("session-1")
+    mock_session.return_value = {
+        "status": "queued",
+        "canonicalKey": "hub-candidate-uuid",  # chosen candidate's id
+        "clarificationCandidates": None,  # Express cleared it
+    }
+    result = _build_initial_state(FRESH_QUERY_DOC_ID)
     assert result["skip_matching_step"] is True
-    assert result["chosen_candidate_id"] == "uuid-abc"
-    assert result["structured_intent"]["entities"] == ["Fed"]
-    assert result["structured_intent"]["polymarket_search_terms"] == ["rate cut"]
+    assert result["chosen_candidate_id"] == "hub-candidate-uuid"
+    # has_market_question_intent=True (user DID intend a market question)
     assert result["structured_intent"]["has_market_question_intent"] is True
 
 
 @patch("agent.process_query.get_query_doc")
 @patch("agent.process_query.get_session_doc")
-def test_build_initial_state_unknown_candidate_id_falls_back_to_freeform(mock_session, mock_query):
-    """chosenCandidateId not in stored candidates → freeform fallback (not a hard error)."""
-    mock_query.return_value = {"chosenCandidateId": "uuid-xyz"}
-    mock_session.return_value = {
-        "clarificationCandidates": [
-            _stored_candidate(id_val="uuid-abc"),  # different ID
-        ]
-    }
-    result = _build_initial_state("session-1")
-    assert result["skip_matching_step"] is True
-    assert result["chosen_candidate_id"] == "uuid-xyz"
-    assert result["structured_intent"]["has_market_question_intent"] is False
+def test_build_initial_state_resume_sets_resume_session_id_hint(mock_session, mock_query):
+    """_resume_session_id hint is set to actual session id for _mark_failed in runner."""
+    mock_query.return_value = {"sessionId": ORIGINAL_SESSION_ID}
+    mock_session.return_value = {"canonicalKey": None}
+    result = _build_initial_state(FRESH_QUERY_DOC_ID)
+    assert result["_resume_session_id"] == ORIGINAL_SESSION_ID
 
 
 # ==========================================================

@@ -134,28 +134,37 @@ def _build_initial_state(query_doc_id: str) -> dict:
     Build the initial LangGraph state dict for a forecastQueries doc.
 
     Normal (first-time) runs return just `{"session_id": query_doc_id}`.
-    Resume-on-clarify runs (Sprint 21 T21.4) additionally pre-populate:
-        - skip_matching_step=True   — query_understand skips LLM call
-        - chosen_candidate_id       — ID of the candidate the user picked
-        - structured_intent         — rebuilt from stored clarificationCandidates
 
-    This pre-flight read happens BEFORE graph.invoke() because:
-    1. The initial state dict is passed to the graph before any node runs.
-    2. claim_session (Node 0) also reads the forecastQueries doc inside a
-       transaction, but by then the initial state dict is already fixed.
-    3. Firestore reads here are cheap (~10ms) vs the graph's LLM calls.
+    Resume-on-clarify runs pre-populate skip_matching_step + chosen_candidate_id
+    + structured_intent so query_understand skips the OpenAI call. Detection
+    is based on the forecastQueries doc's `sessionId` field differing from the
+    doc's own id — the server writes a fresh UUID as the resume doc id, distinct
+    from the original session id (G1 fix, Sprint 21).
 
-    Why read the SESSION doc too (not just the forecastQueries doc):
-        The forecastQueries doc has only chosenCandidateId (a UUID string).
-        The full clarificationCandidates array (with polymarket_search_terms
-        and entities) is stored on the SESSION doc (written by
-        write_clarification, T21.2). We read it to rebuild structured_intent
-        without adding another LLM call on the resume path.
+    Production resume contract (server/src/repositories/session.repository.ts
+    requeueClarifiedSession, line 428):
+        forecastQueries/{fresh-uuid}:
+            sessionId = original_session_id  ← key field for resume detection
+            question, userId (same as original)
+            NO chosenCandidateId field
+        sessions/{original-session-id}:
+            status = 'queued'
+            canonicalKey = chosen_candidate.id | null  ← freeform if null
+            clarificationCandidates = null  ← CLEARED by Express before requeue
 
-    Handles three cases for chosenCandidateId:
-        Key absent (normal first run)     → no skip_matching_step fields
-        Non-null value (candidate picked) → skip, use candidate data
-        Null value (user chose freeform)  → skip, synthesize as Tier 2
+    Why `session_id` stays as `query_doc_id` in the returned dict:
+        claim_session (Node 0) needs to claim the forecastQueries/{fresh-uuid}
+        doc — it calls claim_query(state["session_id"]). If we set
+        state["session_id"] = actual_session_id here, claim_session would try
+        to claim the wrong (non-existent) forecastQueries doc. claim_session
+        handles the translation itself (reading claimed["sessionId"] and
+        overwriting state["session_id"] in its return value).
+
+    Why `_resume_session_id` is set:
+        _mark_failed in process_query() needs the actual session id for
+        cleanup when the graph raises mid-execution. Since state["session_id"]
+        stays as query_doc_id here, we pass the actual id as a side-channel
+        hint. process_query() pops it before calling graph.invoke().
     """
     initial_state: dict = {"session_id": query_doc_id}
 
@@ -163,67 +172,27 @@ def _build_initial_state(query_doc_id: str) -> dict:
     if query_doc is None:
         return initial_state
 
-    # Key not present = normal first run; don't set skip_matching_step.
-    if "chosenCandidateId" not in query_doc:
-        return initial_state
+    # Resume detection: Express writes forecastQueries.sessionId = original_session_id.
+    # For first-time queries, Express writes forecastQueries/{sessionId} so
+    # doc_id == sessionId. On resume, doc_id (fresh UUID) != sessionId (original).
+    session_id_from_doc: str = query_doc.get("sessionId") or query_doc_id
+    if session_id_from_doc == query_doc_id:
+        return initial_state  # first-time query — no resume
 
-    chosen_candidate_id = query_doc.get("chosenCandidateId")
-
-    if chosen_candidate_id is None:
-        # User clicked "None of these — analyze as freeform" (handoff §6.3).
-        initial_state["skip_matching_step"] = True
-        initial_state["chosen_candidate_id"] = None
-        initial_state["structured_intent"] = {
-            "intent": "forecast",
-            "domain": "general",
-            "entities": [],
-            "polymarket_search_terms": None,
-            "has_market_question_intent": False,
-            "confidence": 0.5,
-            "too_broad": False,
-            "rejected": False,
-        }
-        logger.info(
-            "process_query: resume-on-clarify freeform path (chosenCandidateId=null) "
-            "query_doc_id=%s",
-            query_doc_id,
-        )
-        return initial_state
-
-    # Non-null chosenCandidateId: recover candidate from session doc.
-    session_doc = get_session_doc(query_doc_id)  # session_id == query_doc_id
-    stored_candidates: list[dict] = (
-        (session_doc or {}).get("clarificationCandidates") or []
-    )
-    chosen = next(
-        (c for c in stored_candidates if c.get("id") == chosen_candidate_id),
-        None,
-    )
+    # Resume path: read the actual session doc (NOT using query_doc_id —
+    # that would look up sessions/{fresh-uuid} which doesn't exist).
+    session_doc = get_session_doc(session_id_from_doc)
+    # canonicalKey is set by Express to the chosen candidate's id on resume.
+    # null means the user clicked "None of these — freeform analysis".
+    canonical_key: Optional[str] = (session_doc or {}).get("canonicalKey")
 
     initial_state["skip_matching_step"] = True
-    initial_state["chosen_candidate_id"] = chosen_candidate_id
+    initial_state["chosen_candidate_id"] = canonical_key
+    # Hint for _mark_failed — popped by process_query before graph.invoke.
+    initial_state["_resume_session_id"] = session_id_from_doc
 
-    if chosen:
-        # Rebuild structured_intent from the hub-recovery fields stored
-        # in the ClarificationCandidate by T21.1's _build_clarification_candidates.
-        initial_state["structured_intent"] = {
-            "intent": str(chosen.get("intent") or "forecast"),
-            "domain": str(chosen.get("domain") or "general"),
-            "entities": list(chosen.get("entities") or []),
-            "polymarket_search_terms": chosen.get("polymarket_search_terms"),
-            "has_market_question_intent": True,
-            "confidence": float(chosen.get("matchConfidence") or 0.75),
-            "too_broad": False,
-            "rejected": False,
-        }
-        logger.info(
-            "process_query: resume-on-clarify candidate path "
-            "chosen_candidate_id=%s query_doc_id=%s",
-            chosen_candidate_id, query_doc_id,
-        )
-    else:
-        # ID not found in stored candidates — treat as freeform fallback.
-        # This can happen if candidates expired or the ID was corrupted.
+    if canonical_key is None:
+        # User clicked "None of these — freeform analysis" (handoff §6.3).
         initial_state["structured_intent"] = {
             "intent": "forecast",
             "domain": "general",
@@ -234,11 +203,30 @@ def _build_initial_state(query_doc_id: str) -> dict:
             "too_broad": False,
             "rejected": False,
         }
-        logger.warning(
-            "process_query: resume-on-clarify chosen_candidate_id=%s not found "
-            "in stored candidates (count=%d) — falling back to freeform "
-            "query_doc_id=%s",
-            chosen_candidate_id, len(stored_candidates), query_doc_id,
+        logger.info(
+            "process_query: resume-on-clarify freeform "
+            "query_doc_id=%s actual_session_id=%s",
+            query_doc_id, session_id_from_doc,
+        )
+    else:
+        # User chose a specific candidate. Express cleared clarificationCandidates
+        # before requeuing (KG-PHASE8-20), so we cannot recover polymarket_search_terms.
+        # KG-PHASE8-12 means there's no vault-based market resolver anyway —
+        # the pipeline runs as effective Tier 2 regardless.
+        initial_state["structured_intent"] = {
+            "intent": "forecast",
+            "domain": "general",
+            "entities": [],
+            "polymarket_search_terms": None,
+            "has_market_question_intent": True,
+            "confidence": 0.75,
+            "too_broad": False,
+            "rejected": False,
+        }
+        logger.info(
+            "process_query: resume-on-clarify candidate "
+            "canonical_key=%s query_doc_id=%s actual_session_id=%s",
+            canonical_key, query_doc_id, session_id_from_doc,
         )
 
     return initial_state
@@ -264,6 +252,9 @@ def process_query(query_doc_id: str) -> None:
     )
 
     initial_state = _build_initial_state(query_doc_id)
+    # Pop the resume-session hint before the graph sees it — it's a
+    # runner-internal signal, not a ForecastState field.
+    mark_failed_session_id: str = initial_state.pop("_resume_session_id", query_doc_id)
 
     try:
         graph.invoke(initial_state)
@@ -278,15 +269,14 @@ def process_query(query_doc_id: str) -> None:
         )
         return
     except Exception as exc:
-        # session_id == query_doc_id by server contract, so we can pass
-        # query_doc_id straight through as the session id. We don't
-        # have a separate session_id from the graph state because the
-        # failure may have happened before claim_session returned.
+        # For resume-on-clarify queries, mark_failed_session_id is the
+        # actual sessions/{id} doc (not the fresh-UUID forecastQueries
+        # doc id). For first-time queries they are equal.
         logger.exception(
             "process_query: graph processing failed query_doc_id=%s",
             query_doc_id,
         )
-        _mark_failed(query_doc_id, query_doc_id, str(exc))
+        _mark_failed(mark_failed_session_id, query_doc_id, str(exc))
         raise
 
     logger.info(

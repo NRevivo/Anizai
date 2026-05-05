@@ -265,3 +265,55 @@ def test_run_wraps_running_status_update_failure(mocked_firestore):
         call("s1", "claimed"),
         call("s1", "running"),
     ]
+
+
+# ==========================================================
+# 10. G1 fix — resume-on-clarify: claimed doc's sessionId ≠ query_doc_id
+# ==========================================================
+
+def test_run_uses_session_id_from_claimed_doc_on_resume(mocked_firestore):
+    """G1 fix (Sprint 21): when Express creates a new forecastQueries doc
+    with a fresh UUID for resume-on-clarify, that doc's id (query_doc_id)
+    differs from the actual session id (stored in claimed["sessionId"]).
+    claim_session must write to sessions/{actual_session_id} — NOT
+    sessions/{query_doc_id} — and return state["session_id"] = actual_session_id.
+
+    server/src/repositories/session.repository.ts requeueClarifiedSession:318-453
+    uses `collectionRef('forecastQueries').doc()` (fresh UUID) as doc id and
+    writes sessionId: session.id in the document body.
+    """
+    manager, mock_claim, _ = mocked_firestore
+    # Simulate: forecastQueries/{fresh-uuid} has sessionId pointing to the
+    # original session (different from the doc id "fresh-uuid").
+    mock_claim.return_value = _claim_payload(
+        session_id="original-session-id",  # this is claimed["sessionId"]
+        question="Middle East question?",
+        user_id="u-abc",
+    )
+
+    with patch.object(claim_session.settings, "AGENT_WORKER_ID", "worker-1"):
+        # The graph runner passes the fresh forecastQueries doc id as session_id.
+        out = claim_session.run({"session_id": "fresh-uuid-doc-id"})
+
+    # claim_query receives the forecastQueries doc id (to claim the right doc).
+    assert manager.method_calls[0] == call.claim_query("fresh-uuid-doc-id", "worker-1")
+    # Status updates go to the ACTUAL session, not the fresh UUID.
+    assert manager.method_calls[1] == call.update_session_status("original-session-id", "claimed")
+    assert manager.method_calls[2] == call.update_session_status("original-session-id", "running")
+    # Returned state carries the actual session id, not the query doc id.
+    assert out["session_id"] == "original-session-id"
+    assert out["raw_question"] == "Middle East question?"
+    assert out["user_id"] == "u-abc"
+
+
+def test_run_first_time_query_session_id_unchanged(mocked_firestore):
+    """G1 fix backward-compat: for first-time queries where sessionId ==
+    query_doc_id, behaviour is identical to before the fix."""
+    _, mock_claim, _ = mocked_firestore
+    # First-time: forecastQueries/{session_id} — doc id == session id.
+    mock_claim.return_value = _claim_payload(session_id="s42")
+
+    with patch.object(claim_session.settings, "AGENT_WORKER_ID", "worker-1"):
+        out = claim_session.run({"session_id": "s42"})
+
+    assert out["session_id"] == "s42"

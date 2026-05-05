@@ -220,8 +220,12 @@ def mocked_boundaries():
         patch("agent.agents.pulse_analyst.run") as mock_pulse,
         patch("agent.agents.market_bridge.run") as mock_market,
     ):
-        # Defaults — happy path
-        mock_claim.return_value = _claim_payload()
+        # Defaults — happy path.
+        # G1 fix: sessionId in the claimed payload must match the query_doc_id
+        # passed to graph.invoke (both "doc1") so claim_session treats it as a
+        # first-time query (not resume). In production, first-time forecastQueries
+        # docs have the session id as their doc id — sessionId == doc_id.
+        mock_claim.return_value = _claim_payload(session_id="doc1")
         mock_status.return_value = None
 
         qu_client = MagicMock()

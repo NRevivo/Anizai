@@ -169,24 +169,41 @@ def _seed_pending_query(db, session_id: str, question: str) -> None:
     batch.commit()
 
 
-def _seed_resume_query(db, session_id: str, chosen_candidate_id) -> None:
-    """Write a new forecastQueries doc simulating the Express /clarify endpoint.
+def _seed_resume_query(db, session_id: str, canonical_key) -> str:
+    """Write a new forecastQueries doc simulating Express POST /sessions/:id/clarify.
 
-    In production, Express writes a NEW forecastQueries doc with a fresh ID.
-    For this E2E test, we reuse the same session_id (same doc) since the server
-    contract maps session_id == query_doc_id. We set status=pending and add
-    chosenCandidateId so the worker picks it up and resumes.
+    Matches the production behavior of server requeueClarifiedSession:
+      - A fresh UUID is the new forecastQueries doc id (not session_id)
+      - sessionId field points to the original session
+      - No chosenCandidateId field in the forecastQueries doc
+      - sessions/{session_id}: status=queued, canonicalKey set, candidates=null
+
+    Returns the fresh forecastQueries doc id (the worker picks this up).
     """
-    db.collection("forecastQueries").document(session_id).update({
-        "status": "pending",
-        "chosenCandidateId": chosen_candidate_id,
-        "updatedAt": fb_firestore.SERVER_TIMESTAMP,
-    })
-    # Also reset session status to queued so the worker can claim+running
+    fresh_query_doc_id = f"e2e-sprint21-resume-{uuid.uuid4().hex[:8]}"
+
+    # session doc: Express requeues with canonicalKey, candidates cleared
     db.collection("sessions").document(session_id).update({
         "status": "queued",
+        "canonicalKey": canonical_key,       # null=freeform, uuid=specific candidate
+        "clarificationCandidates": None,     # Express clears candidates
         "updatedAt": fb_firestore.SERVER_TIMESTAMP,
+        "lastActivityAt": fb_firestore.SERVER_TIMESTAMP,
     })
+
+    # New forecastQueries doc: fresh UUID id, sessionId points to original
+    db.collection("forecastQueries").document(fresh_query_doc_id).set({
+        "queryId": uuid.uuid4().hex,
+        "sessionId": session_id,             # key field for resume detection
+        "userId": USER_ID,
+        "question": AMBIGUOUS_QUESTION,
+        "status": "pending",
+        "createdAt": fb_firestore.SERVER_TIMESTAMP,
+        "claimedAt": None,
+        "claimedBy": None,
+    })
+
+    return fresh_query_doc_id
 
 
 def _poll_session_status(db, session_id: str, target_status: str, timeout: float) -> dict | None:
@@ -260,17 +277,21 @@ def main() -> int:
                 print(f"    [{c['id'][:8]}...] {c['label']!r} (conf={c['matchConfidence']:.2f})")
 
     # ──────────────────────────────────────────────────────────
-    # Phase 2: Tier 2 freeform resume (chosenCandidateId=null)
+    # Phase 2: Tier 2 freeform resume (canonicalKey=null)
     # ──────────────────────────────────────────────────────────
     print(f"\n{'='*60}")
-    print(f"Phase 2 — Tier 2 freeform resume (chosenCandidateId=null)")
-    print(f"  session_id : {session_id} (same session)")
+    print(f"Phase 2 — Tier 2 freeform resume (G1-corrected, canonicalKey=null)")
+    print(f"  session_id     : {session_id} (same session)")
     print(f"{'='*60}")
 
-    # Simulate the user clicking "None of these — analyze as freeform"
-    _seed_resume_query(db, session_id, chosen_candidate_id=None)
-    print(f"  Seeded resume forecastQueries doc with chosenCandidateId=null.")
-    print(f"  Polling for status='done' (timeout={FORECAST_TIMEOUT_SECONDS}s)...")
+    # Simulate the user clicking "None of these — analyze as freeform".
+    # _seed_resume_query creates a NEW forecastQueries doc (fresh UUID) with
+    # sessionId=session_id and updates session doc with canonicalKey=null.
+    # This matches production server requeueClarifiedSession behavior.
+    fresh_query_doc_id = _seed_resume_query(db, session_id, canonical_key=None)
+    print(f"  Seeded fresh resume forecastQueries doc: {fresh_query_doc_id}")
+    print(f"  Worker will claim forecastQueries/{fresh_query_doc_id} and resume.")
+    print(f"  Polling sessions/{session_id} for status='done' (timeout={FORECAST_TIMEOUT_SECONDS}s)...")
 
     session_done = _poll_session_status(
         db, session_id, "done", FORECAST_TIMEOUT_SECONDS

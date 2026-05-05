@@ -92,9 +92,16 @@ def run(state: dict) -> dict:
             f"session_id={session_id}"
         )
 
+    # G1 fix (Sprint 21): For resume-on-clarify, Express creates a NEW
+    # forecastQueries doc with a fresh UUID as its doc id (not the session id).
+    # The actual sessions/{id} document is identified by the claimed doc's
+    # "sessionId" field. For first-time queries, sessionId == session_id.
+    # server/src/repositories/session.repository.ts:428 (requeueClarifiedSession).
+    actual_session_id: str = claimed.get("sessionId") or session_id
+
     try:
-        firestore_client.update_session_status(session_id, "claimed")
-        firestore_client.update_session_status(session_id, "running")
+        firestore_client.update_session_status(actual_session_id, "claimed")
+        firestore_client.update_session_status(actual_session_id, "running")
     except AgentProcessingError:
         raise
     except Exception as exc:
@@ -103,12 +110,12 @@ def run(state: dict) -> dict:
         ) from exc
 
     logger.info(
-        "claim_session: claimed and running session_id=%s queryId=%s",
-        session_id, claimed.get("queryId"),
+        "claim_session: claimed and running session_id=%s actual_session_id=%s queryId=%s",
+        session_id, actual_session_id, claimed.get("queryId"),
     )
 
     return {
-        "session_id": session_id,
+        "session_id": actual_session_id,
         "raw_question": claimed["question"],
         "user_id": claimed["userId"],
     }

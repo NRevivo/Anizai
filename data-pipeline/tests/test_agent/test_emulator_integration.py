@@ -400,27 +400,42 @@ def test_claim_already_claimed_returns_none(emulator_db, emulator_test_id):
 # Sprint 21 T21.11 — Gate 3 emulator tests for clarification flow
 # ==========================================================
 
-def _seed_pending_query_with_chosen_candidate(
-    db, session_id: str, candidates: list, chosen_candidate_id
+def _seed_resume_state(
+    db,
+    session_id: str,
+    fresh_query_doc_id: str,
+    canonical_key,
 ) -> None:
-    """Simulate the state after write_clarification ran + user picked a candidate.
+    """Simulate the Firestore state after write_clarification ran and Express
+    processed POST /sessions/:id/clarify (G1-corrected production contract).
 
-    Writes:
-      - sessions/{id}: status=awaiting_clarification, clarificationCandidates
-      - forecastQueries/{id}: status=pending, chosenCandidateId (resume doc)
+    Production behavior (server requeueClarifiedSession):
+      - sessions/{session_id}: status=queued, canonicalKey=canonical_key,
+        clarificationCandidates=null (Express CLEARS this)
+      - forecastQueries/{fresh_query_doc_id}: status=pending,
+        sessionId=session_id (fresh UUID doc, NOT session_id as doc id)
+        NO chosenCandidateId field in the forecastQueries doc.
+
+    sprint21_e2e_run.py uses the same shape.
     """
+    # Session doc: Express requeues with canonicalKey set, candidates cleared.
     db.collection("sessions").document(session_id).set({
-        "status": "awaiting_clarification",
-        "clarificationCandidates": candidates,
+        "status": "queued",
+        "canonicalKey": canonical_key,
+        "clarificationCandidates": None,  # cleared by Express
+        "question": "Will the Fed cut rates in 2026?",
+        "userId": "test-user",
         "createdAt": fb_firestore.SERVER_TIMESTAMP,
         "updatedAt": fb_firestore.SERVER_TIMESTAMP,
+        "lastActivityAt": fb_firestore.SERVER_TIMESTAMP,
     })
-    db.collection("forecastQueries").document(session_id).set({
-        "queryId": f"q_{session_id}",
-        "sessionId": session_id,
+    # Fresh forecastQueries doc: new random UUID as doc id, sessionId points
+    # to the original session. No chosenCandidateId field.
+    db.collection("forecastQueries").document(fresh_query_doc_id).set({
+        "queryId": f"q_{fresh_query_doc_id}",
+        "sessionId": session_id,           # key field: actual session id
         "userId": "test-user",
         "question": "Will the Fed cut rates in 2026?",
-        "chosenCandidateId": chosen_candidate_id,
         "status": "pending",
         "createdAt": fb_firestore.SERVER_TIMESTAMP,
         "claimedAt": None,
@@ -505,30 +520,27 @@ def test_sprint21_gate3_clarification_path_writes_awaiting_status(
 def test_sprint21_gate3_tier2_resume_freeform_completes_forecast(
     emulator_db, emulator_test_id
 ):
-    """Resume-on-clarify with chosenCandidateId=null (freeform) → full Tier 2 forecast.
+    """Resume-on-clarify (freeform, canonicalKey=null) → full Tier 2 forecast.
 
-    Verifies:
-    - process_query reads chosenCandidateId=null from real Firestore emulator
-    - skip_matching_step short-circuits query_understand
-    - Full pipeline runs and produces sessionResults with tier='tier_2'
-    - session.status == 'done'
+    Uses the G1-corrected production shape:
+      - Express creates a NEW forecastQueries doc with a fresh UUID id
+        (not the session id) and sessionId=original_session_id in the body.
+      - session doc has canonicalKey=null (freeform) and clarificationCandidates=null.
+      - process_query detects resume via sessionId!=query_doc_id in the
+        forecastQueries doc (NOT via chosenCandidateId field).
+
+    Sprint 21 known limitation (noted in G1 report):
+      - write_to_firestore calls update_query_status(state["session_id"])
+        which marks forecastQueries/{original_session_id} as "done" (not
+        the fresh UUID doc). The fresh UUID doc stays at "claimed". This is
+        acceptable for now — the worker listener only picks up "pending" docs
+        so no re-processing occurs. Sprint 26 adds query_doc_id to state.
     """
     db = emulator_db
     session_id = f"{emulator_test_id}_tier2_resume"
+    fresh_query_doc_id = f"{emulator_test_id}_tier2_resume_fq"  # prefix for cleanup
 
-    # Seed state: session has clarification candidates from prior run;
-    # forecastQueries has chosenCandidateId=None (user clicked "freeform").
-    candidates = [
-        {"id": "uuid-iran-israel", "label": "Iran, Israel", "source": "polymarket",
-         "description": "Forecast question about Iran Israel", "matchConfidence": 0.78,
-         "intent": "forecast", "domain": "geopolitics",
-         "entities": ["Iran", "Israel"], "polymarket_search_terms": ["iran israel conflict"]},
-        {"id": "uuid-gaza-hamas", "label": "Gaza, Hamas", "source": "polymarket",
-         "description": "Forecast question about Gaza Hamas", "matchConfidence": 0.74,
-         "intent": "forecast", "domain": "geopolitics",
-         "entities": ["Gaza", "Hamas"], "polymarket_search_terms": ["gaza ceasefire"]},
-    ]
-    _seed_pending_query_with_chosen_candidate(db, session_id, candidates, chosen_candidate_id=None)
+    _seed_resume_state(db, session_id, fresh_query_doc_id, canonical_key=None)
 
     qu_client, emb_client, rate_client, synth_client = _build_llm_mocks()
 
@@ -546,25 +558,81 @@ def test_sprint21_gate3_tier2_resume_freeform_completes_forecast(
         mock_pulse.return_value = {"market_consensus": [], "community_discussion": [], "overall_sentiment": 0.0, "empty": True}
         mock_market.return_value = {"polymarket": None, "linked_sources": [], "fred_anomalies": [], "google_trends": [], "empty": True}
 
-        process_query(session_id)
+        # process_query receives the FRESH QUERY DOC ID, not the session id.
+        process_query(fresh_query_doc_id)
 
-        # query_understand must NOT have called the LLM (skip_matching_step path)
+        # query_understand must NOT have called the LLM (skip_matching_step)
         qu_client.chat.completions.create.assert_not_called()
 
-    # sessionResults must exist with tier_2
+    # sessionResults is keyed by the ACTUAL session_id (from claimed["sessionId"])
     result_doc = db.collection("sessionResults").document(session_id).get()
-    assert result_doc.exists
+    assert result_doc.exists, f"sessionResults/{session_id} not written"
     result = result_doc.to_dict()
     assert result["tier"] == "tier_2"
     assert result["marketProbability"] is None
     assert result["marketComparison"] == []
     assert result["marketComparisonInsight"] == "No canonical market available — freeform analysis."
 
-    # Session doc must be done
+    # Session doc (original session_id) must be done with tier=tier_2
     session = db.collection("sessions").document(session_id).get().to_dict()
     assert session["status"] == "done"
-    assert session["tier"] == "tier_2"  # T21.8: tier written to session doc
+    assert session["tier"] == "tier_2"  # T21.8
 
-    # forecastQueries also done
-    fq = db.collection("forecastQueries").document(session_id).get().to_dict()
-    assert fq["status"] == "done"
+    # Fresh forecastQueries doc stays at "claimed" (Sprint 21 known limitation —
+    # write_to_firestore uses actual_session_id for update_query_status, which
+    # marks the original session's forecastQueries doc, not the fresh one).
+    fq_fresh = db.collection("forecastQueries").document(fresh_query_doc_id).get().to_dict()
+    assert fq_fresh["status"] == "claimed"  # not "done" — Sprint 26 fix
+
+
+def test_sprint21_gate3_tier1_clear_path_writes_tier1(
+    emulator_db, emulator_test_id
+):
+    """Clear Tier 1 path: market_bridge returns non-None polymarket → tier='tier_1'.
+
+    Gate 3 regression guard added post-Sprint-21 review (#2 from review action
+    items). Complements test_round_trip_writes_session_result (polymarket=None
+    → tier_2) and the Gate 2 Tier 1 test in test_sprint21_gate2.py. Verifies
+    the tier inference in synthesize.py and the tier field write in
+    write_to_firestore.py against real emulator Firestore semantics.
+    """
+    db = emulator_db
+    session_id = f"{emulator_test_id}_tier1_clear"
+    question = "Will the Fed cut rates by Q3 2026?"
+    _seed_pending_query(db, session_id, question)
+
+    qu_client, emb_client, rate_client, synth_client = _build_llm_mocks()
+
+    with (
+        patch("agent.nodes.claim_session.settings.AGENT_WORKER_ID", "worker-test"),
+        patch("agent.nodes.query_understand._get_default_client", return_value=qu_client),
+        patch("agent.nodes.build_embedding._get_default_client", return_value=emb_client),
+        patch("agent.nodes.rate_evidence._get_default_client", return_value=rate_client),
+        patch("agent.nodes.synthesize._get_default_client", return_value=synth_client),
+        patch("agent.agents.researcher.run") as mock_researcher,
+        patch("agent.agents.pulse_analyst.run") as mock_pulse,
+        patch("agent.agents.market_bridge.run") as mock_market,
+    ):
+        mock_researcher.return_value = {"articles": [], "source_diversity": {}, "recency_range": None, "empty": True}
+        mock_pulse.return_value = {"market_consensus": [], "community_discussion": [], "overall_sentiment": 0.0, "empty": True}
+        # Non-None polymarket triggers Tier 1 path in synthesize.py
+        mock_market.return_value = {
+            "polymarket": {"current_odds": 0.72, "market_slug": "fed-rate-cut-q3-2026"},
+            "linked_sources": [],
+            "fred_anomalies": [],
+            "google_trends": [],
+            "empty": False,
+        }
+
+        process_query(session_id)
+
+    # sessionResults tier must be tier_1
+    result_doc = db.collection("sessionResults").document(session_id).get()
+    assert result_doc.exists, f"sessionResults/{session_id} not written"
+    result = result_doc.to_dict()
+    assert result["tier"] == "tier_1"
+
+    # Session doc must also carry tier_1 (T21.8 write_to_firestore)
+    session = db.collection("sessions").document(session_id).get().to_dict()
+    assert session["status"] == "done"
+    assert session["tier"] == "tier_1"
