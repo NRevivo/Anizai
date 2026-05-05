@@ -310,6 +310,56 @@ def test_clarification_needed_contains_shaped_candidates():
     assert all("source" in c for c in needed)
 
 
+def test_run_single_candidate_below_threshold_auto_picks_not_clarifies():
+    """Single candidate with confidence below AUTO_PICK_THRESHOLD must auto-pick,
+    not route to clarification with a len=1 list.
+
+    KG-PHASE8-21: surfaced during T21.12 first run — broad question "What will
+    happen in the Middle East?" caused the real model to return one candidate
+    at low confidence, which hit the ambiguous path and wrote 1 candidate to
+    Firestore. UX invariant: clarification requires ≥2 distinct choices.
+
+    Covers the guard added after _build_clarification_candidates: if
+    len(shaped_candidates) < 2, treat as auto-pick using rank_1 intent.
+    """
+    # Single candidate, confidence=0.60 < AUTO_PICK_THRESHOLD=0.75
+    response = _make_response(
+        candidates=[
+            _make_candidate(confidence=0.60, entities=["Middle East stability"]),
+        ]
+    )
+    out = query_understand.run({"raw_question": "What will happen in the Middle East?"}, client=_make_client(response))
+
+    assert out["awaiting_clarification"] is False, (
+        "single low-confidence candidate must not trigger clarification"
+    )
+    assert out["clarification_candidates"] is None
+    assert out["clarification_needed"] is None
+    # rank_1's intent must be preserved in structured_intent (not discarded)
+    assert out["structured_intent"]["entities"] == ["Middle East stability"]
+
+
+def test_run_single_candidate_too_broad_auto_picks_not_clarifies():
+    """Single too_broad candidate must auto-pick, not surface a 1-item clarification picker.
+
+    too_broad=True on rank_1 causes _should_auto_pick to return False before
+    the len(candidates)==1 guard fires. The ≥2-candidates guard after
+    _build_clarification_candidates catches this case and prevents the
+    single-item picker. Complements the low-confidence case above.
+    """
+    response = _make_response(
+        candidates=[
+            _make_candidate(confidence=0.85, too_broad=True, entities=["Middle East"]),
+        ]
+    )
+    out = query_understand.run({"raw_question": "What will happen?"}, client=_make_client(response))
+
+    assert out["awaiting_clarification"] is False, (
+        "single too_broad candidate must not trigger clarification"
+    )
+    assert out["clarification_candidates"] is None
+
+
 # ==========================================================
 # T21.2 — write_clarification node
 # ==========================================================

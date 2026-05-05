@@ -183,6 +183,20 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
     # UUIDs assigned here are stable within the session — process_query uses
     # them to match chosenCandidateId on resume-on-clarify (T21.4).
     shaped_candidates = _build_clarification_candidates(candidates)
+
+    # Guard: clarification only makes UX sense when ≥2 distinct choices exist.
+    # A single candidate (e.g. low-confidence result from a broad question)
+    # must fall through to auto-pick rather than surfacing a 1-item picker
+    # that offers the user no real decision. Surfaced during T21.12 first run.
+    if len(shaped_candidates) < 2:
+        return {
+            "structured_intent": _strip_meta(rank_1),
+            "awaiting_clarification": False,
+            "clarification_needed": None,
+            "clarification_candidates": None,
+            **metadata_patch,
+        }
+
     return {
         "structured_intent": _strip_meta(rank_1),
         "awaiting_clarification": True,

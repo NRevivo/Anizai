@@ -162,8 +162,17 @@ def test_run_clarifies_when_rank_1_below_auto_pick_threshold():
 
 
 def test_run_clarifies_when_too_broad_even_if_high_confidence():
+    """too_broad=True on rank_1 forces clarification, bypassing the margin check.
+
+    Two candidates are required — clarification is only meaningful when ≥2
+    distinct options exist (KG-PHASE8-21 guard). The second candidate gives
+    the user an alternative interpretation to pick instead of the too_broad one.
+    """
     response = _make_response(
-        candidates=[_make_candidate(confidence=0.95, too_broad=True)]
+        candidates=[
+            _make_candidate(confidence=0.95, too_broad=True, entities=["Economy"]),
+            _make_candidate(confidence=0.80, too_broad=False, entities=["GDP Growth"]),
+        ]
     )
     client = _make_client(response)
 

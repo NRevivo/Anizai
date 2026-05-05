@@ -225,6 +225,37 @@ def _poll_session_status(db, session_id: str, target_status: str, timeout: float
     return None
 
 
+def _poll_session_any_terminal(
+    db,
+    session_id: str,
+    terminal_statuses: set,
+    timeout: float,
+) -> tuple:
+    """Poll sessions/{id} until status is in terminal_statuses.
+
+    Returns (reached_status, session_doc). On timeout or 'failed' returns
+    (None, None) or ('failed', session_doc) respectively.
+
+    Used by Phase 1 to accept either 'awaiting_clarification' (ambiguous path)
+    or 'done' (auto-pick path via KG-PHASE8-21 guard) as valid outcomes.
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        snap = db.collection("sessions").document(session_id).get()
+        if snap.exists:
+            data = snap.to_dict()
+            status = data.get("status")
+            print(f"  status={status!r} (elapsed={time.time() - start:.1f}s)")
+            if status in terminal_statuses:
+                return status, data
+            if status == "failed":
+                print(f"  ERROR: session failed — errorMessage={data.get('errorMessage')!r}")
+                return "failed", data
+        time.sleep(POLL_INTERVAL_SECONDS)
+    print(f"  TIMEOUT: none of {sorted(terminal_statuses)!r} reached after {timeout}s")
+    return None, None
+
+
 def _get_session_result(db, session_id: str) -> dict | None:
     snap = db.collection("sessionResults").document(session_id).get()
     return snap.to_dict() if snap.exists else None
@@ -235,108 +266,151 @@ def _get_session_result(db, session_id: str) -> dict | None:
 # ==========================================================
 
 def main() -> int:
-    """Returns 0 on full pass, 1 on any failure."""
+    """Returns 0 on full pass, 1 on any failure.
+
+    Phase 1 accepts two valid outcomes (KG-PHASE8-21 guard):
+      (a) awaiting_clarification with len(clarificationCandidates) >= 2 — ambiguous path.
+          Proceeds to Phase 2 (Tier 2 freeform resume).
+      (b) done directly — auto-pick path (single-candidate guard fired).
+          Phase 2 skipped; guard verification is the pass criterion.
+
+    Phase 1 fails if:
+      - awaiting_clarification with len < 2 (original KG-PHASE8-21 bug — must never happen now)
+      - session reaches 'failed' status
+      - no terminal status within CLARIFICATION_TIMEOUT_SECONDS
+    """
     init_app()
     db = get_db()
 
     total_failures: list[str] = []
 
     # ──────────────────────────────────────────────────────────
-    # Phase 1: Clarification path
+    # Phase 1: Ambiguous OR auto-pick path
     # ──────────────────────────────────────────────────────────
     session_id = f"e2e-sprint21-{uuid.uuid4().hex[:8]}"
     print(f"\n{'='*60}")
-    print(f"Phase 1 — Clarification path")
+    print(f"Phase 1 — Ambiguous / auto-pick path")
     print(f"  session_id : {session_id}")
     print(f"  question   : {AMBIGUOUS_QUESTION!r}")
     print(f"{'='*60}")
 
     _seed_pending_query(db, session_id, AMBIGUOUS_QUESTION)
     print(f"  Seeded pending query. Waiting for worker to process...")
-    print(f"  Polling for status='awaiting_clarification' (timeout={CLARIFICATION_TIMEOUT_SECONDS}s)...")
-
-    session_data = _poll_session_status(
-        db, session_id, "awaiting_clarification", CLARIFICATION_TIMEOUT_SECONDS
+    print(
+        f"  Polling for {{'awaiting_clarification', 'done'}} "
+        f"(timeout={CLARIFICATION_TIMEOUT_SECONDS}s)..."
     )
 
-    if session_data is None:
-        total_failures.append("Phase 1: session never reached awaiting_clarification")
-        print("  FAIL: Phase 1 did not complete")
-    else:
+    phase1_terminal = {"awaiting_clarification", "done"}
+    phase1_status, session_data = _poll_session_any_terminal(
+        db, session_id, phase1_terminal, CLARIFICATION_TIMEOUT_SECONDS
+    )
+
+    phase2_needed = False
+
+    if phase1_status is None:
+        total_failures.append("Phase 1: timed out — no terminal status reached")
+        print("  FAIL: Phase 1 timed out")
+    elif phase1_status == "failed":
+        msg = (session_data or {}).get("errorMessage", "no errorMessage")
+        total_failures.append(f"Phase 1: session failed — {msg}")
+        print(f"  FAIL: session failed")
+
+    elif phase1_status == "awaiting_clarification":
+        # ── Ambiguous path ──────────────────────────────────────
         candidates = session_data.get("clarificationCandidates")
-        print(f"  clarificationCandidates: {len(candidates) if candidates else 0} items")
+        n = len(candidates) if candidates else 0
+        print(f"  Path: AMBIGUOUS (awaiting_clarification) — {n} candidate(s)")
         phase1_failures = validate_clarification_candidates(candidates)
         if phase1_failures:
+            # awaiting_clarification with <2 candidates is the KG-PHASE8-21 bug.
+            # Must never happen with the guard in place.
             total_failures.extend([f"Phase 1: {f}" for f in phase1_failures])
-            print(f"  FAIL: {len(phase1_failures)} validation error(s)")
+            print(f"  FAIL: {len(phase1_failures)} validation error(s) — KG-PHASE8-21 guard did not fire?")
             for f in phase1_failures:
                 print(f"    - {f}")
         else:
-            print(f"  PASS: clarificationCandidates shape valid ({len(candidates)} candidates)")
+            print(f"  PASS: clarificationCandidates shape valid ({n} candidates)")
             for c in candidates:
                 print(f"    [{c['id'][:8]}...] {c['label']!r} (conf={c['matchConfidence']:.2f})")
+            phase2_needed = True
+
+    else:
+        # ── Auto-pick path (phase1_status == 'done') ────────────
+        print(f"  Path: AUTO-PICK (done directly) — KG-PHASE8-21 guard exercised")
+        result = _get_session_result(db, session_id)
+        if result is None:
+            total_failures.append("Phase 1 (auto-pick): sessionResults/{id} not written")
+            print("  FAIL: sessionResults doc missing on auto-pick path")
+        else:
+            print(f"  PASS: auto-pick path — guard verified, SessionResult written")
+            print(f"    finalProbability : {result.get('finalProbability', 'N/A')}")
+            print(f"    tier             : {result.get('tier', 'N/A')!r}")
+            print(f"    agentVersion     : {result.get('agentVersion', 'N/A')!r}")
+        print(f"  Phase 2 skipped — resume path covered by Gate 2 + Gate 3.")
 
     # ──────────────────────────────────────────────────────────
     # Phase 2: Tier 2 freeform resume (canonicalKey=null)
+    # Only runs when Phase 1 produced awaiting_clarification with ≥2 candidates.
     # ──────────────────────────────────────────────────────────
-    print(f"\n{'='*60}")
-    print(f"Phase 2 — Tier 2 freeform resume (G1-corrected, canonicalKey=null)")
-    print(f"  session_id     : {session_id} (same session)")
-    print(f"{'='*60}")
+    if phase2_needed:
+        print(f"\n{'='*60}")
+        print(f"Phase 2 — Tier 2 freeform resume (G1-corrected, canonicalKey=null)")
+        print(f"  session_id     : {session_id} (same session)")
+        print(f"{'='*60}")
 
-    # Simulate the user clicking "None of these — analyze as freeform".
-    # _seed_resume_query creates a NEW forecastQueries doc (fresh UUID) with
-    # sessionId=session_id and updates session doc with canonicalKey=null.
-    # This matches production server requeueClarifiedSession behavior.
-    fresh_query_doc_id = _seed_resume_query(db, session_id, canonical_key=None)
-    print(f"  Seeded fresh resume forecastQueries doc: {fresh_query_doc_id}")
-    print(f"  Worker will claim forecastQueries/{fresh_query_doc_id} and resume.")
-    print(f"  Polling sessions/{session_id} for status='done' (timeout={FORECAST_TIMEOUT_SECONDS}s)...")
+        # Simulate the user clicking "None of these — analyze as freeform".
+        # _seed_resume_query creates a NEW forecastQueries doc (fresh UUID) with
+        # sessionId=session_id and updates session doc with canonicalKey=null.
+        # This matches production server requeueClarifiedSession behavior.
+        fresh_query_doc_id = _seed_resume_query(db, session_id, canonical_key=None)
+        print(f"  Seeded fresh resume forecastQueries doc: {fresh_query_doc_id}")
+        print(f"  Worker will claim forecastQueries/{fresh_query_doc_id} and resume.")
+        print(f"  Polling sessions/{session_id} for status='done' (timeout={FORECAST_TIMEOUT_SECONDS}s)...")
 
-    session_done = _poll_session_status(
-        db, session_id, "done", FORECAST_TIMEOUT_SECONDS
-    )
+        session_done = _poll_session_status(
+            db, session_id, "done", FORECAST_TIMEOUT_SECONDS
+        )
 
-    if session_done is None:
-        total_failures.append("Phase 2: session never reached done after Tier 2 resume")
-        print("  FAIL: Phase 2 did not complete")
-    else:
-        # Validate the SessionResult
-        result = _get_session_result(db, session_id)
-        if result is None:
-            total_failures.append("Phase 2: sessionResults/{id} not written")
-            print("  FAIL: sessionResults doc missing")
+        if session_done is None:
+            total_failures.append("Phase 2: session never reached done after Tier 2 resume")
+            print("  FAIL: Phase 2 did not complete")
         else:
-            phase2_failures = validate_tier2_session_result(result)
-            if phase2_failures:
-                total_failures.extend([f"Phase 2: {f}" for f in phase2_failures])
-                print(f"  FAIL: {len(phase2_failures)} validation error(s)")
-                for f in phase2_failures:
-                    print(f"    - {f}")
+            result = _get_session_result(db, session_id)
+            if result is None:
+                total_failures.append("Phase 2: sessionResults/{id} not written")
+                print("  FAIL: sessionResults doc missing")
             else:
-                print(f"  PASS: Tier 2 SessionResult valid")
-                print(f"    finalProbability   : {result['finalProbability']:.3f}")
-                print(f"    confidenceLabel    : {result.get('confidenceLabel')!r}")
-                print(f"    tier               : {result.get('tier')!r}")
-                print(f"    marketProbability  : {result.get('marketProbability')!r}")
-                print(f"    agentVersion       : {result.get('agentVersion')!r}")
+                phase2_failures = validate_tier2_session_result(result)
+                if phase2_failures:
+                    total_failures.extend([f"Phase 2: {f}" for f in phase2_failures])
+                    print(f"  FAIL: {len(phase2_failures)} validation error(s)")
+                    for f in phase2_failures:
+                        print(f"    - {f}")
+                else:
+                    print(f"  PASS: Tier 2 SessionResult valid")
+                    print(f"    finalProbability   : {result['finalProbability']:.3f}")
+                    print(f"    confidenceLabel    : {result.get('confidenceLabel')!r}")
+                    print(f"    tier               : {result.get('tier')!r}")
+                    print(f"    marketProbability  : {result.get('marketProbability')!r}")
+                    print(f"    agentVersion       : {result.get('agentVersion')!r}")
 
-        # Verify session.tier was written (T21.8)
-        tier_on_session = session_done.get("tier")
-        if tier_on_session != "tier_2":
-            total_failures.append(
-                f"Phase 2: session doc tier={tier_on_session!r} expected 'tier_2' (T21.8)"
-            )
-            print(f"  FAIL: session.tier={tier_on_session!r} (expected tier_2, T21.8)")
-        else:
-            print(f"  PASS: session.tier='tier_2' confirmed (T21.8)")
+            tier_on_session = session_done.get("tier")
+            if tier_on_session != "tier_2":
+                total_failures.append(
+                    f"Phase 2: session doc tier={tier_on_session!r} expected 'tier_2' (T21.8)"
+                )
+                print(f"  FAIL: session.tier={tier_on_session!r} (expected tier_2, T21.8)")
+            else:
+                print(f"  PASS: session.tier='tier_2' confirmed (T21.8)")
 
     # ──────────────────────────────────────────────────────────
     # Summary
     # ──────────────────────────────────────────────────────────
     print(f"\n{'='*60}")
     if not total_failures:
-        print("T21.12 E2E PASS — Sprint 21 clarification + Tier 2 resume verified")
+        path_label = "clarification + Tier 2 resume" if phase2_needed else "auto-pick (KG-PHASE8-21 guard)"
+        print(f"T21.12 E2E PASS — Sprint 21 {path_label} verified")
         print(f"  Inspect docs in Firestore under session_id: {session_id}")
         return 0
     else:
