@@ -43,12 +43,6 @@ function byDateAsc<T extends { createdAt?: string; ts?: string }>(a: T, b: T): n
     return aDate - bDate;
 }
 
-function byDateDesc<T extends { createdAt?: string }>(a: T, b: T): number {
-    const aDate = new Date(a.createdAt ?? '').getTime();
-    const bDate = new Date(b.createdAt ?? '').getTime();
-    return bDate - aDate;
-}
-
 async function deleteSubcollectionDocs(
     collection: FirebaseFirestore.CollectionReference,
     chunkSize = 200
@@ -274,60 +268,61 @@ export const sessionRepository = {
     },
 
     async getEvidence(sessionId: string, limit = 50): Promise<Evidence[]> {
+        // Pipeline (data-pipeline/agent/schemas.py) writes snake_case keys.
+        // Older fixtures may have camelCase; read both so we don't silently
+        // null out fields that exist on disk.
         const mapEvidenceDoc = (doc: FirebaseFirestore.QueryDocumentSnapshot): Evidence => {
             const data = doc.data();
             return {
                 id: doc.id,
                 type: data.type,
-                evidenceId: data.evidenceId ?? null,
-                sourceType: data.sourceType ?? null,
+                evidenceId: data.evidence_id ?? data.evidenceId ?? null,
+                sourceType: data.source_type ?? data.sourceType ?? null,
                 origin: data.origin ?? null,
                 title: data.title,
                 snippet: data.snippet,
                 url: data.url ?? null,
                 source: data.source ?? null,
-                sourceDomain: data.sourceDomain ?? null,
-                publishedAt: toISOString(data.publishedAt),
-                fetchedAt: toISOString(data.fetchedAt),
-                sourceId: data.sourceId ?? null,
+                sourceDomain: data.source_domain ?? data.sourceDomain ?? null,
+                publishedAt: toISOString(data.published_at ?? data.publishedAt),
+                fetchedAt: toISOString(data.fetched_at ?? data.fetchedAt),
+                sourceId: data.source_id ?? data.sourceId ?? null,
                 score: data.score,
-                relevanceScore: data.relevanceScore ?? null,
-                credibilityTier: data.credibilityTier ?? null,
-                recencyWeight: data.recencyWeight ?? null,
-                usedInAnswer: data.usedInAnswer ?? null,
-                impactOnForecast: data.impactOnForecast ?? null,
+                relevanceScore: data.relevance_score ?? data.relevanceScore ?? null,
+                credibilityTier: data.credibility_tier ?? data.credibilityTier ?? null,
+                recencyWeight: data.recency_weight ?? data.recencyWeight ?? null,
+                usedInAnswer: data.used_in_answer ?? data.usedInAnswer ?? null,
+                impactOnForecast: data.impact_on_forecast ?? data.impactOnForecast ?? null,
                 justification: data.justification ?? null,
                 rank: data.rank ?? null,
-                createdAt: toISOString(data.createdAt) ?? '',
+                createdAt: toISOString(data.created_at ?? data.createdAt) ?? '',
                 impact: data.impact ?? null,
-                impactLabel: data.impactLabel ?? null,
-                isKeyEvidence: data.isKeyEvidence ?? false,
+                impactLabel: data.impact_label ?? data.impactLabel ?? null,
+                isKeyEvidence: data.is_key_evidence ?? data.isKeyEvidence ?? false,
             };
         };
 
-        try {
-            const evidenceSnapshot = await collectionRef('sessions')
-                .doc(sessionId)
-                .collection('evidence')
-                .orderBy('createdAt', 'desc')
-                .limit(limit)
-                .get();
+        // Don't .orderBy() here: the pipeline (write_evidence_batch) does
+        // not write a `createdAt` field on evidence docs, so a server-side
+        // orderBy would silently exclude every pipeline-written row.
+        // Per-session evidence is small (~30–50 docs), so in-memory sort
+        // is fine.
+        const evidenceSnapshot = await collectionRef('sessions')
+            .doc(sessionId)
+            .collection('evidence')
+            .get();
 
-            return evidenceSnapshot.docs.map(mapEvidenceDoc);
-        } catch (error) {
-            if (!isFailedPrecondition(error)) {
-                throw error;
-            }
-            const evidenceSnapshot = await collectionRef('sessions')
-                .doc(sessionId)
-                .collection('evidence')
-                .get();
-
-            return evidenceSnapshot.docs
-                .map(mapEvidenceDoc)
-                .sort(byDateDesc)
-                .slice(0, limit);
-        }
+        return evidenceSnapshot.docs
+            .map(mapEvidenceDoc)
+            .sort((a, b) => {
+                const aTime = new Date(a.publishedAt ?? a.createdAt ?? '').getTime();
+                const bTime = new Date(b.publishedAt ?? b.createdAt ?? '').getTime();
+                if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+                if (Number.isNaN(aTime)) return 1;
+                if (Number.isNaN(bTime)) return -1;
+                return bTime - aTime;
+            })
+            .slice(0, limit);
     },
 
     async getSentimentTimeSeries(sessionId: string, limit = 100): Promise<SentimentDataPoint[]> {

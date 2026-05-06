@@ -11,6 +11,13 @@
 /firebase_test.py
 /firestore-debug.log
 
+# Local environment files — never commit. Use the .env.example files as templates.
+.env
+.env.local
+**/.env
+**/.env.local
+!**/.env.example
+
 
 
 

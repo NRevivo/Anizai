@@ -30,9 +30,8 @@ function getProbabilityAnswer(probability: number): string {
 }
 
 function getFactorTone(direction: KeyFactor['direction']): string {
-    if (direction === 'supports') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    if (direction === 'opposes') return 'bg-red-50 text-red-700 border-red-200';
-    return 'bg-amber-50 text-amber-700 border-amber-200';
+    if (direction === 'increases') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    return 'bg-red-50 text-red-700 border-red-200';
 }
 
 export function PredictionOverview({
@@ -145,11 +144,11 @@ export function PredictionOverview({
                                 <div className="space-y-2">
                                     {keyFactors
                                         .slice()
-                                        .sort((a, b) => a.rank - b.rank)
-                                        .map((factor) => (
-                                            <div key={`${factor.rank}-${factor.title}`} className="rounded-md border border-gray-100 bg-gray-50 p-3">
+                                        .sort((a, b) => b.weight - a.weight)
+                                        .map((factor, index) => (
+                                            <div key={`${index}-${factor.label}`} className="rounded-md border border-gray-100 bg-gray-50 p-3">
                                                 <div className="flex flex-wrap items-center gap-2">
-                                                    <p className="text-sm font-semibold text-gray-900">{factor.title}</p>
+                                                    <p className="text-sm font-semibold text-gray-900">{factor.label}</p>
                                                     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getFactorTone(factor.direction)}`}>
                                                         {factor.direction}
                                                     </span>
@@ -157,7 +156,7 @@ export function PredictionOverview({
                                                         Weight {Math.round(factor.weight * 100)}%
                                                     </span>
                                                 </div>
-                                                <p className="mt-1.5 text-sm text-gray-600 break-words">{factor.explanation}</p>
+                                                <p className="mt-1.5 text-sm text-gray-600 break-words">{factor.description}</p>
                                             </div>
                                         ))}
                                 </div>
@@ -183,12 +182,12 @@ export function PredictionOverview({
                                 <div className="space-y-2">
                                     {reasoningChain
                                         .slice()
-                                        .sort((a, b) => a.sequence - b.sequence)
+                                        .sort((a, b) => a.step - b.step)
                                         .map((step) => (
-                                            <div key={`${step.sequence}-${step.description}`} className="rounded-md border border-gray-100 bg-white px-3 py-2">
+                                            <div key={`${step.step}-${step.title}`} className="rounded-md border border-gray-100 bg-white px-3 py-2">
                                                 <div className="flex flex-wrap items-center gap-2">
-                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Step {step.sequence}</span>
-                                                    <span className="text-[11px] text-gray-500">{step.outcome}</span>
+                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Step {step.step}</span>
+                                                    <span className="text-[11px] text-gray-700 font-medium">{step.title}</span>
                                                 </div>
                                                 <p className="mt-1 text-sm text-gray-600 break-words">{step.description}</p>
                                             </div>

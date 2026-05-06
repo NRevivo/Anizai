@@ -17,7 +17,15 @@ import { CookiesPage } from './pages/CookiesPage';
 import { StateMessage } from './components/ui/StateMessage';
 import { ApiError } from './lib/api';
 import {
-  getDemoUserProfile,
+  describeAuthError,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutUser,
+  signUpWithEmail,
+  subscribeToAuthState,
+} from './services/auth.service';
+import {
+  fetchCurrentUser,
   updateUserPlan,
   type UserPlan,
   type UserProfile,
@@ -336,21 +344,14 @@ function App() {
     };
   }, [activeSessionId]);
 
-  useEffect(() => {
-    setIsHydratingAuth(false);
-  }, []);
-
-  const enterDemoDashboard = useCallback(async () => {
-    setAuthError(null);
+  const enterDashboard = useCallback(async () => {
     setIsDashboardLoading(true);
-
     try {
       const [sessionsData, trendingData] = await Promise.all([
         fetchSessions(),
         fetchTrendingForecasts(20),
       ]);
 
-      setUserProfile(getDemoUserProfile());
       setSessions(sessionsData);
       setTrending(trendingData);
 
@@ -361,8 +362,6 @@ function App() {
         setActiveSessionId(null);
         setActiveSessionDetail(null);
       }
-
-      setAppState('dashboard');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Could not open the dashboard.');
     } finally {
@@ -370,11 +369,45 @@ function App() {
     }
   }, [loadSession]);
 
+  // Drive auth state from Firebase. When a user signs in, hydrate their
+  // server-side profile and load dashboard data. When they sign out, drop
+  // local state so a stale UI never lingers across accounts.
+  useEffect(() => {
+    const unsubscribe = subscribeToAuthState(async (user) => {
+      if (!user) {
+        setUserProfile(null);
+        setSessions([]);
+        setTrending([]);
+        setActiveSessionId(null);
+        setActiveSessionDetail(null);
+        setIsHydratingAuth(false);
+        return;
+      }
+
+      try {
+        const profile = await fetchCurrentUser();
+        setUserProfile(profile);
+        setAppState((current) =>
+          current === 'landing' || current === 'login' || current === 'signup' ? 'dashboard' : current
+        );
+        await enterDashboard();
+      } catch (error) {
+        setAuthError(error instanceof Error ? error.message : 'Could not load your profile.');
+      } finally {
+        setIsHydratingAuth(false);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [enterDashboard]);
+
   const handleGoToLogin = () => {
     if (userProfile) {
       setAppState('dashboard');
     } else {
-      void enterDemoDashboard();
+      setAppState('login');
     }
   };
 
@@ -391,25 +424,50 @@ function App() {
   };
 
   const handleGoogleAuth = async () => {
-    await enterDemoDashboard();
+    setAuthError(null);
+    try {
+      await signInWithGoogle();
+      // onAuthStateChanged subscriber takes it from here: hydrates the
+      // profile and routes to the dashboard.
+    } catch (error) {
+      setAuthError(describeAuthError(error));
+    }
   };
 
-  const handleEmailAuth = async (_email: string, password?: string) => {
+  const handleEmailAuth = async (email: string, password?: string) => {
     if (!password) {
       setAuthError('Password is required for email sign-in.');
       return;
     }
-    await enterDemoDashboard();
+    setAuthError(null);
+    try {
+      await signInWithEmail(email, password);
+    } catch (error) {
+      setAuthError(describeAuthError(error));
+    }
   };
 
   const handleCreateAccount = async (payload: { name: string; email: string; password: string }) => {
-    setUserProfile({ ...getDemoUserProfile(), displayName: payload.name, email: payload.email });
-    setAppState('plan-selection');
+    setAuthError(null);
+    try {
+      await signUpWithEmail(payload);
+      // onAuthStateChanged hydrates UserProfile from /me; then route to
+      // plan selection so a brand-new account picks a tier before the
+      // dashboard.
+      setAppState('plan-selection');
+    } catch (error) {
+      setAuthError(describeAuthError(error));
+    }
   };
 
   const handleGoogleSignup = async () => {
-    setUserProfile(getDemoUserProfile());
-    setAppState('plan-selection');
+    setAuthError(null);
+    try {
+      await signInWithGoogle();
+      setAppState('plan-selection');
+    } catch (error) {
+      setAuthError(describeAuthError(error));
+    }
   };
 
   const handleSelectPlan = async (plan: UserPlan) => {
@@ -438,11 +496,14 @@ function App() {
 
   const handleLogout = async () => {
     setAuthError(null);
-    setUserProfile(null);
-    setSessions([]);
-    setTrending([]);
-    setActiveSessionId(null);
-    setActiveSessionDetail(null);
+    try {
+      await signOutUser();
+    } catch (error) {
+      setAuthError(describeAuthError(error));
+    }
+    // The auth subscriber clears userProfile/sessions/trending/active
+    // session state on the user=null transition. Ephemeral UI state
+    // that the subscriber doesn't own is cleared here.
     setAgentEvents([]);
     setIsAgentEventsLoading(false);
     setSessionMessages(null);

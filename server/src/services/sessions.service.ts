@@ -123,19 +123,21 @@ export interface SessionResult {
     tier: 'tier_1' | 'tier_2' | null;
 }
 
+// Mirrors the canonical pipeline shape (data-pipeline/agent/schemas.py).
+// The repository pass-through reads these directly from Firestore — no
+// rename layer between us and the agent.
 export interface KeyFactor {
-    rank: number;
-    title: string;
-    explanation: string;
-    direction: 'supports' | 'opposes' | 'uncertain';
+    label: string;
+    description: string;
+    direction: 'increases' | 'decreases';
     weight: number;
-    supportingEvidenceIds: string[];
+    evidence_ids: string[];
 }
 
 export interface ReasoningStep {
-    sequence: number;
+    step: number;
+    title: string;
     description: string;
-    outcome: string;
 }
 
 export interface SuggestedAction {
@@ -212,21 +214,21 @@ export async function getSession(sessionId: string, userId: string): Promise<Ses
 }
 
 /**
- * Get session result by sessionId with userId verification
- * Returns null if not found
+ * Get session result by sessionId, authorizing via the parent session.
+ *
+ * `sessionResults/<id>` documents are keyed by sessionId and do not carry
+ * a `userId` field (the pipeline writes them without one). Ownership
+ * lives on `sessions/<id>`, so we verify there before reading the result
+ * by doc id.
+ *
+ * Returns null if the result doc doesn't exist; throws 404 if the parent
+ * session is missing or owned by a different user.
  */
 export async function getSessionResult(sessionId: string, userId: string): Promise<SessionResult | null> {
-    const result = await sessionRepository.getSessionResult(sessionId);
+    // Throws 404 unless the requester owns the parent session.
+    await getSession(sessionId, userId);
 
-    if (!result) {
-        return null;
-    }
-
-    if (result.userId !== userId) {
-        throw new AppError('Session result not found', 404, 'NOT_FOUND');
-    }
-
-    return result;
+    return sessionRepository.getSessionResult(sessionId);
 }
 
 
