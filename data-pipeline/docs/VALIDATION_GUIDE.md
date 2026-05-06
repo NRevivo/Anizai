@@ -47,7 +47,7 @@ Copy-Item .env.example .env
 #   POSTGRES_PASSWORD     (mandatory — docker-compose refuses to start without it)
 #   AIRFLOW_FERNET_KEY    (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 #   OPENAI_API_KEY        (required for Silver translation + Gold enrichment)
-#   NEWS_API_KEY          (NewsAPI source)
+#   THE_NEWS_API_KEY      (TheNewsAPI source — thenewsapi.com)
 #   FRED_API_KEY          (FRED economic data)
 #   OPENWEATHER_API_KEY   (OpenWeather source)
 #   OPENSKY_CLIENT_ID     (OpenSky OAuth2)

@@ -97,9 +97,22 @@ HACKERNEWS_API_BASE_URL = os.getenv(
     "https://hn.algolia.com/api/v1"
 )
 
-# --- NewsAPI (Section B.4) ---
-# REST API — requires API key (Massive.com Stocks Starter Plan).
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+# --- TheNewsAPI (Section B.4) ---
+# REST API — thenewsapi.com (replaced newsapi.org in Sprint 21.5).
+# Why migration: newsapi.org imposes a 24-hour delay on free/paid articles,
+# blocking same-day signal for the RAG agent. TheNewsAPI returns real-time
+# articles. Auth changed apiKey→api_token; source filter changed IDs→domains;
+# response shape changed articles[]→data[]. The producer normalizes the new
+# upstream shape into the same internal raw_payload contract so Silver/Gold
+# stay unchanged (Decision D1 of Sprint 21.5 plan).
+#
+# Free tier: 100 req/day, 3 articles/req — dev only.
+# Basic tier: 2,500 req/day, 100 articles/req — required for prod 20-min DAG.
+THE_NEWS_API_KEY = os.getenv("THE_NEWS_API_KEY", "")
+
+# Articles per request. Default 3 (Free tier hard cap). Set 100 in prod .env
+# when on the Basic plan. Producer reads this at module import time.
+THE_NEWS_API_PAGE_SIZE = int(os.getenv("THE_NEWS_API_PAGE_SIZE", "3"))
 
 # --- ArXiv (Section B.1) ---
 # Public REST API — no key required. Max results per query.

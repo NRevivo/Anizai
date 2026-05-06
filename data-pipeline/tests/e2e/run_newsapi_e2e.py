@@ -21,8 +21,11 @@ Kafka broker):
 No Kafka broker required: the NewsAPI producer is used for its fetch/filter/payload-build
 helpers only. __new__ bypasses the Kafka producer init (same pattern as run_fred_e2e.py).
 
-Uses real OpenAI tokens — no mocks. Set OPENAI_API_KEY and NEWS_API_KEY in
-infrastructure/.env before running.
+Uses real OpenAI tokens — no mocks. Set OPENAI_API_KEY and THE_NEWS_API_KEY in
+infrastructure/.env before running. Sprint 21.5 migration: this E2E now hits
+thenewsapi.com (replaced newsapi.org). On the Free tier (limit=3 per request)
+the run will produce a small but representative sample; in production set
+THE_NEWS_API_PAGE_SIZE=100 (Basic plan) for fuller coverage.
 
 Usage (from data-pipeline/ with venv active):
     python -m tests.e2e.run_newsapi_e2e
@@ -51,7 +54,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from config.kafka_topics import DEAD_LETTER_QUEUE, GOLD_GLOBAL_NEWS, SILVER_GLOBAL_NEWS
-from config.settings import NEWS_API_KEY, OPENAI_API_KEY
+from config.settings import OPENAI_API_KEY, THE_NEWS_API_KEY
 from ingestion.newsapi_producer import (
     EVERYTHING_ENDPOINT,
     REQUEST_DELAY_SEC,
@@ -76,8 +79,9 @@ from utils.kafka_utils import build_bronze_message
 
 # Standard pulse categories to exercise for this E2E.
 # "general" is intentionally excluded — Israel/ME articles are fetched
-# directly via /everything to guarantee whitelist-passing Impact Boost hits.
-E2E_CATEGORIES = ["business", "technology"]
+# directly via /v1/news/all to guarantee whitelist-passing Impact Boost hits.
+# Note Sprint 21.5: TheNewsAPI uses 'tech' not 'technology'.
+E2E_CATEGORIES = ["business", "tech"]
 
 # Cap per category after the whitelist filter. The top-headlines endpoint
 # can return up to PAGE_SIZE=100; capping keeps E2E runtime predictable
@@ -102,10 +106,10 @@ def _check_prerequisites() -> None:
     Checked before the main loop so any misconfiguration is surfaced before
     API calls or DB writes are attempted (same pattern as run_fred_e2e.py).
     """
-    if not NEWS_API_KEY:
+    if not THE_NEWS_API_KEY:
         print(
-            "\n[e2e] ERROR: NEWS_API_KEY is not set in .env.\n"
-            "Set it to your Massive.com Stocks Starter Plan key (Section B.4).\n"
+            "\n[e2e] ERROR: THE_NEWS_API_KEY is not set in .env.\n"
+            "Set it to your thenewsapi.com api_token (Section B.4).\n"
         )
         sys.exit(1)
 
@@ -198,7 +202,7 @@ def run() -> dict:
 
     _check_prerequisites()
     logger.info(
-        "Prerequisites verified: NEWS_API_KEY present, OPENAI_API_KEY present, "
+        "Prerequisites verified: THE_NEWS_API_KEY present, OPENAI_API_KEY present, "
         "PostgreSQL reachable."
     )
 
@@ -264,7 +268,7 @@ def run() -> dict:
         israel_articles, _, _ = producer._fetch_everything(
             from_date=from_date,
             to_date=to_date,
-            sources=None,
+            domains=None,  # None = full authority whitelist sent server-side (Sprint 21.5)
             keywords="israel OR hamas OR gaza OR iran OR hezbollah",
         )
         whitelisted_il = [a for a in israel_articles if producer._passes_whitelist(a)]
@@ -287,7 +291,13 @@ def run() -> dict:
 
     # ── Per-article pipeline ─────────────────────────────────────────────────
     for idx, (article, category) in enumerate(article_queue, start=1):
-        source_name = (article.get("source") or {}).get("name", "unknown")
+        # TheNewsAPI's `source` is a bare domain string (e.g. "reuters.com");
+        # for log readability we resolve it through DOMAIN_DISPLAY_NAMES, falling
+        # back to the raw domain. The full normalisation happens later in
+        # _build_raw_payload() which writes source.{id,name} into raw_payload.
+        from ingestion.newsapi_producer import DOMAIN_DISPLAY_NAMES  # noqa: PLC0415
+        domain      = (article.get("source") or "").strip().lower()
+        source_name = DOMAIN_DISPLAY_NAMES.get(domain, domain) or "unknown"
         title_short = (article.get("title") or "")[:80]
 
         logger.info("")
@@ -298,9 +308,9 @@ def run() -> dict:
         )
 
         # Determine the endpoint label for the Bronze envelope metadata.
-        # /top-headlines for standard categories; /everything for Israel fetch.
+        # /v1/news/top for standard categories; /v1/news/all for Israel fetch.
         endpoint = (
-            f"{TOP_HEADLINES_ENDPOINT}?category={category}"
+            f"{TOP_HEADLINES_ENDPOINT}?categories={category}"
             if category in E2E_CATEGORIES
             else EVERYTHING_ENDPOINT
         )
@@ -429,7 +439,7 @@ def run() -> dict:
             enrichment = row.get("enrichment_ai",  {}) or {}
             domain     = row.get("domain_context",  {}) or {}
 
-            print(f"\n{'─' * 64}")
+            print(f"\n{'-' * 64}")
             print(f"  [{i}] {(vitals.get('title') or 'N/A')[:80]}")
             print(f"  Source    : {row.get('source_platform', '?')}")
             print(f"  URL       : {(vitals.get('url') or 'N/A')[:78]}")

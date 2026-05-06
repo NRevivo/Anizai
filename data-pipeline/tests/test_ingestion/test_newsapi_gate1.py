@@ -1,13 +1,22 @@
 """
-Gate 1 — Ingestion Gate: NewsAPI Bronze Schema Compliance.
+Gate 1 — Ingestion Gate: TheNewsAPI Bronze Schema Compliance.
 
-Validates that the NewsAPI producer's envelope-building, filter, and
+Validates that the TheNewsAPI producer's envelope-building, filter, and
 payload-construction logic produces messages that are fully compliant
 with the Bronze Schema (Section C.1) and Message Envelope (Section 3.2)
 before any message reaches Kafka.
 
+Sprint 21.5 migration (2026-05-06): provider switched from newsapi.org to
+thenewsapi.com. The internal raw_payload contract was preserved verbatim
+(Decision D1) so the Silver/Gold gates and persistence layer stay unchanged.
+The producer is the API-shape boundary: it normalizes TheNewsAPI's response
+shape (data[] with `image_url`, `snippet`, domain-string `source`, and
+`categories[]` array) into the same internal raw_payload keys this test
+already enforces. Filter-logic tests are updated to pass TheNewsAPI's input
+shape (source as a bare domain string).
+
 Design decisions:
-  - Zero live connections: no Kafka broker, no NewsAPI calls.
+  - Zero live connections: no Kafka broker, no TheNewsAPI calls.
     build_bronze_message(), _build_raw_payload(), and all filter methods
     are pure functions tested in complete isolation.
   - Mock payload loaded from tests/mocks/newsapi_article.json (Section 4.4).
@@ -15,13 +24,13 @@ Design decisions:
     validators the Flink Silver Job uses, so a pass here guarantees the
     Silver Job's first gate will also accept NewsAPI messages.
   - Filter-logic tests use NewsAPIProducer.__new__() to skip __init__
-    (avoids NEWS_API_KEY requirement and Kafka connection in CI).
+    (avoids THE_NEWS_API_KEY requirement and Kafka connection in CI).
 
 Gate 1 checklist (Section 9.3 Gate 1):
   [1]  envelope fields present and correctly typed
   [2]  event_id is a valid UUIDv4
   [3]  producer_timestamp is a valid ISO8601 UTC string
-  [4]  source_name == "newsapi"
+  [4]  source_name == "newsapi" (preserved across the migration)
   [5]  payload.raw_payload is a non-empty dict
   [6]  validate_envelope() passes without errors
   [7]  validate_bronze_payload() passes without errors
@@ -29,16 +38,16 @@ Gate 1 checklist (Section 9.3 Gate 1):
   [9]  each call to build_bronze_message() produces a distinct event_id
   [10] raw_payload.article_id is a non-empty URL string
   [11] raw_payload.published_at is a non-empty ISO8601 string
-  [12] raw_payload.source.id and source.name are both present
+  [12] raw_payload.source.id and source.name are both present (post-normalization)
   [13] raw_payload.category is one of the expected values
   [14] raw_payload.fetch_mode is a valid mode string
   [15] raw_payload.impact_boost is a boolean
   [16] raw_payload.impact_boost_reason is a string
   [17] Kafka partition key == source.id (falls back to source.name)
-  [18] AUTHORITY_WHITELIST covers all 17 mandated sources (Section B.4)
+  [18] AUTHORITY_WHITELIST covers all 15 mandated domains (Section B.4)
   [19] GENERAL_KEYWORDS contains all 9 mandated terms (Section B.4)
-  [20] _passes_whitelist(): whitelisted sources pass; unknown sources fail
-  [21] _passes_whitelist(): Israeli source (name-only) passes
+  [20] _passes_whitelist(): whitelisted domains pass; unknown domains fail
+  [21] _passes_whitelist(): Israeli domain (ynet.co.il) passes
   [22] _passes_keyword_sniper(): keyword-bearing articles pass for General
   [23] _passes_keyword_sniper(): non-keyword articles fail for General
   [24] _impact_boost_info(): Israel/energy terms detected correctly
@@ -51,8 +60,8 @@ References:
     - Section 3.4:  NDJSON serialisation (tested via round-trip)
     - Section 4.4:  Mock-Driven Development
     - Section 9.3:  Triple-Gate Test Matrix — Gate 1
-    - Section B.4:  NewsAPI parameters, Authority Whitelist, Keyword Sniper,
-                    Tiered Backfill, Impact Boost
+    - Section B.4:  TheNewsAPI parameters, Authority Whitelist, Keyword
+                    Sniper, Tiered Backfill, Impact Boost
     - Section C.1:  Bronze Schema
     - Section C.3:  Silver Full-Text Document Store fields
 """
@@ -83,30 +92,30 @@ from utils.validators import validate_bronze_payload, validate_envelope
 MOCKS_DIR          = Path(__file__).parent.parent / "mocks"
 NEWSAPI_MOCK_PATH  = MOCKS_DIR / "newsapi_article.json"
 
-HEADLINES_ENDPOINT_PREFIX = "https://newsapi.org/v2/top-headlines"
-EVERYTHING_ENDPOINT       = "https://newsapi.org/v2/everything"
+HEADLINES_ENDPOINT_PREFIX = "https://api.thenewsapi.com/v1/news/top"
+EVERYTHING_ENDPOINT       = "https://api.thenewsapi.com/v1/news/all"
 
-# The 17 authority sources mandated by Section B.4.
-# Tests check that AUTHORITY_WHITELIST covers each one (by ID or display name).
-REQUIRED_SOURCES: dict[str, list[str]] = {
-    "Reuters":           ["reuters"],
-    "AP":                ["associated-press", "associated press"],
-    "WSJ":               ["the-wall-street-journal", "the wall street journal"],
-    "Bloomberg":         ["bloomberg"],
-    "NYT":               ["the-new-york-times", "the new york times"],
-    "WaPo":              ["the-washington-post", "the washington post"],
-    "CNBC":              ["cnbc"],
-    "CNN":               ["cnn"],
-    "BBC":               ["bbc-news", "bbc news"],
-    "FT":                ["financial-times", "financial times"],
-    "The Guardian":      ["the-guardian-uk", "the guardian"],
-    "The Economist":     ["the-economist", "the economist"],
-    "Kan 11":            ["kan 11"],
-    "Times of Israel":   ["the times of israel", "times of israel"],
-    "Jerusalem Post":    ["jerusalem post", "the jerusalem post"],
-    "Ynetnews":          ["ynetnews", "ynet"],
-    "i24 News":          ["i24 news", "i24news"],
-}
+# The 15 authority domains mandated by Section B.4 (Sprint 21.5 — TheNewsAPI
+# migration). Tests check that AUTHORITY_WHITELIST covers each one by domain.
+# Removed in Sprint 21.5: i24news.tv (not on TheNewsAPI), timesofisrael.com
+# (not on TheNewsAPI), Kan 11 (no domain on TheNewsAPI).
+REQUIRED_DOMAINS: list[str] = [
+    "reuters.com",
+    "apnews.com",
+    "wsj.com",
+    "bloomberg.com",
+    "nytimes.com",
+    "washingtonpost.com",
+    "cnbc.com",
+    "cnn.com",
+    "bbc.co.uk",
+    "ft.com",
+    "theguardian.com",
+    "economist.com",
+    "jpost.com",
+    "ynetnews.com",
+    "ynet.co.il",
+]
 
 # All 9 Keyword Sniper terms mandated by Section B.4.
 REQUIRED_KEYWORDS = {
@@ -149,7 +158,7 @@ def newsapi_envelope(article_raw) -> dict:
     Mirrors what NewsAPIProducer._emit() does in production: calls
     build_bronze_message() with the raw_payload and Bronze metadata.
     """
-    endpoint = f"{HEADLINES_ENDPOINT_PREFIX}?category={article_raw['category']}"
+    endpoint = f"{HEADLINES_ENDPOINT_PREFIX}?categories={article_raw['category']}"
     return build_bronze_message(
         source_name=SOURCE_NAME,
         source_endpoint=endpoint,
@@ -162,7 +171,7 @@ def producer_instance() -> NewsAPIProducer:
     """
     Create a NewsAPIProducer instance without triggering __init__.
 
-    Skips NEWS_API_KEY validation and Kafka connection — filter and
+    Skips THE_NEWS_API_KEY validation and Kafka connection — filter and
     payload-builder methods depend only on class-level constants.
     """
     return NewsAPIProducer.__new__(NewsAPIProducer)
@@ -238,11 +247,11 @@ class TestBronzePayload:
         assert parsed.version == 4
 
     def test_bronze_payload_has_source_endpoint(self, newsapi_envelope):
-        """source_endpoint must reference a newsapi.org URL (Section C.1)."""
+        """source_endpoint must reference a thenewsapi.com URL (Section C.1, Sprint 21.5)."""
         endpoint = newsapi_envelope["payload"].get("source_endpoint", "")
         assert isinstance(endpoint, str) and len(endpoint) > 0
-        assert "newsapi.org" in endpoint, (
-            f"source_endpoint should reference a newsapi.org URL. Got: {endpoint}"
+        assert "thenewsapi.com" in endpoint, (
+            f"source_endpoint should reference a thenewsapi.com URL. Got: {endpoint}"
         )
 
     def test_bronze_payload_has_ingestion_timestamp(self, newsapi_envelope):
@@ -398,7 +407,7 @@ class TestNewsAPIDomainCorrectness:
         Shared event_ids corrupt the Paper Trail across Bronze → Silver → Gold
         (Section 3.2 — event_id is the UUIDv4 shared across all layers).
         """
-        endpoint = f"{HEADLINES_ENDPOINT_PREFIX}?category={article_raw['category']}"
+        endpoint = f"{HEADLINES_ENDPOINT_PREFIX}?categories={article_raw['category']}"
         msg1 = build_bronze_message(SOURCE_NAME, endpoint, article_raw)
         msg2 = build_bronze_message(SOURCE_NAME, endpoint, article_raw)
         assert msg1["event_id"] != msg2["event_id"]
@@ -431,58 +440,79 @@ class TestFilterLogic:
 
     All tests use NewsAPIProducer.__new__() to bypass __init__ —
     filter methods depend only on class-level constants.
+
+    Sprint 21.5 update: TheNewsAPI's `source` field is a bare domain string
+    (e.g. "reuters.com"), not the {id, name} dict newsapi.org used. The
+    whitelist is therefore matched by domain. The producer's whitelist is
+    *also* sent server-side via the `domains=` query parameter — these tests
+    cover the defensive client-side recheck in _passes_whitelist.
     """
 
-    # --- Authority Whitelist ---
+    # --- Authority Whitelist (domain-based, Sprint 21.5) ---
 
-    def test_whitelist_passes_reuters_by_id(self, producer_instance):
-        """Reuters source.id 'reuters' must pass the whitelist."""
+    def test_whitelist_passes_reuters_domain(self, producer_instance):
+        """The reuters.com domain must pass the whitelist."""
         assert producer_instance._passes_whitelist(
-            {"source": {"id": "reuters", "name": "Reuters"}}
+            {"source": "reuters.com"}
         ) is True
 
-    def test_whitelist_passes_ap_by_id(self, producer_instance):
-        """Associated Press source.id 'associated-press' must pass."""
+    def test_whitelist_passes_apnews_domain(self, producer_instance):
+        """The apnews.com domain must pass."""
         assert producer_instance._passes_whitelist(
-            {"source": {"id": "associated-press", "name": "The Associated Press"}}
+            {"source": "apnews.com"}
         ) is True
 
-    def test_whitelist_passes_israeli_source_name_only(self, producer_instance):
+    def test_whitelist_passes_israeli_domain_ynet(self, producer_instance):
         """
-        Ynetnews (no official NewsAPI source.id) must pass via name match.
+        ynet.co.il (Israeli wire service) must pass.
 
-        Why this matters: Israeli/regional outlets often lack a formal API ID.
-        Name-based matching is the only reliable gate for these sources (Section B.4).
+        Why this matters: Israeli/regional outlets are explicitly on the
+        Section B.4 whitelist. Compound TLDs (.co.il, .co.uk) must be
+        treated as first-class domains by the gate.
         """
         assert producer_instance._passes_whitelist(
-            {"source": {"id": None, "name": "Ynetnews"}}
+            {"source": "ynet.co.il"}
         ) is True
 
-    def test_whitelist_passes_times_of_israel_name_only(self, producer_instance):
-        """Times of Israel must pass via name match (no standard NewsAPI ID)."""
+    def test_whitelist_passes_jpost_domain(self, producer_instance):
+        """jpost.com (Jerusalem Post) must pass the whitelist."""
         assert producer_instance._passes_whitelist(
-            {"source": {"id": None, "name": "The Times of Israel"}}
+            {"source": "jpost.com"}
+        ) is True
+
+    def test_whitelist_passes_bbc_compound_tld(self, producer_instance):
+        """
+        bbc.co.uk (compound TLD) must pass — verifies the whitelist stores
+        domains verbatim and does not strip TLDs at match time.
+        """
+        assert producer_instance._passes_whitelist(
+            {"source": "bbc.co.uk"}
         ) is True
 
     def test_whitelist_blocks_unknown_blog(self, producer_instance):
         """
-        An unknown source must be blocked by the whitelist.
+        An unknown domain must be blocked by the whitelist.
 
-        Prevents noise from non-authoritative sources entering Bronze (Section 2.2).
+        Prevents noise from non-authoritative sources entering Bronze
+        (Section 2.2). Defensive recheck of the server-side `domains=` filter.
         """
         assert producer_instance._passes_whitelist(
-            {"source": {"id": "random-blog", "name": "Random Blog"}}
+            {"source": "random-blog.com"}
         ) is False
 
     def test_whitelist_blocks_empty_source(self, producer_instance):
-        """An article with no source fields must be blocked."""
-        assert producer_instance._passes_whitelist(
-            {"source": {"id": "", "name": ""}}
-        ) is False
+        """An article with an empty-string source must be blocked."""
+        assert producer_instance._passes_whitelist({"source": ""}) is False
 
     def test_whitelist_blocks_null_source(self, producer_instance):
-        """An article with a null source block must be blocked."""
+        """An article with a null source field must be blocked."""
         assert producer_instance._passes_whitelist({"source": None}) is False
+
+    def test_whitelist_is_case_insensitive(self, producer_instance):
+        """Mixed-case domain "Reuters.COM" must match the lowercase whitelist."""
+        assert producer_instance._passes_whitelist(
+            {"source": "Reuters.COM"}
+        ) is True
 
     # --- Keyword Sniper (General category only) ---
 
@@ -559,19 +589,18 @@ class TestConstantsInvariants:
     would silently drop legitimate authority sources or keywords.
     """
 
-    def test_all_17_sources_covered_in_whitelist(self):
+    def test_all_15_domains_covered_in_whitelist(self):
         """
-        AUTHORITY_WHITELIST must cover all 17 sources from Section B.4.
+        AUTHORITY_WHITELIST must cover all 15 domains from Section B.4
+        (Sprint 21.5: TheNewsAPI uses domains, not source IDs).
 
-        Each source is checked against at least one representative identifier
-        (source.id or lowercased display name). A missing source means the
-        whitelist will silently block that outlet's articles at the Bronze gate.
+        A missing domain means the whitelist will silently block that
+        outlet's articles at the Bronze gate.
         """
-        for source_label, identifiers in REQUIRED_SOURCES.items():
-            covered = any(ident in AUTHORITY_WHITELIST for ident in identifiers)
-            assert covered, (
-                f"Section B.4 authority source '{source_label}' is not covered in "
-                f"AUTHORITY_WHITELIST. Expected one of: {identifiers}"
+        for domain in REQUIRED_DOMAINS:
+            assert domain in AUTHORITY_WHITELIST, (
+                f"Section B.4 authority domain '{domain}' is not covered in "
+                f"AUTHORITY_WHITELIST."
             )
 
     def test_all_9_keywords_present(self):
@@ -606,34 +635,40 @@ class TestConstantsInvariants:
 
     def test_tier_one_sources_are_subset_of_whitelist(self):
         """
-        Every source ID in TIER_ONE_SOURCE_IDS must appear in AUTHORITY_WHITELIST.
+        Every domain in TIER_ONE_SOURCE_IDS (alias of TIER_ONE_DOMAINS in
+        Sprint 21.5) must appear in AUTHORITY_WHITELIST.
 
-        Tier-1 sources are a strict subset of the authority whitelist (Section B.4).
-        A tier-1 ID not in the whitelist would pass the API filter but then be
-        blocked by the client-side whitelist check — silently dropping data.
+        Tier-1 domains are a strict subset of the authority whitelist
+        (Section B.4). A tier-1 domain not in the whitelist would be sent
+        to the API but then blocked by the client-side recheck — silently
+        dropping data.
         """
-        for source_id in TIER_ONE_SOURCE_IDS:
-            assert source_id in AUTHORITY_WHITELIST, (
-                f"Tier-1 source '{source_id}' is not in AUTHORITY_WHITELIST — "
+        for domain in TIER_ONE_SOURCE_IDS:
+            assert domain in AUTHORITY_WHITELIST, (
+                f"Tier-1 domain '{domain}' is not in AUTHORITY_WHITELIST — "
                 "it would be blocked by the client-side whitelist during backfill"
             )
 
     def test_build_raw_payload_produces_required_keys(self, producer_instance):
         """
-        _build_raw_payload() must produce all keys the Silver Job needs
-        to populate the Full-Text Document Store (Section C.3):
-        article_id, title, description, url, published_at, content,
-        author, source, category, fetch_mode, impact_boost, impact_boost_reason.
+        _build_raw_payload() must normalize a TheNewsAPI article into all keys
+        the Silver Job needs for the Full-Text Document Store (Section C.3):
+        article_id, title, description, url, published_at, content, author,
+        source, category, fetch_mode, impact_boost, impact_boost_reason.
+
+        Sprint 21.5 input shape: TheNewsAPI articles use `image_url`,
+        `snippet`, `published_at` (snake_case), and `source` as a bare
+        domain string. The producer converts these to the internal contract.
         """
         article = {
-            "url":         "https://www.reuters.com/test-article",
-            "title":       "Test headline",
-            "description": "Test description with interest rates.",
-            "urlToImage":  "",
-            "publishedAt": "2026-03-31T09:00:00Z",
-            "content":     "Full article content.",
-            "author":      "Test Author",
-            "source":      {"id": "reuters", "name": "Reuters"},
+            "url":          "https://www.reuters.com/test-article",
+            "title":        "Test headline",
+            "description":  "Test description with interest rates.",
+            "image_url":    "",
+            "published_at": "2026-03-31T09:00:00Z",
+            "snippet":      "Test article snippet from TheNewsAPI.",
+            "source":       "reuters.com",
+            "categories":   ["business"],
         }
         raw = producer_instance._build_raw_payload(article, "business", "pulse")
 
@@ -650,6 +685,20 @@ class TestConstantsInvariants:
         assert raw["fetch_mode"] == "pulse"
         assert isinstance(raw["impact_boost"], bool)
         assert isinstance(raw["impact_boost_reason"], str)
+
+        # Sprint 21.5 normalisation invariants
+        assert raw["source"]["id"]   == "reuters", (
+            "TLD-strip rule should produce source.id='reuters' for reuters.com"
+        )
+        assert raw["source"]["name"] == "Reuters", (
+            "DOMAIN_DISPLAY_NAMES lookup should produce source.name='Reuters'"
+        )
+        assert raw["author"] == "", (
+            "TheNewsAPI does not expose an author field; producer must set author=''"
+        )
+        assert raw["content"] == "Test article snippet from TheNewsAPI.", (
+            "snippet must be normalised into the internal `content` field"
+        )
 
 
 # ==========================================================
