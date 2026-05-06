@@ -8,13 +8,6 @@ import {
     type QueryDocumentSnapshot,
     type Unsubscribe,
 } from 'firebase/firestore';
-import {
-    mockChatMessages,
-    mockCurrentPrediction,
-    mockSentimentData,
-    mockSessions,
-    mockTimelineEvents,
-} from '../data/mockData';
 import type { AgentEvent, AgentEventStatus, AgentEventType, KeyFactor, ReasoningStep, SuggestedAction } from '../types';
 
 export type SessionStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'awaiting_clarification';
@@ -162,156 +155,9 @@ export interface CreateMessageInput {
     };
 }
 
-const DEMO_USER_ID = 'demo-user-001';
-const nowIso = () => new Date().toISOString();
-
-let demoSessions: SessionListItem[] = mockSessions.map((session) => ({
-    id: session.id,
-    userId: DEMO_USER_ID,
-    question: session.question,
-    title: session.question,
-    status: 'done',
-    latestProbability: session.probability,
-    latestConfidence: 0.84,
-    followEnabled: true,
-    isFollowing: false,
-    canonicalKey: null,
-    errorCode: null,
-    errorMessage: null,
-    clarificationCandidates: null,
-    createdAt: session.lastUpdated.toISOString(),
-    updatedAt: session.lastUpdated.toISOString(),
-    lastActivityAt: session.lastUpdated.toISOString(),
-}));
-
-const demoMessagesBySessionId = new Map<string, SessionMessage[]>(
-    demoSessions.map((session) => [
-        session.id,
-        mockChatMessages.map((message) => ({
-            id: `${session.id}-${message.id}`,
-            role: message.role,
-            content: message.content,
-            createdAt: message.timestamp.toISOString(),
-            status: 'sent',
-            meta: null,
-        })),
-    ])
-);
-
-function buildDemoSessionDetail(sessionId: string): SessionDetail {
-    const session = demoSessions.find((item) => item.id === sessionId) ?? demoSessions[0];
-    const probability = session.latestProbability ?? mockCurrentPrediction.probability;
-
-    return {
-        session,
-        messages: demoMessagesBySessionId.get(session.id) ?? [],
-        predictionSeries: mockSentimentData.map((_point, index) => ({
-            id: `${session.id}-prediction-${index + 1}`,
-            ts: new Date(2026, 0, index + 1).toISOString(),
-            probability,
-            confidence: 0.84,
-            reasonType: index % 2 === 0 ? 'news' : 'model_update',
-            evidenceIds: [],
-        })),
-        evidence: mockTimelineEvents.map((event) => ({
-            id: event.id,
-            type: event.sourceType,
-            evidenceId: event.id,
-            sourceType: event.sourceType === 'news' ? 'online_news' : event.sourceType === 'social' ? 'online_blog' : 'vault_arxiv',
-            origin: event.sourceType === 'social' ? 'web' : 'vault',
-            title: event.title,
-            snippet: event.description,
-            url: null,
-            source: event.source ?? null,
-            sourceDomain: event.sourceDomain ?? null,
-            publishedAt: new Date(`2026 ${event.date}`).toISOString(),
-            fetchedAt: nowIso(),
-            sourceId: null,
-            score: event.isKeyEvidence ? 0.9 : 0.55,
-            relevanceScore: event.relevanceScore ?? (event.isKeyEvidence ? 0.91 : 0.62),
-            credibilityTier: event.credibilityTier ?? (event.sourceType === 'expert' ? 'high' : 'medium'),
-            recencyWeight: event.recencyWeight ?? 0.64,
-            usedInAnswer: event.usedInAnswer ?? Boolean(event.isKeyEvidence),
-            impactOnForecast: event.impactOnForecast ?? (event.impact === 'positive' ? 'Raised confidence in the forecast.' : event.impact === 'negative' ? 'Introduced downside pressure on the forecast.' : null),
-            justification: event.justification ?? 'Included because it materially affected the forecast assessment.',
-            rank: event.rank ?? null,
-            createdAt: nowIso(),
-            impact: event.impact,
-            impactLabel: event.impactLabel ?? null,
-            isKeyEvidence: event.isKeyEvidence ?? false,
-        })),
-        result: {
-            sessionId: session.id,
-            userId: session.userId,
-            finalProbability: probability,
-            confidence: 0.84,
-            marketComparison: [{ source: 'Polymarket', value: 0.685 }],
-            summaryMarkdown: mockCurrentPrediction.explanation,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            confidenceLabel: 'High Confidence',
-            consensusStrength: 'Moderate',
-            evidenceVolumeLabel: 'High',
-            bottomLineAnswer: mockCurrentPrediction.explanation,
-            detailedExplanation: mockCurrentPrediction.explanation,
-            marketProbability: mockCurrentPrediction.marketProbability ?? null,
-            marketComparisonInsight: 'Demo market data is close to the model estimate.',
-            sentimentAnalysisInsight: 'Expert sentiment is moving ahead of public sentiment.',
-            evidenceFeedSummary: 'Demo evidence is assembled from local data.',
-            keyFactors: [
-                {
-                    rank: 1,
-                    title: 'Legislative momentum',
-                    explanation: 'Committee progress still points toward passage within the current timeline.',
-                    direction: 'supports',
-                    weight: 0.82,
-                    supportingEvidenceIds: ['1', '2'],
-                },
-                {
-                    rank: 2,
-                    title: 'Industry pushback',
-                    explanation: 'Lobbying pressure may slow implementation details even if passage remains likely.',
-                    direction: 'opposes',
-                    weight: 0.41,
-                    supportingEvidenceIds: ['3'],
-                },
-            ],
-            whatIDidntFind: ['No confirmed final plenary vote date was available in the current evidence set.'],
-            reasoningChain: [
-                {
-                    sequence: 1,
-                    description: 'Reviewed legislative progress and recent committee actions.',
-                    outcome: 'Momentum remains favorable.',
-                },
-                {
-                    sequence: 2,
-                    description: 'Compared expert commentary with market pricing.',
-                    outcome: 'External views remain broadly aligned with the forecast.',
-                },
-            ],
-            suggestedActions: [
-                {
-                    id: 'track-vote-date',
-                    label: 'Track the next vote',
-                    prompt: 'What upcoming vote or milestone would most change this forecast?',
-                },
-            ],
-            generatedAt: session.updatedAt,
-            agentVersion: 'demo-agent-v1',
-            tier: 'tier_1',
-        },
-        sentimentTimeSeries: mockSentimentData.map((point, index) => ({
-            id: `${session.id}-sentiment-${index + 1}`,
-            ts: new Date(2026, 0, index + 1).toISOString(),
-            date: point.date,
-            expertSentiment: point.expertSentiment,
-            expertUpper: point.expertUpper ?? null,
-            expertLower: point.expertLower ?? null,
-            publicSentiment: point.publicSentiment,
-            createdAt: nowIso(),
-        })),
-    };
-}
+// Demo session fixtures previously short-circuited the API on failure and
+// silently returned fake data. Removed (Task 3 of the restoration plan)
+// so real users see real errors and a real empty state.
 
 export interface ClarifySessionInput {
     chosenCandidateId: string | null;
@@ -365,117 +211,38 @@ function mapSessionMessageDoc(docSnapshot: QueryDocumentSnapshot): SessionMessag
 }
 
 export async function fetchSessions(): Promise<SessionListItem[]> {
-    try {
-        return await apiRequest<SessionListItem[]>('/sessions');
-    } catch (error) {
-        console.warn('Using demo sessions because the authenticated API is unavailable.', error);
-        return demoSessions;
-    }
+    return apiRequest<SessionListItem[]>('/sessions');
 }
 
 export async function fetchSessionDetail(sessionId: string): Promise<SessionDetail> {
-    try {
-        return await apiRequest<SessionDetail>(`/sessions/${sessionId}`);
-    } catch (error) {
-        console.warn('Using demo session detail because the authenticated API is unavailable.', error);
-        return buildDemoSessionDetail(sessionId);
-    }
+    return apiRequest<SessionDetail>(`/sessions/${sessionId}`);
 }
 
 export async function createSession(input: CreateSessionInput): Promise<SessionListItem> {
-    try {
-        return await apiRequest<SessionListItem>('/sessions', {
-            method: 'POST',
-            body: input,
-        });
-    } catch (error) {
-        console.warn('Creating a demo session because the authenticated API is unavailable.', error);
-        const createdAt = nowIso();
-        const created: SessionListItem = {
-            id: `local-${Date.now()}`,
-            userId: DEMO_USER_ID,
-            question: input.question,
-            title: input.title ?? input.question,
-            status: 'done',
-            latestProbability: 0.52,
-            latestConfidence: 0.72,
-            followEnabled: true,
-            isFollowing: false,
-            canonicalKey: null,
-            errorCode: null,
-            errorMessage: null,
-            clarificationCandidates: null,
-            createdAt,
-            updatedAt: createdAt,
-            lastActivityAt: createdAt,
-        };
-        demoSessions = [created, ...demoSessions];
-        demoMessagesBySessionId.set(created.id, []);
-        return created;
-    }
+    return apiRequest<SessionListItem>('/sessions', {
+        method: 'POST',
+        body: input,
+    });
 }
 
 export async function addSessionMessage(
     sessionId: string,
     input: CreateMessageInput
 ): Promise<SessionMessage> {
-    try {
-        return await apiRequest<SessionMessage>(`/sessions/${sessionId}/messages`, {
-            method: 'POST',
-            body: input,
-        });
-    } catch (error) {
-        console.warn('Saving a demo message because the authenticated API is unavailable.', error);
-        const created: SessionMessage = {
-            id: `local-message-${Date.now()}`,
-            role: input.role,
-            content: input.content,
-            createdAt: nowIso(),
-            status: 'sent',
-            meta: input.meta ?? null,
-        };
-        const messages = demoMessagesBySessionId.get(sessionId) ?? [];
-        demoMessagesBySessionId.set(sessionId, [...messages, created]);
-        return created;
-    }
+    return apiRequest<SessionMessage>(`/sessions/${sessionId}/messages`, {
+        method: 'POST',
+        body: input,
+    });
 }
 
 export async function clarifySession(
     sessionId: string,
     input: ClarifySessionInput
 ): Promise<SessionListItem> {
-    try {
-        return await apiRequest<SessionListItem>(`/sessions/${sessionId}/clarify`, {
-            method: 'POST',
-            body: input,
-        });
-    } catch (error) {
-        console.warn('Updating a demo clarification choice because the authenticated API is unavailable.', error);
-        const existing = demoSessions.find((session) => session.id === sessionId);
-
-        if (!existing) {
-            throw error;
-        }
-
-        const selectedCandidate = input.chosenCandidateId === null
-            ? null
-            : existing.clarificationCandidates?.find((candidate) => candidate.id === input.chosenCandidateId) ?? null;
-        const updatedAt = nowIso();
-
-        const updated: SessionListItem = {
-            ...existing,
-            status: 'queued',
-            canonicalKey: selectedCandidate?.id ?? existing.canonicalKey,
-            errorCode: null,
-            errorMessage: null,
-            clarificationCandidates: null,
-            updatedAt,
-            lastActivityAt: updatedAt,
-        };
-
-        demoSessions = demoSessions.map((session) => session.id === sessionId ? updated : session);
-        return updated;
-    }
+    return apiRequest<SessionListItem>(`/sessions/${sessionId}/clarify`, {
+        method: 'POST',
+        body: input,
+    });
 }
 
 export function subscribeToAgentEvents(
@@ -525,13 +292,7 @@ export function subscribeToSessionMessages(
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-    try {
-        await apiRequest<{ id: string }>(`/sessions/${sessionId}`, {
-            method: 'DELETE',
-        });
-    } catch (error) {
-        console.warn('Deleting a demo session because the authenticated API is unavailable.', error);
-        demoSessions = demoSessions.filter((session) => session.id !== sessionId);
-        demoMessagesBySessionId.delete(sessionId);
-    }
+    await apiRequest<{ id: string }>(`/sessions/${sessionId}`, {
+        method: 'DELETE',
+    });
 }

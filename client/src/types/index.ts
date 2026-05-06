@@ -89,19 +89,22 @@ export interface SuggestedAction {
     icon?: string;
 }
 
+// Shape mirrors the pipeline's canonical KeyFactor (data-pipeline/agent/schemas.py).
+// Snake_case is intentional — the pipeline emits these field names directly into
+// Firestore and the server passes them through unchanged.
 export interface KeyFactor {
-    rank: number;
-    title: string;
-    explanation: string;
-    direction: 'supports' | 'opposes' | 'uncertain';
+    label: string;
+    description: string;
+    direction: 'increases' | 'decreases';
     weight: number;
-    supportingEvidenceIds: string[];
+    evidence_ids: string[];
 }
 
+// Mirrors data-pipeline/agent/schemas.py ReasoningStep.
 export interface ReasoningStep {
-    sequence: number;
+    step: number;
+    title: string;
     description: string;
-    outcome: string;
 }
 
 export type AgentEventType =
