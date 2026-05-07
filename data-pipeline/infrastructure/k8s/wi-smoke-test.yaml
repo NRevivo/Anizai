@@ -1,0 +1,118 @@
+# ==========================================================
+# Anizai — Workload Identity smoke test (Phase C, Sprint C1.14)
+# ==========================================================
+# Why:
+#   End-of-Sprint-C1 deliverable. Proves three things at once:
+#     1. The pipeline-runtime KSA → GSA Workload Identity binding
+#        actually works (the pod's metadata server returns valid
+#        GSA credentials).
+#     2. The Secret Manager CSI driver + SecretProviderClass can
+#        mount a real secret as a file at /var/secrets/openai/.
+#     3. The GSA has secretAccessor on OPENAI_API_KEY.
+#
+#   The pod prints ONLY the byte length of the secret — the value
+#   itself is never logged, never piped into stdout content, never
+#   echoed. Length is enough to confirm a non-zero successful read
+#   without leaking the key into Cloud Logging.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/wi-smoke-test.yaml
+#   kubectl wait --for=condition=Complete job/wi-smoke-test \
+#     -n anizai --timeout=300s
+#   kubectl logs -n anizai job/wi-smoke-test
+#
+# Cleanup (after gate passes):
+#   kubectl delete -f infrastructure/k8s/wi-smoke-test.yaml
+#
+# Spec: cloud_deployment_implementation.md §C1.14 (D3)
+# ==========================================================
+
+# ----------------------------------------------------------
+# SecretProviderClass — declares which Secret Manager secrets
+# the CSI driver should expose under /var/secrets/openai/.
+# Only OPENAI_API_KEY is used here; full per-pod SPCs are
+# defined alongside each workload in C2-C5.
+# ----------------------------------------------------------
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: openai-key-spc
+  namespace: anizai
+spec:
+  # GKE's native Secret Manager add-on registers its provider under the name
+  # "gke", not the upstream "gcp". The SPC schema is upstream-compatible
+  # (apiVersion secrets-store.csi.x-k8s.io/v1) but the `provider` field must
+  # match the registered provider name. Mismatch → "provider not found".
+  provider: gke
+  parameters:
+    secrets: |
+      - resourceName: "projects/anizai-pipeline/secrets/OPENAI_API_KEY/versions/latest"
+        path: "OPENAI_API_KEY"
+---
+# ----------------------------------------------------------
+# One-shot Job — runs once, exits 0 on success.
+# ttlSecondsAfterFinished cleans up the pod 5 min after
+# completion so subsequent re-runs don't collide.
+# ----------------------------------------------------------
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wi-smoke-test
+  namespace: anizai
+  labels:
+    app: wi-smoke-test
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app: wi-smoke-test
+    spec:
+      serviceAccountName: pipeline-runtime
+      restartPolicy: Never
+      containers:
+        - name: smoke
+          image: alpine:3.20
+          # Print byte-length only. `wc -c` includes a trailing
+          # newline if Secret Manager appended one — that's fine,
+          # we only assert the value is present and non-empty.
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if [ ! -f /var/secrets/openai/OPENAI_API_KEY ]; then
+                echo "FAIL: secret file not mounted at /var/secrets/openai/OPENAI_API_KEY" >&2
+                exit 1
+              fi
+              LEN=$(wc -c < /var/secrets/openai/OPENAI_API_KEY)
+              echo "wi-smoke-test: OPENAI_API_KEY length=${LEN} bytes"
+              if [ "${LEN}" -lt 8 ]; then
+                echo "FAIL: secret length suspiciously small (${LEN})" >&2
+                exit 1
+              fi
+              echo "wi-smoke-test: PASS"
+          volumeMounts:
+            - name: openai-secret
+              mountPath: /var/secrets/openai
+              readOnly: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+      volumes:
+        - name: openai-secret
+          csi:
+            # GKE's native Secret Manager add-on (--enable-secret-manager)
+            # registers the CSI driver as `secrets-store-gke.csi.k8s.io`,
+            # NOT the upstream `secrets-store.csi.k8s.io`. The
+            # SecretProviderClass CRD is upstream-compatible; only the
+            # driver reference needs the GKE-specific name.
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: openai-key-spc
