@@ -1,0 +1,62 @@
+# ==========================================================
+# Anizai — Kafka Service (Phase C, Sprint C2.7)
+# ==========================================================
+# Why headless:
+#   StatefulSet pods need stable per-pod DNS (kafka-0.kafka.anizai
+#   .svc.cluster.local) so KRaft controller-quorum voters can be
+#   addressed by name across restarts. Spec C2.7.
+#
+# Why three ports:
+#   Mirrors docker-compose's three Kafka listeners (Section 8.2):
+#     - 9092  EXTERNAL    — laptop access via kubectl port-forward
+#     - 29092 INTERNAL    — in-cluster pod-to-pod traffic (Flink,
+#                           producers, kafka-ui all use this)
+#     - 9093  CONTROLLER  — KRaft controller plane (intra-cluster only;
+#                           single-broker V1 means it loops back to itself)
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/kafka-service.yaml
+#
+# Spec: cloud_deployment_implementation.md §C2.7
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: anizai
+  labels:
+    app: kafka
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  clusterIP: None
+  # publishNotReadyAddresses: true is REQUIRED for self-electing
+  # StatefulSets (Kafka, Zookeeper, etcd, Cassandra) on K8s.
+  # Without it, the headless Service does NOT publish DNS records
+  # for pods that aren't Ready yet — and a brand-new Kafka broker
+  # cannot reach Ready until it can resolve `kafka:9093` to bootstrap
+  # its own KRaft controller (KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka:9093).
+  # Locked loop: pod won't become Ready because DNS doesn't resolve;
+  # DNS doesn't resolve because the pod isn't Ready.
+  #
+  # Docker-compose doesn't hit this because Docker's bridge DNS
+  # resolves container names regardless of health — that's why the
+  # env vars stay identical between dev and cloud (parity), and only
+  # this single Service flag differs. Sprint C2 closure note: discovered
+  # during first kafka-0 apply, fixed by setting this flag.
+  publishNotReadyAddresses: true
+  selector:
+    app: kafka
+  ports:
+    - name: external
+      port: 9092
+      targetPort: 9092
+      protocol: TCP
+    - name: internal
+      port: 29092
+      targetPort: 29092
+      protocol: TCP
+    - name: controller
+      port: 9093
+      targetPort: 9093
+      protocol: TCP

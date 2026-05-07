@@ -1,0 +1,94 @@
+# ==========================================================
+# Anizai — kafka-ui Deployment (Phase C, Sprint C2.10)
+# ==========================================================
+# Why a Deployment (not a StatefulSet):
+#   kafka-ui is fully stateless — its only persistence is a
+#   client-side cache of broker metadata that rebuilds on
+#   restart. No PVC needed.
+#
+# Why provectuslabs/kafka-ui:v0.7.2:
+#   docker-compose currently pins `:latest`. For Phase C the
+#   project convention is "no :latest in production-bound
+#   manifests" (gcp-deployment skill §4) so we pin to v0.7.2 —
+#   the most recent stable release that supports Kafka 3.7.0.
+#   Sprint C2 closeout note: docker-compose's :latest should be
+#   tightened to :v0.7.2 in a follow-up to keep dev/cloud parity
+#   exact (out of scope for this sprint to keep the diff small).
+#
+# Why KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092:
+#   In-cluster INTERNAL listener (port 29092). The EXTERNAL
+#   listener (9092) is reserved for laptop access via port-forward
+#   and advertises 127.0.0.1, which is wrong from inside the
+#   cluster. Same env value as docker-compose.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/kafka-ui-deployment.yaml
+#
+# Spec: cloud_deployment_implementation.md §C2.10
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: anizai
+  labels:
+    app: kafka-ui
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: kafka-ui
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: C
+    spec:
+      serviceAccountName: pipeline-runtime
+      containers:
+        - name: kafka-ui
+          image: provectuslabs/kafka-ui:v0.7.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: KAFKA_CLUSTERS_0_NAME
+              value: Anizai-Cluster
+            - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+              value: kafka:29092
+            # Disable kafka-ui's auth — Phase C is internal/port-forward
+            # only, no public exposure. Keeps the local dev loop simple.
+            - name: AUTH_TYPE
+              value: DISABLED
+          # /actuator/health is the canonical Spring Boot probe
+          # endpoint exposed by kafka-ui.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

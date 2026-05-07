@@ -1,0 +1,32 @@
+# ==========================================================
+# Anizai — kafka-ui Service (Phase C, Sprint C2.10)
+# ==========================================================
+# Why ClusterIP (not headless):
+#   kafka-ui is stateless — no per-pod identity required, just a
+#   regular ClusterIP service in front of the Deployment. Local
+#   access is via `kubectl port-forward svc/kafka-ui 8080:8080`,
+#   which works the same against ClusterIP.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/kafka-ui-service.yaml
+#
+# Spec: cloud_deployment_implementation.md §C2.10, §C2 D5
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: anizai
+  labels:
+    app: kafka-ui
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka-ui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

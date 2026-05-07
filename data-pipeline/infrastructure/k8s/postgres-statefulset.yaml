@@ -1,0 +1,191 @@
+# ==========================================================
+# Anizai — Postgres StatefulSet (Phase C, Sprint C2.4)
+# ==========================================================
+# Why a StatefulSet (not a Deployment):
+#   Postgres requires stable identity + stable persistent volume
+#   across pod restarts. StatefulSet's volumeClaimTemplates binds
+#   the same PVC to pod-N forever — losing the pod does NOT lose
+#   the data directory. A Deployment with a separate PVC would
+#   risk PVC re-binding on a different node.
+#
+# Why timescale/timescaledb-ha:pg16:
+#   Same image as docker-compose. Ships with TimescaleDB +
+#   pgvector pre-installed — no custom Dockerfile needed. Cloud
+#   SQL was rejected (D1) because it does not support TimescaleDB,
+#   which momentum_vault hypertable requires.
+#
+# Why /home/postgres/pgdata + PGDATA=/home/postgres/pgdata/data:
+#   timescaledb-ha runs as user `postgres` with home /home/postgres.
+#   Using the PVC-backed home directory (not /var/lib/postgresql/data)
+#   keeps fsGroup-owned files in the right place and matches the
+#   docker-compose pattern (originally added to fix Windows Docker
+#   Desktop permissions; harmless and consistent in K8s).
+#
+# Why fsGroup: 999:
+#   The postgres user inside timescaledb-ha:pg16 has uid/gid 999.
+#   K8s sets PVC ownership to fsGroup on first mount; without this,
+#   the pod CrashLoops with "permission denied for /home/postgres/pgdata".
+#   Cold-start handler in cloud_deployment_implementation.md §C2.
+#
+# Why POSTGRES_PASSWORD_FILE (not env var from Secret):
+#   The CSI mount projects the Secret Manager value as a file. The
+#   official postgres entrypoint reads POSTGRES_PASSWORD_FILE if
+#   set, eliminating the need for an intermediary K8s Secret object
+#   created via SPC secretObjects. Fewer moving parts; password
+#   never appears in `kubectl describe pod`.
+#
+# Why init.sql via ConfigMap mount (not baked into image):
+#   D3 — schema source-of-truth is a single file in
+#   data-pipeline/infrastructure/sql/init.sql. ConfigMap mount
+#   mirrors docker-compose's `:/docker-entrypoint-initdb.d/01_init.sql`.
+#   Postgres only runs init.d scripts on a fresh data dir (PGDATA empty)
+#   — re-applying this manifest does NOT re-run init.sql.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/postgres-statefulset.yaml
+#   kubectl wait --for=condition=Ready pod -l app=postgres -n anizai --timeout=300s
+#
+# Spec: cloud_deployment_implementation.md §C2.2, §C2 D1/D2/D3 + §3
+# ==========================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: anizai
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: C
+    spec:
+      serviceAccountName: pipeline-runtime
+      # fsGroup 999 = postgres uid/gid inside timescaledb-ha:pg16.
+      # Without this the pod CrashLoops on PVC mount permission errors.
+      securityContext:
+        fsGroup: 999
+      # No nodeSelector — Postgres lands on main-pool naturally because
+      # polymarket-pool is e2-micro (1 GB RAM total) and cannot host
+      # a Postgres pod with 2 GB request. main-pool is the e2-standard-8
+      # (8 vCPU / 32 GB) workhorse for everything except polymarket.
+      containers:
+        - name: postgres
+          image: timescale/timescaledb-ha:pg16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            # Plain env vars — username and database name are not secrets
+            # (Sprint C2 kickoff Q3 = option A). Mirrors docker-compose
+            # defaults so dev/cloud parity holds.
+            - name: POSTGRES_USER
+              value: anizai
+            - name: POSTGRES_DB
+              value: anizai
+            # Password sourced from the CSI-projected file. The official
+            # postgres entrypoint reads this and sets the role password
+            # on init. After init the file remains mounted but unused.
+            - name: POSTGRES_PASSWORD_FILE
+              value: /var/secrets/postgres/POSTGRES_PASSWORD
+            # Match docker-compose: PGDATA points at a sub-dir of the PVC
+            # mount so the mount root can hold metadata/lost+found without
+            # confusing initdb. timescaledb-ha expects /home/postgres/pgdata.
+            - name: PGDATA
+              value: /home/postgres/pgdata/data
+          volumeMounts:
+            # Persistent data dir — bound by volumeClaimTemplate below.
+            - name: postgres-data
+              mountPath: /home/postgres/pgdata
+            # init.sql ConfigMap — runs on first-init only (postgres
+            # entrypoint semantics).
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            # CSI-projected POSTGRES_PASSWORD file. readOnly so the
+            # entrypoint cannot accidentally write the password.
+            - name: postgres-password
+              mountPath: /var/secrets/postgres
+              readOnly: true
+          # pg_isready is the canonical readiness/liveness probe for
+          # postgres. -U + -d so the probe authenticates against the
+          # specific role/db the application uses (catches role-init
+          # failures, not just port-open).
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - anizai
+                - -d
+                - anizai
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - anizai
+                - -d
+                - anizai
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            # Sized for V1 single-replica + ~90-day retention horizon.
+            # Sum of all C2 requests stays well under main-pool capacity
+            # (e2-standard-8 = 8 vCPU / 32 GB; we're using ~1 vCPU /
+            # 3 GB across postgres + kafka + kafka-ui).
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init-sql
+            items:
+              - key: 01_init.sql
+                path: 01_init.sql
+        - name: postgres-password
+          csi:
+            # GKE-native add-on driver name. Upstream
+            # secrets-store.csi.k8s.io is NOT registered on this cluster.
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: postgres-secrets-spc
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app: postgres
+          app.kubernetes.io/part-of: anizai-pipeline
+          phase: C
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        # GKE default storage class. pd-balanced gives us the
+        # SSD/HDD price-perf middle ground appropriate for an OLTP
+        # workload of our size.
+        storageClassName: standard-rwo
+        resources:
+          requests:
+            storage: 20Gi

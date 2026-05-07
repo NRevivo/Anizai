@@ -1,0 +1,45 @@
+# ==========================================================
+# Anizai — Postgres Service (Phase C, Sprint C2.3)
+# ==========================================================
+# Why:
+#   Headless ClusterIP service so:
+#     1. StatefulSet pods get stable per-pod DNS at
+#        postgres-0.postgres.anizai.svc.cluster.local — required
+#        contract for StatefulSet identity. Spec C2.3.
+#     2. In-cluster consumers (Flink in C3, Airflow in C4, agent
+#        in C5) reach Postgres at the short name `postgres:5432`.
+#     3. Local laptop access via `kubectl port-forward svc/postgres
+#        5432:5432` — kubectl port-forwarding works against
+#        headless services by selecting any matching pod.
+#
+#   No NodePort, no LoadBalancer (Phase C decision: no public
+#   exposure). Per gcp-deployment skill §4 + cloud_deployment_
+#   implementation.md §C2 D5.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/postgres-service.yaml
+#
+# Spec: cloud_deployment_implementation.md §C2.3
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: anizai
+  labels:
+    app: postgres
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  # Headless service — `clusterIP: None` enables per-pod DNS for the
+  # StatefulSet. Single-replica V1 still benefits from this for
+  # consistency with the StatefulSet pattern (and forward-compat
+  # with replicas in the future).
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

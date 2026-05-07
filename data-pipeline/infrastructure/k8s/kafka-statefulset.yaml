@@ -1,0 +1,164 @@
+# ==========================================================
+# Anizai — Kafka StatefulSet (Phase C, Sprint C2.6)
+# ==========================================================
+# Why a StatefulSet:
+#   Kafka brokers must keep stable identity (KRaft node id +
+#   advertised listener) across restarts so producer/consumer
+#   offsets remain valid. StatefulSet's volumeClaimTemplates also
+#   binds the same PVC to kafka-0 forever — broker log directory
+#   is durable.
+#
+# Why apache/kafka:3.7.0:
+#   Identical image + version to docker-compose. Phase C is a parity
+#   port — every K8s workload must run the same image as its
+#   docker-compose counterpart so behavior cannot drift between
+#   environments. Per cloud_deployment_implementation.md §C2 D1.
+#
+# Why KRaft (not Zookeeper):
+#   Already chosen in docker-compose (Section 8.2). Eliminates the
+#   ZK ensemble; single-process broker+controller is simpler to
+#   operate and matches what the producers and Flink already expect.
+#
+# Why dual listeners INTERNAL+EXTERNAL identical to docker-compose:
+#   - INTERNAL (29092) advertised as kafka:29092 — used by all
+#     in-cluster clients (Flink, producers, kafka-ui).
+#   - EXTERNAL (9092) advertised as 127.0.0.1:9092 — under
+#     kubectl port-forward this is the loopback the laptop sees.
+#     Identical to docker-compose's 127.0.0.1:9092 advertisement
+#     (Windows host networking via Docker Desktop), so any local
+#     tooling that worked against docker-compose works against
+#     port-forwarded GKE without changes.
+#   - CONTROLLER (9093) is the KRaft control plane — never advertised
+#     to clients, only used by the broker process itself.
+#
+# Why KAFKA_AUTO_CREATE_TOPICS_ENABLE=false:
+#   D4 + Section 3.3 — topics are created explicitly by kafka-init
+#   with their correct retention/cleanup policies. Auto-create would
+#   silently produce topics with default retention (7 days) and
+#   cleanup.policy=delete, masking misconfigurations.
+#
+# Why /var/lib/kafka/data:
+#   Default Kafka log directory in apache/kafka:3.7.0. Same path
+#   docker-compose uses; mounting the PVC here gives durable broker
+#   storage across pod restarts.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/kafka-statefulset.yaml
+#   kubectl wait --for=condition=Ready pod -l app=kafka -n anizai --timeout=300s
+#
+# Spec: cloud_deployment_implementation.md §C2.6, §C2 D1/D2 + §3.1
+# ==========================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: anizai
+  labels:
+    app: kafka
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: C
+    spec:
+      serviceAccountName: pipeline-runtime
+      # apache/kafka:3.7.0 runs as user `appuser` (uid 1000). PVC
+      # ownership must match so the broker can write to its log dir.
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: kafka
+          image: apache/kafka:3.7.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: external
+              containerPort: 9092
+              protocol: TCP
+            - name: internal
+              containerPort: 29092
+              protocol: TCP
+            - name: controller
+              containerPort: 9093
+              protocol: TCP
+          env:
+            # KRaft single-node config — identical to docker-compose.
+            - name: KAFKA_NODE_ID
+              value: "0"
+            - name: KAFKA_PROCESS_ROLES
+              value: "controller,broker"
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: "0@kafka:9093"
+            - name: KAFKA_LISTENERS
+              value: "INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "INTERNAL://kafka:29092,EXTERNAL://127.0.0.1:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "INTERNAL"
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: "CONTROLLER"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+            - name: KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS
+              value: "300000"
+          volumeMounts:
+            - name: kafka-data
+              mountPath: /var/lib/kafka/data
+          # Same readiness check as docker-compose: kafka-topics --list
+          # confirms the broker is fully booted (controller elected,
+          # metadata caches warm), not just port-open.
+          readinessProbe:
+            exec:
+              command:
+                - /opt/kafka/bin/kafka-topics.sh
+                - --bootstrap-server
+                - localhost:9092
+                - --list
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 15
+          livenessProbe:
+            exec:
+              command:
+                - /opt/kafka/bin/kafka-topics.sh
+                - --bootstrap-server
+                - localhost:9092
+                - --list
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "1Gi"
+            limits:
+              cpu: "1500m"
+              memory: "2Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: kafka-data
+        labels:
+          app: kafka
+          app.kubernetes.io/part-of: anizai-pipeline
+          phase: C
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: standard-rwo
+        resources:
+          requests:
+            storage: 10Gi

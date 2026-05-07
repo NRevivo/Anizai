@@ -1,0 +1,214 @@
+# ==========================================================
+# Anizai — Kafka topic-creation Job (Phase C, Sprint C2.8)
+# ==========================================================
+# Why a Job (not an initContainer of the Kafka pod):
+#   D4 + parity with docker-compose. Topic creation needs the
+#   broker fully booted AND running on its real listener — the
+#   broker pod cannot run kafka-topics.sh against itself before
+#   it is itself ready. A separate Job that depends on Kafka
+#   readiness is the canonical pattern.
+#
+# Why --if-not-exists on every topic:
+#   Idempotency. The Job can be re-run after a transient failure
+#   without erroring out on already-created topics. Cold-start
+#   handler (cloud_deployment_implementation.md §C2): if the Job
+#   races the broker boot and exits with UnknownTopicOrPartition-
+#   Exception on the first pass, kubectl delete + re-apply is safe.
+#
+# Why retention values lifted verbatim from docker-compose:
+#   Section 3.3 — Bronze=7d, Silver=3d, Gold=3d, ingestion_triggers=
+#   7d, dead-letter-queue=30d. These are pipeline-wide invariants
+#   (Phase 0 frozen). Drift here = silent data loss between cloud
+#   and dev.
+#
+# Why 14 topics (not more, not less):
+#   Sprint C2 gate criterion. The 14 break down as:
+#     11 Bronze (one per source: polymarket, predictit, telegram,
+#                reddit, hackernews, newsapi, arxiv, fred,
+#                googletrends, openweather, opensky)
+#      2 Silver streams (social_pulse, global_news)
+#      1 Silver structured_metrics
+#      2 Gold streams (social_pulse, global_news)        --> 16 lines but
+#      1 Gold structured_metrics                              actually:
+#      1 ingestion_triggers
+#      1 dead-letter-queue
+#   = 11 + 2 + 1 + 2 + 1 + 1 + 1 = 19 — but Section 3.3 collapses
+#   the per-source counters: gate target is the 14 unique topic
+#   names that match the docker-compose kafka-init creation list.
+#
+#   Recounting against docker-compose (lines 124-209):
+#     11 Bronze + 2 Silver streams + 1 Silver metrics +
+#      2 Gold streams + 1 Gold metrics + ingestion_triggers +
+#      dead-letter-queue = 19 topics.
+#
+#   Spec C2.8 says "14 topics matching the kafka-init definitions
+#   in infrastructure/docker-compose.yml". The total in compose IS
+#   19. Treating "14 topics" in the spec as the docker-compose list,
+#   we reproduce that list exactly here. (Drift flagged for sprint
+#   closeout: spec says 14, compose creates 19 — compose is the
+#   parity source-of-truth, so 19 is correct.)
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/kafka-init-job.yaml
+#   kubectl wait --for=condition=Complete job/kafka-init -n anizai \
+#     --timeout=300s
+#   kubectl logs -n anizai job/kafka-init     # confirm "[OK]" lines
+#
+# Spec: cloud_deployment_implementation.md §C2.8, §C2 D4 +
+#       data-pipeline spec §3.1, §3.3
+# ==========================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: anizai
+  labels:
+    app: kafka-init
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  # 5 min after Complete the Job + pod are GC'd. Re-apply the file
+  # to re-run; kubectl delete job/kafka-init clears earlier (deletes
+  # the completed pod immediately).
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: kafka-init
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: C
+    spec:
+      serviceAccountName: pipeline-runtime
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-init
+          image: apache/kafka:3.7.0
+          imagePullPolicy: IfNotPresent
+          # Bash loop lifted verbatim from docker-compose's kafka-init
+          # service. The only change is `BS=kafka:29092` (in-cluster
+          # service DNS) where compose used the same hostname via
+          # docker bridge.
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              KAFKA=/opt/kafka/bin/kafka-topics.sh
+              BS=kafka:29092
+
+              echo "=== Waiting for Kafka broker readiness ==="
+              # Defence in depth — the broker readiness probe should
+              # already be passing by the time this Job's pod schedules,
+              # but a brief loop catches the controller-quorum-elected-
+              # but-metadata-not-yet-warm window described in the cold-
+              # start handler.
+              for i in $(seq 1 30); do
+                if $KAFKA --bootstrap-server $BS --list >/dev/null 2>&1; then
+                  echo "  broker ready (attempt $i)"
+                  break
+                fi
+                echo "  waiting for broker (attempt $i/30)..."
+                sleep 2
+              done
+
+              echo "=== Creating Bronze topics (7-day retention) ==="
+              BRONZE_RETENTION=604800000
+              for TOPIC in \
+                ingest.bronze.polymarket \
+                ingest.bronze.predictit \
+                ingest.bronze.telegram \
+                ingest.bronze.reddit \
+                ingest.bronze.hackernews \
+                ingest.bronze.newsapi \
+                ingest.bronze.arxiv \
+                ingest.bronze.fred \
+                ingest.bronze.googletrends \
+                ingest.bronze.openweather \
+                ingest.bronze.opensky
+              do
+                $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                  --topic "$TOPIC" \
+                  --partitions 3 \
+                  --replication-factor 1 \
+                  --config retention.ms=$BRONZE_RETENTION \
+                  --config cleanup.policy=delete
+                echo "  [OK] $TOPIC"
+              done
+
+              echo "=== Creating Silver topics (3-day retention) ==="
+              SILVER_RETENTION=259200000
+              for TOPIC in \
+                process.silver.social_pulse \
+                process.silver.global_news
+              do
+                $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                  --topic "$TOPIC" \
+                  --partitions 3 \
+                  --replication-factor 1 \
+                  --config retention.ms=$SILVER_RETENTION \
+                  --config cleanup.policy=delete
+                echo "  [OK] $TOPIC"
+              done
+
+              echo "=== Creating Silver structured_metrics (3-day delete) ==="
+              $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                --topic process.silver.structured_metrics \
+                --partitions 3 \
+                --replication-factor 1 \
+                --config cleanup.policy=delete \
+                --config retention.ms=$SILVER_RETENTION
+              echo "  [OK] process.silver.structured_metrics"
+
+              echo "=== Creating Gold topics (3-day retention) ==="
+              GOLD_RETENTION=259200000
+              for TOPIC in \
+                serve.gold.social_pulse \
+                serve.gold.global_news
+              do
+                $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                  --topic "$TOPIC" \
+                  --partitions 3 \
+                  --replication-factor 1 \
+                  --config retention.ms=$GOLD_RETENTION \
+                  --config cleanup.policy=delete
+                echo "  [OK] $TOPIC"
+              done
+
+              echo "=== Creating Gold structured_metrics (3-day delete) ==="
+              $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                --topic serve.gold.structured_metrics \
+                --partitions 3 \
+                --replication-factor 1 \
+                --config cleanup.policy=delete \
+                --config retention.ms=$GOLD_RETENTION
+              echo "  [OK] serve.gold.structured_metrics"
+
+              echo "=== Creating System topics ==="
+              # ingestion_triggers: RAG agent → on-demand requests (7-day)
+              $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                --topic ingestion_triggers \
+                --partitions 1 \
+                --replication-factor 1 \
+                --config retention.ms=604800000 \
+                --config cleanup.policy=delete
+              echo "  [OK] ingestion_triggers"
+
+              # dead-letter-queue: 30-day retention for operator inspection
+              $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                --topic dead-letter-queue \
+                --partitions 3 \
+                --replication-factor 1 \
+                --config retention.ms=2592000000 \
+                --config cleanup.policy=delete
+              echo "  [OK] dead-letter-queue"
+
+              echo "=== All topics created successfully ==="
+              $KAFKA --bootstrap-server $BS --list
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
