@@ -1,22 +1,28 @@
 """
-Gate 1 — Ingestion Gate: TheNewsAPI Bronze Schema Compliance.
+Gate 1 — Ingestion Gate: newsapi.ai (Event Registry) Bronze Schema Compliance.
 
-Validates that the TheNewsAPI producer's envelope-building, filter, and
+Validates that the newsapi.ai producer's envelope-building, filter, and
 payload-construction logic produces messages that are fully compliant
 with the Bronze Schema (Section C.1) and Message Envelope (Section 3.2)
 before any message reaches Kafka.
 
-Sprint 21.5 migration (2026-05-06): provider switched from newsapi.org to
-thenewsapi.com. The internal raw_payload contract was preserved verbatim
-(Decision D1) so the Silver/Gold gates and persistence layer stay unchanged.
-The producer is the API-shape boundary: it normalizes TheNewsAPI's response
-shape (data[] with `image_url`, `snippet`, domain-string `source`, and
-`categories[]` array) into the same internal raw_payload keys this test
-already enforces. Filter-logic tests are updated to pass TheNewsAPI's input
-shape (source as a bare domain string).
+Phase 7A migration (2026-05-09): provider switched from thenewsapi.com to
+eventregistry.org. The internal raw_payload contract is preserved verbatim
+(Decision M1/M7) so the Silver/Gold gates and persistence layer stay unchanged.
+The producer is the API-shape boundary: it normalizes newsapi.ai's response
+shape (articles.results[] with `body`, `image`, `dateTime`, `source` as a
+{uri, title} dict, `authors[]`) into the same internal raw_payload keys this
+test already enforces.
+
+Category model change (Phase 7A, T7A.2 finding):
+    PULSE_CATEGORIES now contains 5 explicit URI-notation categories:
+    news/Business, news/Technology, news/Health, news/Science, news/Politics.
+    GENERAL_CATEGORY ("news" root) removed — returns 0 results on newsapi.ai.
+    GENERAL_KEYWORDS pre-filter removed from producer — existed only to gate
+    the "news" root bucket. All 5 categories pass through uniformly.
 
 Design decisions:
-  - Zero live connections: no Kafka broker, no TheNewsAPI calls.
+  - Zero live connections: no Kafka broker, no newsapi.ai calls.
     build_bronze_message(), _build_raw_payload(), and all filter methods
     are pure functions tested in complete isolation.
   - Mock payload loaded from tests/mocks/newsapi_article.json (Section 4.4).
@@ -24,7 +30,7 @@ Design decisions:
     validators the Flink Silver Job uses, so a pass here guarantees the
     Silver Job's first gate will also accept NewsAPI messages.
   - Filter-logic tests use NewsAPIProducer.__new__() to skip __init__
-    (avoids THE_NEWS_API_KEY requirement and Kafka connection in CI).
+    (avoids NEWSAI_API_KEY requirement and Kafka connection in CI).
 
 Gate 1 checklist (Section 9.3 Gate 1):
   [1]  envelope fields present and correctly typed
@@ -39,19 +45,17 @@ Gate 1 checklist (Section 9.3 Gate 1):
   [10] raw_payload.article_id is a non-empty URL string
   [11] raw_payload.published_at is a non-empty ISO8601 string
   [12] raw_payload.source.id and source.name are both present (post-normalization)
-  [13] raw_payload.category is one of the expected values
+  [13] raw_payload.category is one of the expected categoryUri values
   [14] raw_payload.fetch_mode is a valid mode string
   [15] raw_payload.impact_boost is a boolean
   [16] raw_payload.impact_boost_reason is a string
   [17] Kafka partition key == source.id (falls back to source.name)
   [18] AUTHORITY_WHITELIST covers all 15 mandated domains (Section B.4)
-  [19] GENERAL_KEYWORDS contains all 9 mandated terms (Section B.4)
-  [20] _passes_whitelist(): whitelisted domains pass; unknown domains fail
+  [19] news/Politics is in PULSE_CATEGORIES (new in Phase 7A, was absent on TheNewsAPI)
+  [20] _passes_whitelist(): reads source.uri dict field; whitelisted domains pass
   [21] _passes_whitelist(): Israeli domain (ynet.co.il) passes
-  [22] _passes_keyword_sniper(): keyword-bearing articles pass for General
-  [23] _passes_keyword_sniper(): non-keyword articles fail for General
-  [24] _impact_boost_info(): Israel/energy terms detected correctly
-  [25] _build_raw_payload() produces all Silver-Job-required keys
+  [22] _impact_boost_info(): Israel/energy terms detected correctly
+  [23] _build_raw_payload() produces all Silver-Job-required keys; newsapi.ai shape
 
 References:
     - Section 2.1:  Producer Matrix (NewsAPI row)
@@ -60,8 +64,7 @@ References:
     - Section 3.4:  NDJSON serialisation (tested via round-trip)
     - Section 4.4:  Mock-Driven Development
     - Section 9.3:  Triple-Gate Test Matrix — Gate 1
-    - Section B.4:  TheNewsAPI parameters, Authority Whitelist, Keyword
-                    Sniper, Tiered Backfill, Impact Boost
+    - Section B.4:  newsapi.ai parameters, Authority Whitelist, Impact Boost
     - Section C.1:  Bronze Schema
     - Section C.3:  Silver Full-Text Document Store fields
 """
@@ -70,15 +73,16 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from ingestion.newsapi_producer import (
     AUTHORITY_WHITELIST,
-    GENERAL_CATEGORY,
-    GENERAL_KEYWORDS,
+    NEWSAI_GETARTICLES_URL,
     PULSE_CATEGORIES,
     SOURCE_NAME,
+    TIER_ONE_DOMAINS,
     TIER_ONE_SOURCE_IDS,
     NewsAPIProducer,
 )
@@ -89,16 +93,10 @@ from utils.validators import validate_bronze_payload, validate_envelope
 # Paths & Constants
 # ==========================================================
 
-MOCKS_DIR          = Path(__file__).parent.parent / "mocks"
-NEWSAPI_MOCK_PATH  = MOCKS_DIR / "newsapi_article.json"
+MOCKS_DIR         = Path(__file__).parent.parent / "mocks"
+NEWSAPI_MOCK_PATH = MOCKS_DIR / "newsapi_article.json"
 
-HEADLINES_ENDPOINT_PREFIX = "https://api.thenewsapi.com/v1/news/top"
-EVERYTHING_ENDPOINT       = "https://api.thenewsapi.com/v1/news/all"
-
-# The 15 authority domains mandated by Section B.4 (Sprint 21.5 — TheNewsAPI
-# migration). Tests check that AUTHORITY_WHITELIST covers each one by domain.
-# Removed in Sprint 21.5: i24news.tv (not on TheNewsAPI), timesofisrael.com
-# (not on TheNewsAPI), Kan 11 (no domain on TheNewsAPI).
+# The 15 authority domains mandated by Section B.4.
 REQUIRED_DOMAINS: list[str] = [
     "reuters.com",
     "apnews.com",
@@ -117,17 +115,13 @@ REQUIRED_DOMAINS: list[str] = [
     "ynet.co.il",
 ]
 
-# All 9 Keyword Sniper terms mandated by Section B.4.
-REQUIRED_KEYWORDS = {
-    "conflict",
-    "sanctions",
-    "crude oil",
-    "opec",
-    "missile defense",
-    "interest rates",
-    "ai regulation",
-    "nato",
-    "central bank",
+# All 5 category URIs confirmed live in T7A.2.
+EXPECTED_CATEGORY_URIS: set[str] = {
+    "news/Business",
+    "news/Technology",
+    "news/Health",
+    "news/Science",
+    "news/Politics",
 }
 
 # Valid fetch_mode values for the NewsAPI producer.
@@ -141,7 +135,7 @@ VALID_FETCH_MODES = {"pulse", "backfill_full", "backfill_tier_one", "backfill_an
 @pytest.fixture(scope="module")
 def article_raw() -> dict:
     """
-    Load the NewsAPI article mock payload (Section 4.4).
+    Load the newsapi.ai mock raw_payload (Section 4.4).
 
     This is the dict that NewsAPIProducer._build_raw_payload() would produce.
     scope="module" reads the file once and shares it across all tests.
@@ -153,12 +147,13 @@ def article_raw() -> dict:
 @pytest.fixture(scope="module")
 def newsapi_envelope(article_raw) -> dict:
     """
-    Build the full Bronze envelope from the mock NewsAPI article payload.
+    Build the full Bronze envelope from the mock newsapi.ai article payload.
 
     Mirrors what NewsAPIProducer._emit() does in production: calls
     build_bronze_message() with the raw_payload and Bronze metadata.
+    Endpoint uses newsapi.ai's NEWSAI_GETARTICLES_URL with categoryUri param (M1).
     """
-    endpoint = f"{HEADLINES_ENDPOINT_PREFIX}?categories={article_raw['category']}"
+    endpoint = f"{NEWSAI_GETARTICLES_URL}?categoryUri={article_raw['category']}"
     return build_bronze_message(
         source_name=SOURCE_NAME,
         source_endpoint=endpoint,
@@ -171,7 +166,7 @@ def producer_instance() -> NewsAPIProducer:
     """
     Create a NewsAPIProducer instance without triggering __init__.
 
-    Skips THE_NEWS_API_KEY validation and Kafka connection — filter and
+    Skips NEWSAI_API_KEY validation and Kafka connection — filter and
     payload-builder methods depend only on class-level constants.
     """
     return NewsAPIProducer.__new__(NewsAPIProducer)
@@ -247,11 +242,16 @@ class TestBronzePayload:
         assert parsed.version == 4
 
     def test_bronze_payload_has_source_endpoint(self, newsapi_envelope):
-        """source_endpoint must reference a thenewsapi.com URL (Section C.1, Sprint 21.5)."""
+        """
+        source_endpoint must reference the newsapi.ai (eventregistry.org) URL.
+
+        Phase 7A: NEWSAI_GETARTICLES_URL replaces the two TheNewsAPI endpoints.
+        Confirms the _emit() method uses the correct new URL (M1).
+        """
         endpoint = newsapi_envelope["payload"].get("source_endpoint", "")
         assert isinstance(endpoint, str) and len(endpoint) > 0
-        assert "thenewsapi.com" in endpoint, (
-            f"source_endpoint should reference a thenewsapi.com URL. Got: {endpoint}"
+        assert "eventregistry.org" in endpoint, (
+            f"source_endpoint should reference eventregistry.org. Got: {endpoint}"
         )
 
     def test_bronze_payload_has_ingestion_timestamp(self, newsapi_envelope):
@@ -345,24 +345,24 @@ class TestNewsAPIDomainCorrectness:
         assert isinstance(source["id"],   str), "source.id must be a string"
         assert isinstance(source["name"], str), "source.name must be a string"
 
-    def test_category_is_valid_string(self, newsapi_envelope):
+    def test_category_is_valid_uri_string(self, newsapi_envelope):
         """
-        raw_payload.category must be one of the expected values.
+        raw_payload.category must be one of the 5 newsapi.ai categoryUri values
+        or empty string (backfill articles have no category).
 
-        The Silver Job uses category to decide whether to apply the
-        Keyword Sniper scoring pass (Section 4.1A).
+        Phase 7A: categories use URI notation (news/Business) not slug notation.
         """
         category = newsapi_envelope["payload"]["raw_payload"].get("category", "")
-        valid    = set(PULSE_CATEGORIES) | {GENERAL_CATEGORY, ""}
+        valid    = EXPECTED_CATEGORY_URIS | {""}
         assert category in valid, (
-            f"category '{category}' not in expected set {valid}"
+            f"category {category!r} not in expected set {valid}"
         )
 
     def test_fetch_mode_is_valid(self, newsapi_envelope):
         """fetch_mode must be one of the defined producer operating modes."""
         fetch_mode = newsapi_envelope["payload"]["raw_payload"].get("fetch_mode", "")
         assert fetch_mode in VALID_FETCH_MODES, (
-            f"fetch_mode '{fetch_mode}' not in {VALID_FETCH_MODES}"
+            f"fetch_mode {fetch_mode!r} not in {VALID_FETCH_MODES}"
         )
 
     def test_impact_boost_is_boolean(self, newsapi_envelope):
@@ -370,8 +370,7 @@ class TestNewsAPIDomainCorrectness:
         raw_payload.impact_boost must be a boolean (Section B.4 Impact Boost rule).
 
         The Gold Job reads this flag to apply +1 to impact_level for
-        Israeli/Middle East security or energy articles — it must be a
-        boolean, not a truthy string.
+        Israeli/Middle East security or energy articles.
         """
         boost = newsapi_envelope["payload"]["raw_payload"].get("impact_boost")
         assert isinstance(boost, bool), (
@@ -390,7 +389,6 @@ class TestNewsAPIDomainCorrectness:
         The mock article (OPEC/crude oil headline) must have impact_boost=True.
 
         Validates the impact boost detection embedded at Bronze layer (Section B.4).
-        If this fails, the Gold Job will silently miss the +1 boost for energy news.
         """
         raw = newsapi_envelope["payload"]["raw_payload"]
         assert raw["impact_boost"] is True, (
@@ -407,7 +405,7 @@ class TestNewsAPIDomainCorrectness:
         Shared event_ids corrupt the Paper Trail across Bronze → Silver → Gold
         (Section 3.2 — event_id is the UUIDv4 shared across all layers).
         """
-        endpoint = f"{HEADLINES_ENDPOINT_PREFIX}?categories={article_raw['category']}"
+        endpoint = f"{NEWSAI_GETARTICLES_URL}?categoryUri={article_raw['category']}"
         msg1 = build_bronze_message(SOURCE_NAME, endpoint, article_raw)
         msg2 = build_bronze_message(SOURCE_NAME, endpoint, article_raw)
         assert msg1["event_id"] != msg2["event_id"]
@@ -416,13 +414,10 @@ class TestNewsAPIDomainCorrectness:
         """
         The Kafka partition key is source.id (falls back to source.name).
 
-        Why: groups all articles from the same publisher into the same Kafka
-        partition, ensuring the Silver Job's SHA-256 dedup sees them together
-        (consistent with series_id keying for FRED, Section 4.2B pattern).
         This test confirms source.id is non-empty in the mock so the partition
         key never falls back to 'unknown' for authoritative whitelisted sources.
         """
-        source    = newsapi_envelope["payload"]["raw_payload"]["source"]
+        source        = newsapi_envelope["payload"]["raw_payload"]["source"]
         partition_key = source["id"] or source["name"]
         assert partition_key != "", (
             "Partition key must be non-empty for whitelisted sources"
@@ -436,48 +431,45 @@ class TestNewsAPIDomainCorrectness:
 
 class TestFilterLogic:
     """
-    Unit tests for the three pre-emission filters in NewsAPIProducer.
+    Unit tests for the pre-emission filters in NewsAPIProducer.
 
     All tests use NewsAPIProducer.__new__() to bypass __init__ —
     filter methods depend only on class-level constants.
 
-    Sprint 21.5 update: TheNewsAPI's `source` field is a bare domain string
-    (e.g. "reuters.com"), not the {id, name} dict newsapi.org used. The
-    whitelist is therefore matched by domain. The producer's whitelist is
-    *also* sent server-side via the `domains=` query parameter — these tests
-    cover the defensive client-side recheck in _passes_whitelist.
+    Phase 7A update: newsapi.ai's source field is a dict with a uri key
+    (e.g. {"uri": "reuters.com", "title": "Reuters"}), not a bare domain string.
+    _passes_whitelist now reads article["source"]["uri"] (M3). There is no
+    keyword sniper pre-filter in the producer — GENERAL_KEYWORDS gate removed.
     """
 
-    # --- Authority Whitelist (domain-based, Sprint 21.5) ---
+    # --- Authority Whitelist (source.uri dict, Phase 7A / M3) ---
 
     def test_whitelist_passes_reuters_domain(self, producer_instance):
-        """The reuters.com domain must pass the whitelist."""
+        """The reuters.com source.uri must pass the whitelist."""
         assert producer_instance._passes_whitelist(
-            {"source": "reuters.com"}
+            {"source": {"uri": "reuters.com"}}
         ) is True
 
     def test_whitelist_passes_apnews_domain(self, producer_instance):
-        """The apnews.com domain must pass."""
+        """The apnews.com source.uri must pass."""
         assert producer_instance._passes_whitelist(
-            {"source": "apnews.com"}
+            {"source": {"uri": "apnews.com"}}
         ) is True
 
     def test_whitelist_passes_israeli_domain_ynet(self, producer_instance):
         """
         ynet.co.il (Israeli wire service) must pass.
 
-        Why this matters: Israeli/regional outlets are explicitly on the
-        Section B.4 whitelist. Compound TLDs (.co.il, .co.uk) must be
-        treated as first-class domains by the gate.
+        Compound TLDs (.co.il, .co.uk) must be treated as first-class domains.
         """
         assert producer_instance._passes_whitelist(
-            {"source": "ynet.co.il"}
+            {"source": {"uri": "ynet.co.il"}}
         ) is True
 
     def test_whitelist_passes_jpost_domain(self, producer_instance):
         """jpost.com (Jerusalem Post) must pass the whitelist."""
         assert producer_instance._passes_whitelist(
-            {"source": "jpost.com"}
+            {"source": {"uri": "jpost.com"}}
         ) is True
 
     def test_whitelist_passes_bbc_compound_tld(self, producer_instance):
@@ -486,69 +478,27 @@ class TestFilterLogic:
         domains verbatim and does not strip TLDs at match time.
         """
         assert producer_instance._passes_whitelist(
-            {"source": "bbc.co.uk"}
+            {"source": {"uri": "bbc.co.uk"}}
         ) is True
 
     def test_whitelist_blocks_unknown_blog(self, producer_instance):
-        """
-        An unknown domain must be blocked by the whitelist.
-
-        Prevents noise from non-authoritative sources entering Bronze
-        (Section 2.2). Defensive recheck of the server-side `domains=` filter.
-        """
+        """An unknown source.uri must be blocked by the whitelist."""
         assert producer_instance._passes_whitelist(
-            {"source": "random-blog.com"}
+            {"source": {"uri": "random-blog.com"}}
         ) is False
 
-    def test_whitelist_blocks_empty_source(self, producer_instance):
-        """An article with an empty-string source must be blocked."""
-        assert producer_instance._passes_whitelist({"source": ""}) is False
+    def test_whitelist_blocks_empty_source_uri(self, producer_instance):
+        """An article with an empty source.uri must be blocked."""
+        assert producer_instance._passes_whitelist({"source": {"uri": ""}}) is False
 
-    def test_whitelist_blocks_null_source(self, producer_instance):
-        """An article with a null source field must be blocked."""
-        assert producer_instance._passes_whitelist({"source": None}) is False
+    def test_whitelist_blocks_missing_source(self, producer_instance):
+        """An article with no source key must be blocked gracefully."""
+        assert producer_instance._passes_whitelist({}) is False
 
     def test_whitelist_is_case_insensitive(self, producer_instance):
         """Mixed-case domain "Reuters.COM" must match the lowercase whitelist."""
         assert producer_instance._passes_whitelist(
-            {"source": "Reuters.COM"}
-        ) is True
-
-    # --- Keyword Sniper (General category only) ---
-
-    def test_keyword_sniper_passes_crude_oil_in_title(self, producer_instance):
-        """'crude oil' in title must pass the keyword sniper."""
-        assert producer_instance._passes_keyword_sniper(
-            {"title": "OPEC agrees to cut crude oil output", "description": ""}
-        ) is True
-
-    def test_keyword_sniper_passes_nato_in_description(self, producer_instance):
-        """'nato' in description must pass (description field is also scanned)."""
-        assert producer_instance._passes_keyword_sniper(
-            {"title": "European defence ministers meet", "description": "NATO leaders discussed expansion."}
-        ) is True
-
-    def test_keyword_sniper_passes_central_bank(self, producer_instance):
-        """'central bank' must pass the keyword sniper."""
-        assert producer_instance._passes_keyword_sniper(
-            {"title": "Central bank raises rates by 25 basis points", "description": ""}
-        ) is True
-
-    def test_keyword_sniper_blocks_no_keywords(self, producer_instance):
-        """
-        An article with no keyword matches must be blocked for the General category.
-
-        This is the primary noise-reduction gate (Section 2.2 / B.4).
-        Sports, entertainment, and lifestyle content must not enter Bronze.
-        """
-        assert producer_instance._passes_keyword_sniper(
-            {"title": "Local sports team wins championship", "description": "Great match in the final."}
-        ) is False
-
-    def test_keyword_sniper_is_case_insensitive(self, producer_instance):
-        """'CRUDE OIL' (uppercase) must match the lowercase keyword set."""
-        assert producer_instance._passes_keyword_sniper(
-            {"title": "CRUDE OIL prices surge", "description": ""}
+            {"source": {"uri": "Reuters.COM"}}
         ) is True
 
     # --- Impact Boost Detection ---
@@ -584,15 +534,13 @@ class TestFilterLogic:
 
 class TestConstantsInvariants:
     """
-    Verifies that AUTHORITY_WHITELIST and GENERAL_KEYWORDS contain all
-    mandated values from Section B.4. Catches accidental omissions that
-    would silently drop legitimate authority sources or keywords.
+    Verifies that AUTHORITY_WHITELIST and PULSE_CATEGORIES contain all
+    mandated values from Section B.4. Catches accidental omissions.
     """
 
     def test_all_15_domains_covered_in_whitelist(self):
         """
-        AUTHORITY_WHITELIST must cover all 15 domains from Section B.4
-        (Sprint 21.5: TheNewsAPI uses domains, not source IDs).
+        AUTHORITY_WHITELIST must cover all 15 domains from Section B.4.
 
         A missing domain means the whitelist will silently block that
         outlet's articles at the Bronze gate.
@@ -603,47 +551,43 @@ class TestConstantsInvariants:
                 f"AUTHORITY_WHITELIST."
             )
 
-    def test_all_9_keywords_present(self):
+    def test_pulse_categories_are_five_uri_strings(self):
         """
-        GENERAL_KEYWORDS must contain all 9 terms mandated by Section B.4.
+        PULSE_CATEGORIES must be exactly the 5 newsapi.ai category URIs confirmed
+        in T7A.2. All categories are treated uniformly — no GENERAL_CATEGORY.
 
-        Missing a keyword means the General category will block articles that
-        spec says should pass the Keyword Sniper pre-filter.
+        Phase 7A change: added news/Politics; removed "general" slug and the
+        "news" root (returns 0 results). URI notation (news/X) replaces slugs.
         """
-        missing = REQUIRED_KEYWORDS - GENERAL_KEYWORDS
-        assert not missing, (
-            f"GENERAL_KEYWORDS is missing Section B.4 terms: {missing}"
+        assert set(PULSE_CATEGORIES) == EXPECTED_CATEGORY_URIS, (
+            f"PULSE_CATEGORIES {set(PULSE_CATEGORIES)} != expected {EXPECTED_CATEGORY_URIS}"
         )
 
-    def test_pulse_categories_are_valid(self):
+    def test_politics_category_is_in_pulse_categories(self):
         """
-        PULSE_CATEGORIES must be non-empty and not include GENERAL_CATEGORY.
+        news/Politics must be in PULSE_CATEGORIES.
 
-        General is handled separately (with Keyword Sniper); including it in
-        PULSE_CATEGORIES would apply it twice in run_pulse().
+        This category was not available on TheNewsAPI — its presence here is
+        the key Phase 7A addition (M4, T7A.2 confirmed it returns articles).
         """
-        assert len(PULSE_CATEGORIES) > 0, "PULSE_CATEGORIES must not be empty"
-        assert GENERAL_CATEGORY not in PULSE_CATEGORIES, (
-            f"'{GENERAL_CATEGORY}' must not be in PULSE_CATEGORIES — "
-            "it is fetched separately with Keyword Sniper applied"
+        assert "news/Politics" in PULSE_CATEGORIES, (
+            "news/Politics must be in PULSE_CATEGORIES (Phase 7A, M4)"
         )
 
     def test_tier_one_source_ids_are_non_empty(self):
-        """TIER_ONE_SOURCE_IDS must be a non-empty list (used for backfill Tier 2)."""
+        """TIER_ONE_SOURCE_IDS (alias of TIER_ONE_DOMAINS) must be non-empty."""
         assert isinstance(TIER_ONE_SOURCE_IDS, list)
         assert len(TIER_ONE_SOURCE_IDS) > 0
 
     def test_tier_one_sources_are_subset_of_whitelist(self):
         """
-        Every domain in TIER_ONE_SOURCE_IDS (alias of TIER_ONE_DOMAINS in
-        Sprint 21.5) must appear in AUTHORITY_WHITELIST.
+        Every domain in TIER_ONE_DOMAINS must appear in AUTHORITY_WHITELIST.
 
-        Tier-1 domains are a strict subset of the authority whitelist
-        (Section B.4). A tier-1 domain not in the whitelist would be sent
-        to the API but then blocked by the client-side recheck — silently
-        dropping data.
+        Tier-1 domains are a strict subset of the authority whitelist (Section B.4).
+        A tier-1 domain not in the whitelist would be blocked by the client-side
+        recheck during backfill — silently dropping data.
         """
-        for domain in TIER_ONE_SOURCE_IDS:
+        for domain in TIER_ONE_DOMAINS:
             assert domain in AUTHORITY_WHITELIST, (
                 f"Tier-1 domain '{domain}' is not in AUTHORITY_WHITELIST — "
                 "it would be blocked by the client-side whitelist during backfill"
@@ -651,26 +595,24 @@ class TestConstantsInvariants:
 
     def test_build_raw_payload_produces_required_keys(self, producer_instance):
         """
-        _build_raw_payload() must normalize a TheNewsAPI article into all keys
-        the Silver Job needs for the Full-Text Document Store (Section C.3):
-        article_id, title, description, url, published_at, content, author,
-        source, category, fetch_mode, impact_boost, impact_boost_reason.
+        _build_raw_payload() must normalize a newsapi.ai article into all keys
+        the Silver Job needs for the Full-Text Document Store (Section C.3).
 
-        Sprint 21.5 input shape: TheNewsAPI articles use `image_url`,
-        `snippet`, `published_at` (snake_case), and `source` as a bare
-        domain string. The producer converts these to the internal contract.
+        Phase 7A input shape: newsapi.ai articles use `body` (full text),
+        `image`, `dateTime`, `source` as {uri, title} dict, `authors` as list.
+        The producer normalizes these into the unchanged internal contract.
         """
         article = {
-            "url":          "https://www.reuters.com/test-article",
-            "title":        "Test headline",
-            "description":  "Test description with interest rates.",
-            "image_url":    "",
-            "published_at": "2026-03-31T09:00:00Z",
-            "snippet":      "Test article snippet from TheNewsAPI.",
-            "source":       "reuters.com",
-            "categories":   ["business"],
+            "url":         "https://www.reuters.com/test-article",
+            "title":       "Test headline",
+            "description": "Test description with interest rates.",
+            "image":       "https://example.com/img.jpg",
+            "dateTime":    "2026-03-31T09:00:00Z",
+            "body":        "Full article body text from newsapi.ai, replacing snippet.",
+            "source":      {"uri": "reuters.com", "title": "Reuters"},
+            "authors":     [{"name": "John Smith", "uri": "john-smith"}],
         }
-        raw = producer_instance._build_raw_payload(article, "business", "pulse")
+        raw = producer_instance._build_raw_payload(article, "news/Business", "pulse")
 
         required_keys = {
             "article_id", "title", "description", "url", "published_at",
@@ -680,25 +622,88 @@ class TestConstantsInvariants:
         missing = required_keys - set(raw.keys())
         assert not missing, f"_build_raw_payload() missing keys: {missing}"
 
-        assert raw["article_id"] == "https://www.reuters.com/test-article"
-        assert raw["category"]   == "business"
-        assert raw["fetch_mode"] == "pulse"
+        # Core field mapping assertions (M7)
+        assert raw["article_id"]   == "https://www.reuters.com/test-article"
+        assert raw["category"]     == "news/Business"
+        assert raw["fetch_mode"]   == "pulse"
+        assert raw["published_at"] == "2026-03-31T09:00:00Z"
+        assert raw["url_to_image"] == "https://example.com/img.jpg"
         assert isinstance(raw["impact_boost"], bool)
         assert isinstance(raw["impact_boost_reason"], str)
 
-        # Sprint 21.5 normalisation invariants
+        # Phase 7A normalisation invariants
         assert raw["source"]["id"]   == "reuters", (
             "TLD-strip rule should produce source.id='reuters' for reuters.com"
         )
         assert raw["source"]["name"] == "Reuters", (
-            "DOMAIN_DISPLAY_NAMES lookup should produce source.name='Reuters'"
+            "source.title='Reuters' from API should be used as source.name (M7)"
         )
-        assert raw["author"] == "", (
-            "TheNewsAPI does not expose an author field; producer must set author=''"
+        assert raw["author"] == "John Smith", (
+            "authors[0].name should be extracted and used as author string"
         )
-        assert raw["content"] == "Test article snippet from TheNewsAPI.", (
-            "snippet must be normalised into the internal `content` field"
+        assert raw["content"] == "Full article body text from newsapi.ai, replacing snippet.", (
+            "newsapi.ai body must be normalised into the internal `content` field (M7)"
         )
+
+    def test_fetch_articles_uses_correct_params(self, producer_instance):
+        """
+        _fetch_articles() must send all required params for newsapi.ai (M5, M6).
+
+        Asserts: apiKey present, categoryUri present, sourceUri present (as
+        multiple separate params per domain — list-of-tuples format; CSV not
+        accepted by newsapi.ai per T7A.14 diagnostic), lang=eng, articlesPage,
+        articlesCount, resultType=articles, articleBodyLen=-1,
+        includeArticleBody=true, articlesSortBy=date (pulse mode).
+        """
+        with patch("ingestion.newsapi_producer.requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "articles": {"results": [], "totalResults": 0}
+            }
+            mock_resp.raise_for_status.return_value = None
+
+            with patch("ingestion.newsapi_producer.timed_request") as mock_timed:
+                mock_timed.side_effect = lambda fn: (fn(), 100)
+                mock_get.return_value = mock_resp
+
+                try:
+                    producer_instance._fetch_articles("news/Business")
+                except Exception:
+                    pass
+
+            if mock_get.called:
+                _, kwargs = mock_get.call_args
+                raw_params = kwargs.get("params", [])
+
+                # params is list-of-tuples — one entry per sourceUri domain.
+                # Build a set of keys and a first-match value lookup for scalars.
+                if isinstance(raw_params, list):
+                    param_keys = {k for k, _ in raw_params}
+                    def get_param(key):
+                        return next((v for k, v in raw_params if k == key), None)
+                else:
+                    param_keys = set(raw_params.keys())
+                    def get_param(key):
+                        return raw_params.get(key)
+
+                assert "apiKey"          in param_keys, "apiKey must be in request params (M2)"
+                assert "categoryUri"     in param_keys, "categoryUri must be in request params (M4)"
+                assert "articlesPage"    in param_keys, "articlesPage must be in params (M6)"
+                assert "articlesCount"   in param_keys, "articlesCount must be in params (M6)"
+                assert "sourceUri"       in param_keys, "sourceUri must be in params — one per domain (M3, T7A.14)"
+                assert get_param("lang")               == "eng",      "lang must be 'eng' (ISO 639-3, M5)"
+                assert get_param("resultType")         == "articles",  "resultType=articles required (M5)"
+                assert get_param("articleBodyLen")     == -1,          "articleBodyLen=-1 required (M5)"
+                assert get_param("includeArticleBody") == "true",      "includeArticleBody=true required (M5)"
+                assert get_param("articlesSortBy")     == "date",      "articlesSortBy=date required for pulse (M5)"
+
+                # Confirm sourceUri appears once per whitelisted domain
+                source_uri_values = [v for k, v in raw_params if k == "sourceUri"] if isinstance(raw_params, list) else []
+                if source_uri_values:
+                    assert len(source_uri_values) == len(set(source_uri_values)), \
+                        "Each sourceUri domain must appear exactly once"
+                    assert "reuters.com" in source_uri_values, \
+                        "reuters.com must be in sourceUri params (AUTHORITY_WHITELIST member)"
 
 
 # ==========================================================

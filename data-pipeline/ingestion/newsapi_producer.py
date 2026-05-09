@@ -1,71 +1,82 @@
 """
-NewsAPI Producer — TheNewsAPI REST, 15-30 min polling.
+NewsAPI Producer — newsapi.ai (Event Registry) REST, 15-30 min polling.
 
-Fetches top headlines from authority-whitelisted domains across Business,
-Tech, Health, Science, and General categories. Applies the Keyword Sniper
-pre-filter on the 'general' category before Bronze emission — only articles
-matching at least one keyword in GENERAL_KEYWORDS are forwarded. All other
-categories pass through the domain whitelist check only (server-side via
-TheNewsAPI's `domains` parameter, plus a defensive client-side recheck).
+Phase 7A migration (2026-05-09): replaced TheNewsAPI (api.thenewsapi.com) with
+newsapi.ai (eventregistry.org). The producer is the API-shape boundary (Section
+3.3 Service Isolation): all changes are confined to this file and its config/tests.
+Wire-protocol source_name="newsapi" and Kafka topic BRONZE_NEWSAPI are preserved —
+no schema migration, no downstream churn.
 
-Sprint 21.5 migration (2026-05-06): replaced newsapi.org with thenewsapi.com.
-Why: newsapi.org imposes a 24-hour delay on free/paid articles, blocking
-same-day signal for the RAG agent. TheNewsAPI returns real-time articles.
-The producer is the API-shape boundary (Section 3.3 Service Isolation):
-TheNewsAPI's response (data[] of articles with a domain-string `source` field
-and a `categories[]` array) is normalized into the same internal raw_payload
-contract Silver/Gold consumed before — preserving all downstream logic.
+Why newsapi.ai:
+    TheNewsAPI's `snippet` field is at most 60 chars, providing only a truncated
+    excerpt. newsapi.ai returns the full article body (articleBodyLen=-1),
+    which is required for Phase 7B's semantic rescue calibration and for the
+    hub's RAG drill-down path (knowledge_vault.full_text_raw, Section 8.3.1).
 
-Note on 'politics' category: TheNewsAPI does not expose a 'politics' category.
-Political content is captured via the 'general' category combined with the
-Keyword Sniper filter (Section 2.2).
+Category model (Phase 7A):
+    news/Politics added as an explicit category (was not available on TheNewsAPI;
+    political content was previously captured via the "general" bucket + the
+    GENERAL_KEYWORDS pre-filter, which raised both noise and false positives).
+    The "news" root category was tested live (T7A.2) and returns 0 results on
+    newsapi.ai — it is not a valid standalone category filter and is omitted.
+    GENERAL_KEYWORDS pre-filter removed from the producer: it existed only to
+    gate the noisy "news" root bucket, which no longer exists. All 5 categories
+    now pass through the authority whitelist uniformly (no per-category gating).
+    The GENERAL_KEYWORDS list itself is preserved in keyword_sniper.py for
+    reference; its removal from MASTER_KEYWORD_LIST is a Phase 7B decision.
+
+API shape changes (TheNewsAPI → newsapi.ai, decision M1-M9):
+    Endpoint:   /v1/news/top + /v1/news/all → single /api/v1/article/getArticles
+    Auth:       api_token= → apiKey=
+    Source:     domains= (csv) → sourceUri= (csv)
+                source field: bare domain string → {uri, title} dict
+    Categories: categories= (slug) → categoryUri= (URI notation)
+    Pagination: page/limit → articlesPage/articlesCount
+    Body:       snippet (60 char) → body (full text via articleBodyLen=-1)
+    Date:       published_at → dateTime
+    Image:      image_url → image
+    Authors:    absent → authors[] (list of objects with name/uri keys)
+
+Internal raw_payload contract (unchanged — Silver/Gold consume these verbatim):
+    article_id, title, description, url, url_to_image, published_at, content,
+    author, source.id, source.name, category, fetch_mode, impact_boost,
+    impact_boost_reason — all field names identical to the pre-7A contract.
 
 Two operating modes (Section 2.3 / B.4):
-  - pulse    (default) — one page of /v1/news/top per category per pulse run.
-                         Designed to be called every 15-30 min by an Airflow DAG.
-  - backfill            — tiered historical load via /v1/news/all:
+  - pulse    (default) — one page of getArticles per category per run.
+                         Called every 15-30 min by an Airflow DAG.
+  - backfill            — tiered historical load via date range params:
                            Tier 1: full density, 0-6 months, all authority domains
                            Tier 2: tier-1 domains only, 6-24 months
-                           Tier 3: tier-1 + keyword search, 2-5 years (anomaly events;
-                                   only executed if --keywords is supplied)
+                           Tier 3: tier-1 domains + keyword search, 2-5 years
 
 Why pre-filter at the producer (not only in Flink):
     Section 2.2 mandates "Only high-signal data enters Bronze Kafka topics."
-    Pushing noise into Bronze wastes Kafka retention, Silver processing cycles,
-    and Silver DLQ capacity. The whitelist + General Keyword Sniper gates are
-    cheap string operations; running them here costs nothing. The Silver Job's
-    keyword_sniper.py module applies a more sophisticated relevance-scoring pass
-    inside Flink (Section 4.1A).
+    The authority whitelist is a cheap domain-set lookup; running it here costs
+    nothing and prevents junk from consuming Kafka retention. Silver's
+    keyword_sniper.py applies full relevance scoring at the Flink layer (§4.1A).
 
-Why send `domains=<whitelist>` server-side instead of client-side filtering:
-    TheNewsAPI Free tier returns only 3 articles/request; client-side filtering
-    after the fact would waste the entire request budget on rejected articles.
-    Server-side `domains=` filter at the API layer guarantees every returned
-    article is from a whitelisted publisher — every article counts toward
-    high-signal Bronze emission. The defensive client-side `_passes_whitelist`
-    check is retained as an integrity guard (in case TheNewsAPI ever returns
-    an article whose `source` field is not on the whitelist).
+Why send sourceUri= server-side:
+    The API returns articles only from the declared source URIs — every returned
+    article is from a whitelisted publisher. The defensive client-side
+    _passes_whitelist recheck guards against any API-side slip.
 
-Why embed impact_boost flag in raw_payload:
-    Section B.4 requires a +1 boost to impact_level for Israeli/Middle East
-    security or energy articles. Embedding the boolean flag and matched keyword
-    at Bronze time makes the Gold Job stateless — it reads the flag rather than
-    re-scanning article text, keeping Section 3.3 Service Isolation intact.
+Why embed impact_boost in raw_payload:
+    Section B.4 requires +1 to impact_level for Israeli/Middle East security or
+    energy articles. Embedding the boolean flag at Bronze time makes the Gold Job
+    stateless — it reads the flag rather than re-scanning text (Section 3.3).
 
-Why source.id is derived by stripping the TLD from the domain:
-    TheNewsAPI's `source` is a bare domain string (e.g. "reuters.com"). The
-    Silver Job's SHA-256 dedup keys on the article URL, not on source.id, so
-    changing the source.id derivation rule does not break dedup. The TLD-strip
-    rule yields stable lowercase ids that group articles by publisher into the
-    same Kafka partition (matching the FRED producer's series_id keying pattern).
+Why source.id is derived by stripping the TLD from source.uri:
+    newsapi.ai's source.uri is a bare domain (e.g. "reuters.com", "bbc.co.uk").
+    The Silver Job's SHA-256 dedup keys on article URL, not source.id, so the
+    derivation rule has no effect on dedup. TLD-stripping yields stable lowercase
+    ids that group articles by publisher into the same Kafka partition.
 
 Partition key: source.id — groups articles by publisher into the same Kafka
-    partition. The Silver Job's SHA-256 dedup sees all articles from the same
-    source on the same consumer, making hash collision detection consistent.
-    Falls back to source.name if id is somehow absent.
+    partition. Falls back to source.name if id is absent.
 
 Kafka Target: ingest.bronze.newsapi (BRONZE_NEWSAPI)
-Source name on the wire: "newsapi" — preserved across the migration so that
+Source name on the wire: "newsapi" — preserved across all migrations so that
     Silver routing, knowledge_vault rows, and knowledge_vectors.source_platform
     stay stable; no schema migration required.
 
@@ -74,13 +85,13 @@ References:
     - Section 2.2:  SNR Optimization — Domain Filtering Strategy
     - Section 2.3:  Scheduled pollers — Airflow DAGs manage invocation
     - Section B.4:  NewsAPI technical parameters, Authority Whitelist,
-                    Keyword Sniper keywords, Tiered Backfill, Impact Boost
+                    Tiered Backfill, Impact Boost
     - Section C.1:  Bronze Schema (build_bronze_message wraps every payload)
     - Section C.3:  Silver Full-Text Document Store — fields this producer populates
     - Section 3.3:  Service Isolation — no transformation, no DB writes here
     - Section 3.4:  NDJSON serialisation (handled by kafka_utils.py)
-    - Section 4.1A: Keyword Sniper Filter (Silver-level; producer does pre-filter only)
-    - Section 9.1:  Environment parity — THE_NEWS_API_KEY from .env
+    - Section 4.1A: Keyword Sniper Filter (Silver-level; producer no longer pre-filters)
+    - Section 9.1:  Environment parity — NEWSAI_API_KEY from .env
 """
 
 from __future__ import annotations
@@ -93,7 +104,7 @@ from typing import Optional
 import requests
 
 from config.kafka_topics import BRONZE_NEWSAPI
-from config.settings import THE_NEWS_API_KEY, THE_NEWS_API_PAGE_SIZE
+from config.settings import NEWSAI_API_KEY, NEWSAI_BASE_URL, NEWSAI_PAGE_SIZE
 from utils.kafka_utils import build_bronze_message, make_producer, timed_request
 from utils.logging_config import setup_logging
 
@@ -102,46 +113,43 @@ setup_logging()
 
 
 # ==========================================================
-# TheNewsAPI Constants (Section B.4)
+# newsapi.ai Constants (Section B.4, Phase 7A)
 # ==========================================================
 
-# Wire-protocol source name. Preserved as "newsapi" across the
-# newsapi.org → thenewsapi.com migration so Silver routing and all
-# downstream knowledge_vault / knowledge_vectors rows stay stable.
+# Wire-protocol source name. Preserved as "newsapi" across all migrations so
+# Silver routing and all downstream knowledge_vault / knowledge_vectors rows
+# stay stable; no schema migration required.
 SOURCE_NAME = "newsapi"
 
-NEWSAPI_BASE_URL       = "https://api.thenewsapi.com/v1/news"
-TOP_HEADLINES_ENDPOINT = f"{NEWSAPI_BASE_URL}/top"   # /v1/news/top — replaces /v2/top-headlines
-EVERYTHING_ENDPOINT    = f"{NEWSAPI_BASE_URL}/all"   # /v1/news/all — replaces /v2/everything
+NEWSAI_GETARTICLES_URL = f"{NEWSAI_BASE_URL}/article/getArticles"
 
-# Articles returned per request. Driven by env var:
-#   THE_NEWS_API_PAGE_SIZE=3   → Free tier (dev/testing)
-#   THE_NEWS_API_PAGE_SIZE=100 → Basic tier (production)
-PAGE_SIZE = THE_NEWS_API_PAGE_SIZE
+# Articles returned per request. Driven by env var NEWSAI_PAGE_SIZE.
+# Default 10 — newsapi.ai free tier tolerates this. Raise in prod .env.
+PAGE_SIZE = NEWSAI_PAGE_SIZE
 
-# Inter-request delay. TheNewsAPI Basic plan tolerates ~1 req/s sustained;
-# matches the previous newsapi.org cadence so the DAG behavior is unchanged.
+# Inter-request delay. Matches the previous cadence so DAG behavior is unchanged.
 REQUEST_DELAY_SEC = 1.0
 
-# Categories fetched in pulse mode via /v1/news/top.
-# TheNewsAPI uses 'tech' (not 'technology'); other names match newsapi.org's.
-PULSE_CATEGORIES = ["business", "tech", "health", "science"]
-
-# The 'general' category is fetched separately and also keyword-sniped
-# because it mixes high- and low-signal content.
-GENERAL_CATEGORY = "general"
+# Category URIs confirmed via T7A.2 live validation (all 5 return articles
+# with full body). "news" root omitted — returns 0 results on newsapi.ai (T7A.2).
+# GENERAL_KEYWORDS pre-filter removed — it gated the "news" root bucket only,
+# which no longer exists. All 5 categories pass through uniformly.
+PULSE_CATEGORIES: list[str] = [
+    "news/Business",
+    "news/Technology",
+    "news/Health",
+    "news/Science",
+    "news/Politics",
+]
 
 
 # ==========================================================
 # Authority Whitelist — Domains (Section B.4)
 # ==========================================================
-# Matched against TheNewsAPI's `source` field (a bare domain string), and
-# also passed server-side via the `domains` query parameter so the API only
-# returns articles already on the whitelist. The client-side recheck is a
-# defensive integrity guard — see module docstring.
-#
-# Removed in Sprint 21.5: i24news.tv (not on TheNewsAPI), timesofisrael.com
-# (not on TheNewsAPI), kan11/Kan 11 (no domain on TheNewsAPI).
+# Matched against newsapi.ai's source.uri field (a bare domain string) and
+# also sent server-side via sourceUri= so the API only returns articles from
+# whitelisted publishers. The client-side recheck is a defensive integrity
+# guard — see _passes_whitelist and module docstring.
 
 AUTHORITY_WHITELIST: frozenset[str] = frozenset({
     # --- Global wire & financial press ---
@@ -167,12 +175,9 @@ AUTHORITY_WHITELIST: frozenset[str] = frozenset({
 # ==========================================================
 # Domain → Display Name Mapping (Section B.4)
 # ==========================================================
-# Used to populate `raw_payload.source.name` so the Silver Job's
-# knowledge_vault rows retain a human-readable publisher field.
-# Why this lookup: TheNewsAPI exposes only the domain — there is no display
-# name in its response shape, unlike newsapi.org which returned source.name.
-# Keeping the display-name string preserves UX downstream (RAG citations,
-# knowledge_vault.source_publisher rendering).
+# Used as a fallback to populate raw_payload.source.name when newsapi.ai's
+# source.title field is absent. Preserves human-readable publisher names for
+# knowledge_vault rows and RAG citations. Prefer source.title when present (M7).
 
 DOMAIN_DISPLAY_NAMES: dict[str, str] = {
     "reuters.com":         "Reuters",
@@ -197,8 +202,7 @@ DOMAIN_DISPLAY_NAMES: dict[str, str] = {
 # Tier-1 Backfill Domains (Section B.4)
 # ==========================================================
 # Subset of the full whitelist used for the 6-24 month backfill window.
-# Highest-reliability global wire/financial sources only. Direct domain
-# translation of the previous TIER_ONE_SOURCE_IDS list (Sprint 21.5).
+# Highest-reliability global wire/financial sources only.
 
 TIER_ONE_DOMAINS: list[str] = [
     "reuters.com",
@@ -210,28 +214,6 @@ TIER_ONE_DOMAINS: list[str] = [
     "bbc.co.uk",
     "ft.com",
 ]
-
-
-# ==========================================================
-# Keyword Sniper — General Category Pre-filter (Section B.4)
-# ==========================================================
-# A General-category article is emitted to Bronze only if its title OR
-# description contains at least one of these keywords (case-insensitive).
-# This matches the spec keywords exactly.
-# Full relevance scoring (density + position weights) is handled by
-# processing/keyword_sniper.py at the Silver Flink layer (Section 4.1A).
-
-GENERAL_KEYWORDS: frozenset[str] = frozenset({
-    "conflict",
-    "sanctions",
-    "crude oil",
-    "opec",
-    "missile defense",
-    "interest rates",
-    "ai regulation",
-    "nato",
-    "central bank",
-})
 
 
 # ==========================================================
@@ -262,12 +244,10 @@ BACKFILL_MAX_YEARS       = 5     # Tier 3: anomaly scan upper bound (years from 
 # ==========================================================
 # Domain → source.id Derivation
 # ==========================================================
-# Why TLD-stripping: TheNewsAPI's `source` field is the bare publisher domain
-# (e.g. "reuters.com", "bbc.co.uk"). The Silver Job's SHA-256 dedup keys on
-# the article URL — not on source.id — so the chosen derivation rule has no
-# functional effect on dedup. We strip the public TLD to produce a stable
-# lowercase id (reuters.com → reuters, bbc.co.uk → bbc, ynet.co.il → ynet)
-# that groups articles by publisher into the same Kafka partition.
+# newsapi.ai's source.uri is the bare publisher domain (e.g. "reuters.com",
+# "bbc.co.uk"). We strip the public TLD to produce a stable lowercase id
+# (reuters.com → reuters, bbc.co.uk → bbc, ynet.co.il → ynet) that groups
+# articles by publisher into the same Kafka partition.
 
 def _domain_to_source_id(domain: str) -> str:
     """
@@ -280,7 +260,6 @@ def _domain_to_source_id(domain: str) -> str:
     """
     if not domain:
         return ""
-    # Leftmost label is the brand: "bbc.co.uk" → "bbc", "reuters.com" → "reuters".
     return domain.split(".", 1)[0]
 
 
@@ -290,30 +269,32 @@ def _domain_to_source_id(domain: str) -> str:
 
 class NewsAPIProducer:
     """
-    Scheduled REST producer for TheNewsAPI top headlines.
+    Scheduled REST producer for newsapi.ai (Event Registry) articles.
 
-    Pulse mode polls /v1/news/top every 15-30 min for each category, with the
-    full authority whitelist sent server-side via the `domains` parameter.
-    Backfill mode crawls /v1/news/all across three date-range tiers.
+    Pulse mode polls /api/v1/article/getArticles every 15-30 min for each of
+    the 5 explicit category URIs, with the full authority whitelist sent
+    server-side via sourceUri=. All categories are treated uniformly — no
+    per-category keyword pre-filtering (Phase 7A finding: the "news" root
+    bucket that warranted the GENERAL_KEYWORDS gate no longer exists).
+
+    Backfill mode crawls the same endpoint across three date-range tiers.
 
     Both modes apply the authority whitelist (server-side filter + defensive
-    client-side recheck); only the General category additionally requires a
-    Keyword Sniper hit before Bronze emission.
+    client-side recheck via _passes_whitelist).
 
     Emits to: ingest.bronze.newsapi (BRONZE_NEWSAPI)
     """
 
     def __init__(self) -> None:
-        if not THE_NEWS_API_KEY:
+        if not NEWSAI_API_KEY:
             raise ValueError(
-                "[newsapi] THE_NEWS_API_KEY not set in .env — cannot authenticate. "
-                "Set THE_NEWS_API_KEY to your thenewsapi.com api_token (Section B.4)."
+                "[newsapi] NEWSAI_API_KEY not set in .env — cannot authenticate. "
+                "Set NEWSAI_API_KEY to your eventregistry.org api key (Section B.4)."
             )
         self._producer = make_producer()
-        # Running totals for the summary log (reset each run_pulse / run_backfill call)
+        # Running totals — reset each run_pulse / run_backfill call
         self._emitted            = 0
         self._filtered_whitelist = 0
-        self._filtered_keyword   = 0
 
     # ----------------------------------------------------------
     # Filters (Section 2.2, B.4)
@@ -321,40 +302,25 @@ class NewsAPIProducer:
 
     def _passes_whitelist(self, article: dict) -> bool:
         """
-        Return True if the article's source domain is on the authority whitelist.
+        Return True if the article's source.uri is on the authority whitelist.
 
-        TheNewsAPI's `source` field is a bare domain string. The check is
-        case-insensitive and trims whitespace to guard against minor formatting
-        differences across API responses. This is a defensive recheck of the
-        server-side `domains=` filter (see module docstring).
+        newsapi.ai returns source as a dict with a uri key (e.g. "reuters.com").
+        This differs from TheNewsAPI's bare domain string — the check now reads
+        article["source"]["uri"] (M3). Case-insensitive; strips whitespace.
+        Defensive client-side recheck of the server-side sourceUri= filter.
         """
-        domain = (article.get("source") or "").strip().lower()
+        source = article.get("source") or {}
+        domain = (source.get("uri") or "").strip().lower()
         return domain in AUTHORITY_WHITELIST
-
-    def _passes_keyword_sniper(self, article: dict) -> bool:
-        """
-        Return True if the article's title or description contains at least one
-        GENERAL_KEYWORDS term. Applied to General category only (Section B.4).
-
-        Why title + description (not full content): the producer pre-filter needs
-        only a fast yes/no decision. TheNewsAPI's `snippet` field is a short
-        excerpt, not full content, making it less reliable than title+description
-        for this gate. The Silver Job's keyword_sniper.py applies full relevance
-        scoring on the complete document body inside Flink (Section 4.1A).
-        """
-        text = " ".join(filter(None, [
-            article.get("title")       or "",
-            article.get("description") or "",
-        ])).lower()
-        return any(kw in text for kw in GENERAL_KEYWORDS)
 
     def _impact_boost_info(self, article: dict) -> tuple[bool, str]:
         """
         Return (needs_boost, matched_term) based on IMPACT_BOOST_TERMS scan.
 
-        Why first-match only: the Gold Job needs a boolean flag and a single
-        human-readable reason for audit trails; scanning all terms is unnecessary.
-        If multiple terms match, the first encountered is stored as boost_reason.
+        Reads title and description — same field names in newsapi.ai as in
+        TheNewsAPI (T7A.7 verification: no code change needed). First-match
+        only: the Gold Job needs a boolean flag and a single human-readable
+        reason for audit trails.
         """
         text = " ".join(filter(None, [
             article.get("title")       or "",
@@ -366,134 +332,100 @@ class NewsAPIProducer:
         return False, ""
 
     # ----------------------------------------------------------
-    # TheNewsAPI REST Fetch
+    # newsapi.ai REST Fetch (Section B.4, M1, M5, M6)
     # ----------------------------------------------------------
 
-    def _whitelist_domains_param(self) -> str:
-        """
-        Build the comma-separated `domains=` parameter from AUTHORITY_WHITELIST.
-
-        Why pre-built once: TheNewsAPI accepts the full domain list per request,
-        and serializing the frozenset on every call would be wasteful. Sorted
-        deterministically so log output and request signatures are stable.
-        """
-        return ",".join(sorted(AUTHORITY_WHITELIST))
-
-    def _fetch_top_headlines(
+    def _fetch_articles(
         self,
         category: str,
         page: int = 1,
-    ) -> tuple[list[dict], int, int]:
-        """
-        Fetch one page of /v1/news/top for a given category.
-
-        Why no `locale` filter: the authority whitelist already constrains the
-        publisher set to English-language outlets we trust. Adding locale=us
-        would drop UK and Israeli sources that are explicitly on the whitelist.
-
-        Why `language=en`: ensures non-English wire copies of the same article
-        (e.g. Hebrew Ynet articles) do not leak into Bronze; downstream NLP
-        operates on English. Translation is scoped to Telegram only (§4.1D).
-
-        Args:
-            category: TheNewsAPI category string ("business", "tech", "health",
-                      "science", "general").
-            page:     1-indexed page number.
-
-        Returns:
-            (articles, total_results, duration_ms)
-
-        Raises:
-            requests.HTTPError: On non-2xx responses.
-            requests.RequestException: On network failures.
-        """
-        params: dict = {
-            "api_token":  THE_NEWS_API_KEY,
-            "categories": category,
-            "domains":    self._whitelist_domains_param(),
-            "language":   "en",
-            "limit":      PAGE_SIZE,
-            "page":       page,
-        }
-        response, duration_ms = timed_request(
-            lambda: requests.get(TOP_HEADLINES_ENDPOINT, params=params, timeout=20)
-        )
-        response.raise_for_status()
-
-        data          = response.json()
-        articles      = data.get("data") or []
-        meta          = data.get("meta") or {}
-        total_results = meta.get("found") or 0
-
-        logger.debug(
-            "[newsapi] /top categories=%s page=%d — %d articles "
-            "(found=%d, %dms)",
-            category, page, len(articles), total_results, duration_ms,
-        )
-        return articles, total_results, duration_ms
-
-    def _fetch_everything(
-        self,
-        from_date: str,
-        to_date: str,
+        date_start: Optional[str] = None,
+        date_end: Optional[str] = None,
         domains: Optional[list[str]] = None,
         keywords: Optional[str] = None,
-        page: int = 1,
     ) -> tuple[list[dict], int, int]:
         """
-        Fetch one page from /v1/news/all — used for tiered backfill.
+        Fetch one page from eventregistry.org/api/v1/article/getArticles.
 
-        Why `published_after` / `published_before`: TheNewsAPI's date-range
-        parameters on the /all endpoint. Replaces newsapi.org's `from` / `to`.
+        Single method replaces _fetch_top_headlines + _fetch_everything (M1).
+        The endpoint and all required params are the same regardless of mode;
+        only date range, articlesSortBy, and optional keyword search differ.
 
-        Why `search` (not `q`): TheNewsAPI's keyword query parameter name.
-        Same Boolean OR/AND syntax as before, e.g. "oil crisis OR NATO".
+        Why single endpoint: newsapi.ai uses getArticles for all query types.
+        Pulse mode adds articlesSortBy=date for recency-ordered results.
+        Backfill mode adds dateStart/dateEnd; articlesSortBy is omitted so the
+        API applies its natural date-range pagination order (M5).
 
-        Why `language=en`: see _fetch_top_headlines.
+        Why lang=eng (ISO 639-3): ensures non-English wire copies of the same
+        article do not leak into Bronze. Downstream NLP operates on English.
+
+        Why articleBodyLen=-1: requests the full body. Free tier may silently
+        cap this; document as a known gap per M9 if so.
+
+        Why sourceUri as multiple separate params (not CSV): newsapi.ai does not
+        accept a comma-separated string for sourceUri — each domain must be sent
+        as a separate query parameter. Validated via diagnostic call (T7A.14).
+        This is why params is a list-of-tuples rather than a dict.
 
         Args:
-            from_date: ISO date "YYYY-MM-DD" (inclusive).
-            to_date:   ISO date "YYYY-MM-DD" (inclusive).
-            domains:   List of TheNewsAPI domains. None = full authority whitelist
-                       sent server-side.
-            keywords:  Optional keyword query string for the `search` parameter.
-            page:      1-indexed page number.
+            category:   newsapi.ai categoryUri string (e.g. "news/Business").
+                        Empty string for backfill — omits categoryUri from params.
+            page:       1-indexed page number.
+            date_start: ISO date "YYYY-MM-DD" for backfill (dateStart param).
+            date_end:   ISO date "YYYY-MM-DD" for backfill (dateEnd param).
+            domains:    Domain list for sourceUri override (Tier 2/3 backfill).
+                        None = full authority whitelist.
+            keywords:   Optional keyword query string for backfill anomaly tier.
 
         Returns:
             (articles, total_results, duration_ms)
         """
-        domains_param = ",".join(domains) if domains else self._whitelist_domains_param()
-        params: dict = {
-            "api_token":        THE_NEWS_API_KEY,
-            "domains":          domains_param,
-            "published_after":  from_date,
-            "published_before": to_date,
-            "language":         "en",
-            "limit":            PAGE_SIZE,
-            "page":             page,
-        }
+        domain_list = domains if domains is not None else sorted(AUTHORITY_WHITELIST)
+
+        # List-of-tuples so requests sends one sourceUri param per domain.
+        # newsapi.ai requires this format — CSV is not accepted (T7A.14 finding).
+        params: list[tuple] = [
+            ("apiKey",             NEWSAI_API_KEY),
+            ("lang",               "eng"),
+            ("articlesPage",       page),
+            ("articlesCount",      PAGE_SIZE),
+            ("resultType",         "articles"),
+            ("articleBodyLen",     -1),
+            ("includeArticleBody", "true"),
+        ]
+        for domain in domain_list:
+            params.append(("sourceUri", domain))
+        if category:
+            params.append(("categoryUri", category))
+        # Pulse mode: sort by date for recency; backfill: omit and let API paginate
+        if date_start is None and date_end is None:
+            params.append(("articlesSortBy", "date"))
+        if date_start:
+            params.append(("dateStart", date_start))
+        if date_end:
+            params.append(("dateEnd", date_end))
         if keywords:
-            params["search"] = keywords
+            params.append(("keyword", keywords))
 
         response, duration_ms = timed_request(
-            lambda: requests.get(EVERYTHING_ENDPOINT, params=params, timeout=30)
+            lambda: requests.get(NEWSAI_GETARTICLES_URL, params=params, timeout=20)
         )
         response.raise_for_status()
 
-        data          = response.json()
-        articles      = data.get("data") or []
-        meta          = data.get("meta") or {}
-        total_results = meta.get("found") or 0
+        data           = response.json()
+        articles_block = data.get("articles") or {}
+        articles       = articles_block.get("results") or []
+        total_results  = articles_block.get("totalResults") or 0
 
         logger.debug(
-            "[newsapi] /all from=%s to=%s page=%d — %d articles "
+            "[newsapi] getArticles category=%r page=%d — %d articles "
             "(found=%d, %dms)",
-            from_date, to_date, page, len(articles), total_results, duration_ms,
+            category or "<all>", page, len(articles), total_results, duration_ms,
         )
         return articles, total_results, duration_ms
 
     # ----------------------------------------------------------
-    # Payload Builder — TheNewsAPI → Internal raw_payload Contract
+    # Payload Builder — newsapi.ai → Internal raw_payload Contract
     # ----------------------------------------------------------
 
     def _build_raw_payload(
@@ -503,60 +435,79 @@ class NewsAPIProducer:
         fetch_mode: str,
     ) -> dict:
         """
-        Construct the raw_payload dict for one TheNewsAPI article.
+        Construct the raw_payload dict for one newsapi.ai article.
 
         This method is the API-shape boundary (Section 3.3 Service Isolation):
-        TheNewsAPI's response shape (data[i] with `image_url`, `snippet`,
-        `source` as a domain string, `categories[]` as an array) is normalized
-        into the same internal contract Silver/Gold consumed before the Sprint
-        21.5 migration — preserving downstream logic verbatim (Decision D1).
+        newsapi.ai's response shape is normalized into the same internal contract
+        Silver/Gold consumed before the Phase 7A migration — preserving all
+        downstream logic verbatim.
 
-        Field mapping (TheNewsAPI → internal):
+        Field mapping (newsapi.ai → internal raw_payload):
             url           → article_id (canonical SHA-256 dedup key, §4.1C)
             title         → title
             description   → description
             url           → url
-            image_url     → url_to_image
-            published_at  → published_at (ISO8601, pass-through)
-            snippet       → content (short excerpt; TheNewsAPI has no full body)
-            (none)        → author = "" (TheNewsAPI does not expose author)
-            source domain → source.id (TLD-stripped) + source.name (display lookup)
-            categories[0] → category (override only if no fetch-time category)
+            image         → url_to_image
+            dateTime      → published_at (ISO8601 pass-through)
+            body          → content (full text — key improvement over TheNewsAPI
+                            snippet; populates knowledge_vault.full_text_raw)
+            authors[]     → author (name/uri extracted per element; joined ", ")
+            source.uri    → source.id (TLD-stripped via _domain_to_source_id)
+            source.title  → source.name (prefer source.title from API; fall back
+                            to DOMAIN_DISPLAY_NAMES lookup; final fallback: bare
+                            domain — preserves human-readable publisher for RAG
+                            citations on any article the lookup table misses)
 
-        Why pass-through behavior on `categories`: TheNewsAPI returns an array
-        of category labels per article. We use the fetch-time category from the
-        producer call (which is the gate that selected this article) and store
-        it in the same internal `category` field; this preserves the contract
-        used by the Silver Job and Gate 2 tests.
+        Why prefer source.title over DOMAIN_DISPLAY_NAMES:
+            newsapi.ai returns the publisher's display name directly in the API
+            response. DOMAIN_DISPLAY_NAMES is retained as a fallback for the
+            rare case where source.title is absent (e.g. obscure resyndication).
 
-        Why content may be a short snippet: TheNewsAPI's `snippet` field is a
-        truncated excerpt, similar to newsapi.org's truncated `content`. The
-        Silver Job stores the description as inverted_pyramid_lead and uses
-        the URL for the full-body scraper that runs downstream (Sprint 15+).
+        Why authors[] extraction handles both dicts and strings:
+            Event Registry's authors field returns a list of author objects
+            ({name, uri, ...}), but the schema is loose — a plain string may
+            appear in edge cases. Handling both avoids a TypeError on join().
 
         Args:
-            article:    Raw article dict from TheNewsAPI's data[] array.
-            category:   Category string used to fetch this article ("business",
-                        "general", etc.). Empty string for backfill articles
-                        (fetched via /v1/news/all with no category filter).
+            article:    Raw article dict from newsapi.ai's articles.results[].
+            category:   categoryUri used to fetch this article (e.g.
+                        "news/Business"). Empty string for backfill articles.
             fetch_mode: "pulse" | "backfill_full" | "backfill_tier_one" |
                         "backfill_anomaly"
         """
-        domain        = (article.get("source") or "").strip().lower()
-        source_id     = _domain_to_source_id(domain)
-        source_name   = DOMAIN_DISPLAY_NAMES.get(domain, domain)
+        source_dict  = article.get("source") or {}
+        domain       = (source_dict.get("uri") or "").strip().lower()
+        source_id    = _domain_to_source_id(domain)
+        source_name  = (
+            source_dict.get("title")
+            or DOMAIN_DISPLAY_NAMES.get(domain)
+            or domain
+        )
+
+        # Extract author names — authors[] may contain dicts or bare strings
+        authors_raw  = article.get("authors") or []
+        author_parts: list[str] = []
+        for a in authors_raw:
+            if isinstance(a, dict):
+                name = a.get("name") or a.get("uri") or ""
+                if name:
+                    author_parts.append(name)
+            elif isinstance(a, str) and a:
+                author_parts.append(a)
+        author = ", ".join(author_parts)
+
         boost, reason = self._impact_boost_info(article)
 
         return {
-            # Core article fields (normalized from TheNewsAPI shape)
+            # Core article fields (normalized from newsapi.ai shape)
             "article_id":    article.get("url") or "",
             "title":         article.get("title") or "",
             "description":   article.get("description") or "",
             "url":           article.get("url") or "",
-            "url_to_image":  article.get("image_url") or "",
-            "published_at":  article.get("published_at") or "",
-            "content":       article.get("snippet") or "",
-            "author":        "",  # TheNewsAPI does not expose author
+            "url_to_image":  article.get("image") or "",
+            "published_at":  article.get("dateTime") or "",
+            "content":       article.get("body") or "",
+            "author":        author,
             "source": {
                 "id":   source_id,
                 "name": source_name,
@@ -577,21 +528,17 @@ class NewsAPIProducer:
         Wrap raw_payload in a Bronze envelope and publish to ingest.bronze.newsapi.
 
         Partition key: source.id — falls back to source.name if id is absent.
-        All articles from the same publisher land in the same Kafka partition,
-        ensuring the Silver Job's dedup logic sees them together (consistent
-        with series_id keying in the FRED producer).
-
-        Args:
-            raw_payload:  Dict produced by _build_raw_payload().
-            duration_ms:  HTTP request duration to include in Bronze metadata.
+        Endpoint logged in metadata reflects the actual API call (M1: single
+        endpoint for all modes).
         """
-        source = raw_payload["source"]
+        source        = raw_payload["source"]
         partition_key = source["id"] or source["name"] or "unknown"
+        category      = raw_payload.get("category", "")
 
         endpoint = (
-            f"{TOP_HEADLINES_ENDPOINT}?categories={raw_payload['category']}"
+            f"{NEWSAI_GETARTICLES_URL}?categoryUri={category}"
             if raw_payload["fetch_mode"] == "pulse"
-            else EVERYTHING_ENDPOINT
+            else NEWSAI_GETARTICLES_URL
         )
 
         msg = build_bronze_message(
@@ -616,26 +563,23 @@ class NewsAPIProducer:
         duration_ms: int,
     ) -> int:
         """
-        Apply whitelist + keyword sniper, build payload, emit passing articles.
+        Apply authority whitelist, build payload, emit passing articles.
 
-        Keyword Sniper is applied only when category == GENERAL_CATEGORY (Section B.4).
-        All other categories — including the empty-string category used for backfill
-        articles — pass through the whitelist check only.
+        All categories pass through the whitelist check uniformly — no
+        per-category keyword pre-filtering. The GENERAL_KEYWORDS gate was
+        removed in Phase 7A because the "news" root bucket (which needed it)
+        returns 0 results on newsapi.ai (T7A.2 finding). Silver's
+        keyword_sniper.py applies full relevance scoring at the Flink layer
+        (Section 4.1A).
 
         Returns:
             Count of articles emitted to Bronze in this call.
         """
         emitted = 0
         for article in articles:
-            # Gate 1 — Authority whitelist (defensive client-side recheck of
-            # the server-side `domains=` filter; Section B.4)
+            # Authority whitelist — defensive client-side recheck of sourceUri= (B.4)
             if not self._passes_whitelist(article):
                 self._filtered_whitelist += 1
-                continue
-
-            # Gate 2 — Keyword Sniper on General category only (Section B.4)
-            if category == GENERAL_CATEGORY and not self._passes_keyword_sniper(article):
-                self._filtered_keyword += 1
                 continue
 
             raw_payload = self._build_raw_payload(article, category, fetch_mode)
@@ -650,34 +594,30 @@ class NewsAPIProducer:
 
     def run_pulse(self) -> int:
         """
-        Fetch and emit one page of /v1/news/top for all pulse categories.
+        Fetch and emit one page of getArticles for all 5 pulse categories.
 
-        Designed to be called every 15-30 min by an Airflow DAG (Section 2.3 / B.4).
-        PAGE_SIZE per category covers the typical inter-run article volume on the
-        Basic plan (limit=100). On the Free plan (limit=3) the volume is small but
-        sufficient for dev/testing — overflow is implicitly captured on the next run.
+        Designed to be called every 15-30 min by an Airflow DAG (Section 2.3).
+        All categories are treated uniformly — the whitelist server-side filter
+        ensures every returned article is from a whitelisted publisher.
 
         Returns:
             Total number of Bronze messages emitted.
         """
-        self._emitted = self._filtered_whitelist = self._filtered_keyword = 0
+        self._emitted = self._filtered_whitelist = 0
 
         logger.info(
-            "[newsapi] Pulse run starting — %d standard categories + general "
-            "(keyword-sniped); page_size=%d",
+            "[newsapi] Pulse run starting — %d categories; page_size=%d",
             len(PULSE_CATEGORIES), PAGE_SIZE,
         )
 
-        all_categories = PULSE_CATEGORIES + [GENERAL_CATEGORY]
-        for category in all_categories:
+        for category in PULSE_CATEGORIES:
             try:
-                articles, _, duration_ms = self._fetch_top_headlines(category)
+                articles, _, duration_ms = self._fetch_articles(category)
                 emitted = self._process_and_emit(articles, category, "pulse", duration_ms)
                 logger.info(
-                    "[newsapi] category=%-12s fetched=%d  emitted=%d  "
-                    "wl_filtered=%d  kw_filtered=%d",
-                    category, len(articles), emitted,
-                    self._filtered_whitelist, self._filtered_keyword,
+                    "[newsapi] category=%-20s fetched=%d  emitted=%d  "
+                    "wl_filtered=%d",
+                    category, len(articles), emitted, self._filtered_whitelist,
                 )
             except requests.HTTPError as exc:
                 logger.error(
@@ -696,9 +636,8 @@ class NewsAPIProducer:
 
         self._producer.flush()
         logger.info(
-            "[newsapi] Pulse run complete — emitted=%d  "
-            "wl_filtered=%d  kw_filtered=%d",
-            self._emitted, self._filtered_whitelist, self._filtered_keyword,
+            "[newsapi] Pulse run complete — emitted=%d  wl_filtered=%d",
+            self._emitted, self._filtered_whitelist,
         )
         return self._emitted
 
@@ -715,37 +654,36 @@ class NewsAPIProducer:
         keywords: Optional[str] = None,
     ) -> int:
         """
-        Paginate through /v1/news/all for one date range and emit passing articles.
+        Paginate through getArticles for one date range and emit passing articles.
 
         Pagination continues until either the last page is reached (fewer articles
-        returned than PAGE_SIZE) or TheNewsAPI returns an empty page. TheNewsAPI's
-        `meta.found` total is used to detect the final page deterministically.
+        returned than PAGE_SIZE) or the API returns an empty page.
 
         Args:
             from_date:  Inclusive start date.
             to_date:    Inclusive end date.
-            domains:    List of TheNewsAPI domains to filter by. None = full
-                        authority whitelist (server-side).
+            domains:    Domain list for sourceUri override. None = full whitelist.
             tier_name:  Label for log messages ("full", "tier_one", "anomaly").
-            keywords:   Optional `search` query string.
+            keywords:   Optional keyword query for anomaly tier.
 
         Returns:
             Number of articles emitted for this date range.
         """
-        from_str   = from_date.isoformat()
-        to_str     = to_date.isoformat()
-        fetch_mode = f"backfill_{tier_name}"
-        page       = 1
+        from_str      = from_date.isoformat()
+        to_str        = to_date.isoformat()
+        fetch_mode    = f"backfill_{tier_name}"
+        page          = 1
         range_emitted = 0
 
         while True:
             try:
-                articles, total_results, duration_ms = self._fetch_everything(
-                    from_date=from_str,
-                    to_date=to_str,
+                articles, total_results, duration_ms = self._fetch_articles(
+                    category="",   # backfill: no category filter
+                    page=page,
+                    date_start=from_str,
+                    date_end=to_str,
                     domains=domains,
                     keywords=keywords,
-                    page=page,
                 )
             except requests.HTTPError as exc:
                 logger.error(
@@ -765,7 +703,6 @@ class NewsAPIProducer:
             if not articles:
                 break
 
-            # Category is empty string for backfill — no keyword sniper applied
             emitted = self._process_and_emit(articles, "", fetch_mode, duration_ms)
             range_emitted += emitted
 
@@ -775,7 +712,6 @@ class NewsAPIProducer:
                 tier_name, from_str, page, emitted, range_emitted,
             )
 
-            # Stop if this is the last page
             is_last_page = len(articles) < PAGE_SIZE or page * PAGE_SIZE >= total_results
             if is_last_page:
                 break
@@ -791,28 +727,21 @@ class NewsAPIProducer:
 
         Tier 1 — Full density (0-6 months):
             All authority domains via the full whitelist server-side.
-            Covers recent high-density period.
 
         Tier 2 — Tier-1 domains (6-24 months):
             Restricted to TIER_ONE_DOMAINS (top 8 global wire/financial sources).
-            Reduces data volume for the older period while preserving
-            authoritative coverage of major events.
 
-        Tier 3 — Anomaly events (2-5 years):
+        Tier 3 — Anomaly events (2-5 years) — optional:
             Only executed if `keywords` argument is supplied.
-            Uses tier-1 domain list + `search` query to surface major
-            geopolitical or market-anomaly events (e.g. "oil crisis OR NATO").
-            Skipped if no keywords provided — anomaly dates vary by use case
-            and should be supplied by the operator at backfill invocation time.
 
         Args:
             keywords: Keyword query string for the anomaly-tier scan (Tier 3).
-                      If None, Tier 3 is skipped and a warning is logged.
+                      If None, Tier 3 is skipped.
 
         Returns:
             Total number of Bronze messages emitted.
         """
-        self._emitted = self._filtered_whitelist = self._filtered_keyword = 0
+        self._emitted = self._filtered_whitelist = 0
         today = date.today()
         total = 0
 
@@ -846,7 +775,7 @@ class NewsAPIProducer:
             anomaly_end   = tier1_start - timedelta(days=1)
             anomaly_start = today - timedelta(days=BACKFILL_MAX_YEARS * 365)
             logger.info(
-                "[newsapi] Backfill Tier 3 (anomaly events): %s → %s — keywords='%s'",
+                "[newsapi] Backfill Tier 3 (anomaly events): %s → %s — keywords=%r",
                 anomaly_start.isoformat(), anomaly_end.isoformat(), keywords,
             )
             total += self._backfill_date_range(
@@ -863,8 +792,8 @@ class NewsAPIProducer:
 
         self._producer.flush()
         logger.info(
-            "[newsapi] Backfill complete — emitted=%d  wl_filtered=%d  kw_filtered=%d",
-            self._emitted, self._filtered_whitelist, self._filtered_keyword,
+            "[newsapi] Backfill complete — emitted=%d  wl_filtered=%d",
+            self._emitted, self._filtered_whitelist,
         )
         return self._emitted
 
@@ -878,7 +807,7 @@ class NewsAPIProducer:
 
         Must be called in the finally block of main() to prevent message loss —
         kafka-python-ng buffers messages in memory and flush() forces a
-        synchronous drain before exit (same pattern as fred_producer.py).
+        synchronous drain before exit.
         """
         self._producer.flush()
         self._producer.close()
@@ -886,12 +815,15 @@ class NewsAPIProducer:
 
 
 # ==========================================================
-# Backwards-compatibility export — TIER_ONE_SOURCE_IDS
+# Backwards-compatibility exports — removed in T7A.16 cleanup
 # ==========================================================
-# Retained as an alias of TIER_ONE_DOMAINS to avoid breaking any test or
-# import that still references the pre-Sprint-21.5 name. New code should
-# import TIER_ONE_DOMAINS directly. Drop in a follow-up sprint.
-TIER_ONE_SOURCE_IDS = TIER_ONE_DOMAINS
+# TIER_ONE_SOURCE_IDS: alias of TIER_ONE_DOMAINS (pre-Phase-7A name).
+# TOP_HEADLINES_ENDPOINT: alias of NEWSAI_GETARTICLES_URL — Gate 2 Silver and
+#   Gold tests import this constant to construct test endpoint strings. The URL
+#   value changes but the import succeeds; endpoint strings are metadata only
+#   and are not validated against a pattern by the Silver/Gold processors.
+TIER_ONE_SOURCE_IDS   = TIER_ONE_DOMAINS
+TOP_HEADLINES_ENDPOINT = NEWSAI_GETARTICLES_URL
 
 
 # ==========================================================
@@ -930,7 +862,7 @@ def main(mode: str = "pulse", keywords: Optional[str] = None) -> None:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="TheNewsAPI Bronze Producer")
+    parser = argparse.ArgumentParser(description="newsapi.ai (Event Registry) Bronze Producer")
     parser.add_argument(
         "mode",
         nargs="?",

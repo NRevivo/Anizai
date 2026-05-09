@@ -3,8 +3,9 @@ Sprint 3 End-to-End Integration Test — NewsAPI Vertical Slice.
 
 Runs the full NewsAPI pipeline in standalone mode (without a Flink cluster or
 Kafka broker):
-  1. Fetches real articles from NewsAPI (business + technology categories, plus a
-     targeted Israel/Middle East fetch to exercise the Impact Boost rule — Section B.4)
+  1. Fetches real articles from newsapi.ai (Event Registry) — all 5 pulse category
+     URIs (news/Business, news/Technology, news/Health, news/Science, news/Politics),
+     plus a targeted Israel/Middle East fetch to exercise the Impact Boost rule (B.4)
   2. Applies the authority whitelist at the producer layer
   3. Builds Bronze envelopes and routes them through the Silver Job
      (process_newsapi_message) — sniper scoring, SHA-256 dedup, Silver schema validation
@@ -21,11 +22,10 @@ Kafka broker):
 No Kafka broker required: the NewsAPI producer is used for its fetch/filter/payload-build
 helpers only. __new__ bypasses the Kafka producer init (same pattern as run_fred_e2e.py).
 
-Uses real OpenAI tokens — no mocks. Set OPENAI_API_KEY and THE_NEWS_API_KEY in
-infrastructure/.env before running. Sprint 21.5 migration: this E2E now hits
-thenewsapi.com (replaced newsapi.org). On the Free tier (limit=3 per request)
-the run will produce a small but representative sample; in production set
-THE_NEWS_API_PAGE_SIZE=100 (Basic plan) for fuller coverage.
+Uses real OpenAI tokens — no mocks. Set OPENAI_API_KEY and NEWSAI_API_KEY in
+infrastructure/.env before running. Phase 7A migration: this E2E now hits
+eventregistry.org (replaced thenewsapi.com). Full body text arrives in
+knowledge_vault.full_text_raw via the body field (articleBodyLen=-1).
 
 Usage (from data-pipeline/ with venv active):
     python -m tests.e2e.run_newsapi_e2e
@@ -54,12 +54,12 @@ from datetime import date, timedelta
 from typing import Optional
 
 from config.kafka_topics import DEAD_LETTER_QUEUE, GOLD_GLOBAL_NEWS, SILVER_GLOBAL_NEWS
-from config.settings import OPENAI_API_KEY, THE_NEWS_API_KEY
+from config.settings import NEWSAI_API_KEY, OPENAI_API_KEY
 from ingestion.newsapi_producer import (
-    EVERYTHING_ENDPOINT,
+    NEWSAI_GETARTICLES_URL,
+    PULSE_CATEGORIES,
     REQUEST_DELAY_SEC,
     SOURCE_NAME,
-    TOP_HEADLINES_ENDPOINT,
     NewsAPIProducer,
 )
 from persistence.knowledge_vault import archive as kv_archive
@@ -77,11 +77,9 @@ from utils.kafka_utils import build_bronze_message
 # Runner parameters
 # ==========================================================
 
-# Standard pulse categories to exercise for this E2E.
-# "general" is intentionally excluded — Israel/ME articles are fetched
-# directly via /v1/news/all to guarantee whitelist-passing Impact Boost hits.
-# Note Sprint 21.5: TheNewsAPI uses 'tech' not 'technology'.
-E2E_CATEGORIES = ["business", "tech"]
+# Phase 7A: all 5 confirmed newsapi.ai category URIs (T7A.2).
+# Israel/ME articles are additionally fetched via targeted keyword search.
+E2E_CATEGORIES = PULSE_CATEGORIES  # ["news/Business", "news/Technology", ...]
 
 # Cap per category after the whitelist filter. The top-headlines endpoint
 # can return up to PAGE_SIZE=100; capping keeps E2E runtime predictable
@@ -106,10 +104,10 @@ def _check_prerequisites() -> None:
     Checked before the main loop so any misconfiguration is surfaced before
     API calls or DB writes are attempted (same pattern as run_fred_e2e.py).
     """
-    if not THE_NEWS_API_KEY:
+    if not NEWSAI_API_KEY:
         print(
-            "\n[e2e] ERROR: THE_NEWS_API_KEY is not set in .env.\n"
-            "Set it to your thenewsapi.com api_token (Section B.4).\n"
+            "\n[e2e] ERROR: NEWSAI_API_KEY is not set in .env.\n"
+            "Set it to your eventregistry.org api key (Section B.4).\n"
         )
         sys.exit(1)
 
@@ -142,7 +140,6 @@ def _make_producer_helper() -> NewsAPIProducer:
     p = NewsAPIProducer.__new__(NewsAPIProducer)
     p._emitted            = 0
     p._filtered_whitelist = 0
-    p._filtered_keyword   = 0
     return p
 
 
@@ -193,7 +190,7 @@ def run() -> dict:
     )
     logger = logging.getLogger("e2e_newsapi")
 
-    logger.info("=== Anizai Sprint 3 — NewsAPI E2E Integration Test ===")
+    logger.info("=== Anizai Phase 7A — newsapi.ai E2E Integration Test ===")
     logger.info(
         "Categories: %s  |  Israel/ME fetch: last %d days  |  "
         "Model: GPT-4o + text-embedding-3-small",
@@ -202,7 +199,7 @@ def run() -> dict:
 
     _check_prerequisites()
     logger.info(
-        "Prerequisites verified: THE_NEWS_API_KEY present, OPENAI_API_KEY present, "
+        "Prerequisites verified: NEWSAI_API_KEY present, OPENAI_API_KEY present, "
         "PostgreSQL reachable."
     )
 
@@ -236,9 +233,9 @@ def run() -> dict:
     # --- Round 1: Standard pulse categories (business + technology) ---
     for category in E2E_CATEGORIES:
         logger.info("")
-        logger.info("[fetch] Fetching top-headlines  category=%s ...", category)
+        logger.info("[fetch] Fetching articles  category=%s ...", category)
         try:
-            articles, _, _ = producer._fetch_top_headlines(category)
+            articles, _, _ = producer._fetch_articles(category)
         except Exception as exc:
             logger.error("[fetch] HTTP/network error  category=%s: %s — skipping", category, exc)
             counts["errors"] += 1
@@ -265,11 +262,12 @@ def run() -> dict:
     from_date = (today - timedelta(days=ISRAEL_FETCH_DAYS)).isoformat()
     to_date   = today.isoformat()
     try:
-        israel_articles, _, _ = producer._fetch_everything(
-            from_date=from_date,
-            to_date=to_date,
-            domains=None,  # None = full authority whitelist sent server-side (Sprint 21.5)
-            keywords="israel OR hamas OR gaza OR iran OR hezbollah",
+        israel_articles, _, _ = producer._fetch_articles(
+            category="",      # no category filter — cross-category targeted search
+            date_start=from_date,
+            date_end=to_date,
+            domains=None,     # None = full authority whitelist server-side
+            keywords="israel",
         )
         whitelisted_il = [a for a in israel_articles if producer._passes_whitelist(a)]
         capped_il      = whitelisted_il[:MAX_ISRAEL_ARTICLES]
@@ -291,13 +289,10 @@ def run() -> dict:
 
     # ── Per-article pipeline ─────────────────────────────────────────────────
     for idx, (article, category) in enumerate(article_queue, start=1):
-        # TheNewsAPI's `source` is a bare domain string (e.g. "reuters.com");
-        # for log readability we resolve it through DOMAIN_DISPLAY_NAMES, falling
-        # back to the raw domain. The full normalisation happens later in
-        # _build_raw_payload() which writes source.{id,name} into raw_payload.
-        from ingestion.newsapi_producer import DOMAIN_DISPLAY_NAMES  # noqa: PLC0415
-        domain      = (article.get("source") or "").strip().lower()
-        source_name = DOMAIN_DISPLAY_NAMES.get(domain, domain) or "unknown"
+        # newsapi.ai's source field is a dict {uri, title}; prefer title for
+        # log readability. _build_raw_payload() handles full normalisation later.
+        source_dict = article.get("source") or {}
+        source_name = source_dict.get("title") or source_dict.get("uri") or "unknown"
         title_short = (article.get("title") or "")[:80]
 
         logger.info("")
@@ -307,12 +302,12 @@ def run() -> dict:
             source_name, title_short,
         )
 
-        # Determine the endpoint label for the Bronze envelope metadata.
-        # /v1/news/top for standard categories; /v1/news/all for Israel fetch.
+        # Endpoint label for Bronze envelope metadata.
+        # Phase 7A: single endpoint for all modes (M1).
         endpoint = (
-            f"{TOP_HEADLINES_ENDPOINT}?categories={category}"
-            if category in E2E_CATEGORIES
-            else EVERYTHING_ENDPOINT
+            f"{NEWSAI_GETARTICLES_URL}?categoryUri={category}"
+            if category
+            else NEWSAI_GETARTICLES_URL
         )
 
         # --- Build Bronze envelope ---
@@ -472,7 +467,7 @@ def run() -> dict:
 
     # ── Final summary ─────────────────────────────────────────────────────────
     print(f"\n{'=' * 64}")
-    print(f"  Sprint 3 E2E — NewsAPI — COMPLETE  ({elapsed:.1f}s)")
+    print(f"  Phase 7A E2E — newsapi.ai — COMPLETE  ({elapsed:.1f}s)")
     print(f"{'=' * 64}")
     col_w = 30
     for key, val in counts.items():

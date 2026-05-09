@@ -1,18 +1,18 @@
 {
-  "_comment": "Realistic mock of a single TheNewsAPI article AFTER normalisation by NewsAPIProducer._build_raw_payload(). Stored verbatim as raw_payload inside the Bronze envelope. Source: Reuters (authority-whitelisted domain reuters.com → source.id 'reuters' via TLD-strip rule, source.name 'Reuters' via DOMAIN_DISPLAY_NAMES lookup). Category: business, fetch_mode: pulse. impact_boost=true because title contains 'crude oil' (Section B.4 Impact Boost rule). author='' because TheNewsAPI does not expose an author field; content is sourced from TheNewsAPI's `snippet` (a short excerpt — full text is fetched downstream by the scraper). Sprint 21.5 / Section 4.4 / Section C.1 / Section B.4.",
+  "_comment": "Realistic mock of a single newsapi.ai (Event Registry) article AFTER normalisation by NewsAPIProducer._build_raw_payload(). Stored verbatim as raw_payload inside the Bronze envelope. Source: Reuters (authority-whitelisted domain reuters.com → source.id 'reuters' via TLD-strip rule, source.name 'Reuters' via source.title field). Category: news/Business (newsapi.ai categoryUri), fetch_mode: pulse. impact_boost=true because title contains 'crude oil' (Section B.4 Impact Boost rule). content is sourced from newsapi.ai's `body` field (full article text — key improvement over TheNewsAPI's 60-char snippet). Phase 7A / Section 4.4 / Section C.1 / Section B.4.",
   "article_id": "https://www.reuters.com/markets/commodities/opec-extends-output-cuts-q3-2026-03-31",
   "title": "OPEC agrees to extend crude oil output cuts through Q3 2026",
   "description": "OPEC+ ministers agreed on Monday to maintain their current crude oil production cuts through the third quarter of 2026, supporting oil prices amid global demand uncertainty.",
   "url": "https://www.reuters.com/markets/commodities/opec-extends-output-cuts-q3-2026-03-31",
-  "url_to_image": "https://images.thenewsapi.com/opec-meeting.jpg",
+  "url_to_image": "https://cloudfront-us-east-2.images.arcpublishing.com/reuters/opec-meeting.jpg",
   "published_at": "2026-03-31T10:15:00Z",
-  "content": "VIENNA, March 31 (Reuters) - OPEC+ ministers agreed on Monday to maintain their current crude oil production cuts through the third quarter of 2026, keeping the alliance's collective reduction at 3.66 million barrels per day.",
-  "author": "",
+  "content": "VIENNA, March 31 (Reuters) - OPEC+ ministers agreed on Monday to maintain their current crude oil production cuts through the third quarter of 2026, keeping the alliance's collective reduction at 3.66 million barrels per day. The decision, reached at a Vienna meeting, came as members sought to balance market stability against concerns over slowing global demand growth. Saudi Arabia's energy minister said the alliance remained committed to proactive management of supply. Brent crude rose 1.2 percent following the announcement, trading at $87.40 a barrel.",
+  "author": "Ahmad Ghaddar, Alex Lawler",
   "source": {
     "id": "reuters",
     "name": "Reuters"
   },
-  "category": "business",
+  "category": "news/Business",
   "fetch_mode": "pulse",
   "impact_boost": true,
   "impact_boost_reason": "crude oil"

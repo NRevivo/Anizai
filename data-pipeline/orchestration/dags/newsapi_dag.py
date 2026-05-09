@@ -4,16 +4,17 @@
 # Runs the NewsAPI producer every 20 minutes (Section 2.3).
 #
 # Producer:   ingestion/newsapi_producer.py  main(mode="pulse")
+# Provider:   newsapi.ai (Event Registry) — eventregistry.org (Phase 7A)
 # Schedule:   */20 * * * *   (every 20 minutes)
 # Retries:    2 attempts, 2 minutes apart
-# Mode:       "pulse" — fetches latest articles for all NEWS_QUERIES
+# Mode:       "pulse" — fetches latest articles for all 5 category URIs
 #
 # Design decisions (Section 6A):
 #   D3 — PythonOperator: direct Python function call.
 #   D4 — LocalExecutor: KAFKA_BOOTSTRAP_SERVERS=kafka:29092 inherited from
 #        airflow-scheduler container environment.
-#   High-frequency justification: NewsAPI free tier publishes articles
-#   continuously — 20-minute cadence balances freshness vs. request cost.
+#   High-frequency justification: newsapi.ai publishes articles continuously;
+#   20-minute cadence balances freshness vs. request cost.
 #   Shorter retry delay (2 min vs 5 min for daily jobs) because within a
 #   20-minute window a quick retry is still timely; a 5-minute wait would
 #   consume the full interval.
@@ -22,7 +23,7 @@
 # calls run_reactive() via daemon threads — independent code paths, no conflict.
 #
 # max_active_runs=1: prevents overlapping runs if a previous 20-min task
-# is still executing (e.g., slow NewsAPI response under load).
+# is still executing (e.g., slow newsapi.ai response under load).
 #
 # PYTHONPATH=/opt/airflow/data-pipeline resolves `from ingestion.newsapi_producer`.
 # ==========================================================

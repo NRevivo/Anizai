@@ -97,21 +97,23 @@ HACKERNEWS_API_BASE_URL = os.getenv(
     "https://hn.algolia.com/api/v1"
 )
 
-# --- TheNewsAPI (Section B.4) ---
-# REST API — thenewsapi.com (replaced newsapi.org in Sprint 21.5).
-# Why migration: newsapi.org imposes a 24-hour delay on free/paid articles,
-# blocking same-day signal for the RAG agent. TheNewsAPI returns real-time
-# articles. Auth changed apiKey→api_token; source filter changed IDs→domains;
-# response shape changed articles[]→data[]. The producer normalizes the new
-# upstream shape into the same internal raw_payload contract so Silver/Gold
-# stay unchanged (Decision D1 of Sprint 21.5 plan).
-#
-# Free tier: 100 req/day, 3 articles/req — dev only.
-# Basic tier: 2,500 req/day, 100 articles/req — required for prod 20-min DAG.
-THE_NEWS_API_KEY = os.getenv("THE_NEWS_API_KEY", "")
+# --- newsapi.ai / Event Registry (Section B.4) ---
+# REST API — eventregistry.org (replaced thenewsapi.com in Phase 7A).
+# Why migration: TheNewsAPI's snippet field is 60 chars max; newsapi.ai returns
+# full article body (articleBodyLen=-1), which is what Phase 7B's semantic rescue
+# and the hub's full_text_raw RAG drill-down both require.
+# Auth: apiKey (query param). Source filter: sourceUri (csv of domains).
+# Validated category URIs (T7A.2): news/Business, news/Technology, news/Health,
+# news/Science, news/Politics. "news" root returns 0 results — not used.
+NEWSAI_API_KEY  = os.getenv("NEWSAI_API_KEY", "")
+NEWSAI_BASE_URL = "https://eventregistry.org/api/v1"
 
-# Articles per request. Default 3 (Free tier hard cap). Set 100 in prod .env
-# when on the Basic plan. Producer reads this at module import time.
+# Articles per request. Default 10 (free tier tolerates this; adjust in prod).
+NEWSAI_PAGE_SIZE = int(os.getenv("NEWSAI_PAGE_SIZE", "10"))
+
+# --- TheNewsAPI (Section B.4) — REMOVED in T7A.16 cleanup ---
+# Retained here until T7A.16 so no import breaks during the migration window.
+THE_NEWS_API_KEY      = os.getenv("THE_NEWS_API_KEY", "")
 THE_NEWS_API_PAGE_SIZE = int(os.getenv("THE_NEWS_API_PAGE_SIZE", "3"))
 
 # --- ArXiv (Section B.1) ---
