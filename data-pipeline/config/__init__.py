@@ -45,8 +45,9 @@ from .settings import (
     TELEGRAM_API_HASH,
     # REDDIT credentials removed — API pre-approval required (Nov 2025 policy)
     HACKERNEWS_API_BASE_URL,
-    THE_NEWS_API_KEY,
-    THE_NEWS_API_PAGE_SIZE,
+    NEWSAI_API_KEY,
+    NEWSAI_BASE_URL,
+    NEWSAI_PAGE_SIZE,
     ARXIV_MAX_RESULTS,
     FRED_API_KEY,
     OPENWEATHER_API_KEY,

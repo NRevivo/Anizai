@@ -111,10 +111,6 @@ NEWSAI_BASE_URL = "https://eventregistry.org/api/v1"
 # Articles per request. Default 10 (free tier tolerates this; adjust in prod).
 NEWSAI_PAGE_SIZE = int(os.getenv("NEWSAI_PAGE_SIZE", "10"))
 
-# --- TheNewsAPI (Section B.4) — REMOVED in T7A.16 cleanup ---
-# Retained here until T7A.16 so no import breaks during the migration window.
-THE_NEWS_API_KEY      = os.getenv("THE_NEWS_API_KEY", "")
-THE_NEWS_API_PAGE_SIZE = int(os.getenv("THE_NEWS_API_PAGE_SIZE", "3"))
 
 # --- ArXiv (Section B.1) ---
 # Public REST API — no key required. Max results per query.

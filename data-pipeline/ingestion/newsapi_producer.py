@@ -814,16 +814,6 @@ class NewsAPIProducer:
         logger.info("[newsapi] Producer closed cleanly.")
 
 
-# ==========================================================
-# Backwards-compatibility exports — removed in T7A.16 cleanup
-# ==========================================================
-# TIER_ONE_SOURCE_IDS: alias of TIER_ONE_DOMAINS (pre-Phase-7A name).
-# TOP_HEADLINES_ENDPOINT: alias of NEWSAI_GETARTICLES_URL — Gate 2 Silver and
-#   Gold tests import this constant to construct test endpoint strings. The URL
-#   value changes but the import succeeds; endpoint strings are metadata only
-#   and are not validated against a pattern by the Silver/Gold processors.
-TIER_ONE_SOURCE_IDS   = TIER_ONE_DOMAINS
-TOP_HEADLINES_ENDPOINT = NEWSAI_GETARTICLES_URL
 
 
 # ==========================================================

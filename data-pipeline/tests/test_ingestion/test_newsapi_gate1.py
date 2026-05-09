@@ -83,7 +83,6 @@ from ingestion.newsapi_producer import (
     PULSE_CATEGORIES,
     SOURCE_NAME,
     TIER_ONE_DOMAINS,
-    TIER_ONE_SOURCE_IDS,
     NewsAPIProducer,
 )
 from utils.kafka_utils import build_bronze_message, ndjson_deserializer, ndjson_serializer
@@ -574,10 +573,10 @@ class TestConstantsInvariants:
             "news/Politics must be in PULSE_CATEGORIES (Phase 7A, M4)"
         )
 
-    def test_tier_one_source_ids_are_non_empty(self):
-        """TIER_ONE_SOURCE_IDS (alias of TIER_ONE_DOMAINS) must be non-empty."""
-        assert isinstance(TIER_ONE_SOURCE_IDS, list)
-        assert len(TIER_ONE_SOURCE_IDS) > 0
+    def test_tier_one_domains_are_non_empty(self):
+        """TIER_ONE_DOMAINS must be non-empty (used for backfill Tier 2 sourceUri filter)."""
+        assert isinstance(TIER_ONE_DOMAINS, list)
+        assert len(TIER_ONE_DOMAINS) > 0
 
     def test_tier_one_sources_are_subset_of_whitelist(self):
         """

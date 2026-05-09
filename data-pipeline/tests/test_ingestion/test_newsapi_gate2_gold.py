@@ -63,7 +63,7 @@ from config.kafka_topics import (
     SILVER_GLOBAL_NEWS,
     SILVER_SOCIAL_PULSE,
 )
-from ingestion.newsapi_producer import SOURCE_NAME, TOP_HEADLINES_ENDPOINT
+from ingestion.newsapi_producer import NEWSAI_GETARTICLES_URL, SOURCE_NAME
 from processing.gold_job import (
     apply_impact_boost,
     build_cognitive_metadata_prompt,
@@ -79,7 +79,7 @@ from utils.validators import validate_gold_signal
 # ==========================================================
 
 MOCKS_DIR       = Path(__file__).parent.parent / "mocks"
-_NEWSAPI_ENDPOINT = TOP_HEADLINES_ENDPOINT + "?category=business&language=en"
+_NEWSAPI_ENDPOINT = NEWSAI_GETARTICLES_URL + "?categoryUri=news/Business"
 _EMBEDDING_DIM  = 1536
 
 

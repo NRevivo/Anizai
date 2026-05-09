@@ -47,7 +47,7 @@ Copy-Item .env.example .env
 #   POSTGRES_PASSWORD     (mandatory — docker-compose refuses to start without it)
 #   AIRFLOW_FERNET_KEY    (generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 #   OPENAI_API_KEY        (required for Silver translation + Gold enrichment)
-#   THE_NEWS_API_KEY      (TheNewsAPI source — thenewsapi.com)
+#   NEWSAI_API_KEY        (newsapi.ai / Event Registry — eventregistry.org)
 #   FRED_API_KEY          (FRED economic data)
 #   OPENWEATHER_API_KEY   (OpenWeather source)
 #   OPENSKY_CLIENT_ID     (OpenSky OAuth2)
@@ -237,7 +237,7 @@ You will see 8 DAGs in the DAG list:
 | `fred_daily` | 06:00 UTC daily | FRED economic indicators (9 series) |
 | `arxiv_daily` | 07:00 UTC daily | ArXiv research papers (7 categories) |
 | `googletrends_daily` | 08:00 UTC daily | Google Trends (4 geos, 50 topics) |
-| `newsapi_high_frequency` | Every 20 min | NewsAPI headlines (5 categories) |
+| `newsapi_high_frequency` | Every 20 min | newsapi.ai (Event Registry) headlines (5 categories) |
 | `hackernews_high_frequency` | Every 20 min | HackerNews stories (points > 50) |
 | `openweather_high_frequency` | Every 10 min | OpenWeather (10 strategic hotspots) |
 | `opensky_high_frequency` | Every 3 min | OpenSky flight density (7 bounding boxes) |
