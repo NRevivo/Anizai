@@ -69,6 +69,22 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
 
 # ==========================================================
+# 5b. AI — Gold Semantic Rescue (Phase 7B, §4.1A)
+# ==========================================================
+# Cosine-similarity floor for the semantic rescue gate in GlobalNewsGoldFunction.
+# Articles that fail keyword_sniper (is_high_signal=False) are embedded with
+# text-embedding-3-small and compared against the sniper reference vector.
+# Similarity >= this threshold → promoted (is_high_signal set True, Gold runs).
+# Similarity < this threshold  → dropped entirely (no kv_archive, no Gold).
+# Env-overridable so the threshold can be relaxed in production without redeploy
+# if the drop rate exceeds expectations (B7 mitigation). Initial value: 0.35
+# (conservative mid-point of the 0.30–0.40 design range; Phase 7B.5 calibration
+# will refine this against post-7A vault rows when production data is available).
+GOLD_SEMANTIC_RESCUE_THRESHOLD = float(
+    os.getenv("GOLD_SEMANTIC_RESCUE_THRESHOLD", "0.35")
+)
+
+# ==========================================================
 # 6. Source Credentials — Grouped by Producer
 # ==========================================================
 

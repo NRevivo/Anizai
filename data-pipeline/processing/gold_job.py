@@ -2447,6 +2447,57 @@ def process_opensky_gold_message(
 # Flink Pipeline — requires PyFlink (Docker container only)
 # ==========================================================
 
+# ==========================================================
+# Semantic Rescue — module-level helper (Phase 7B, §4.1A)
+# ==========================================================
+
+def compute_semantic_rescue(
+    silver_doc: dict,
+    openai_client: Any,
+    sniper_ref_vec: Any,   # np.ndarray, typed as Any to avoid numpy import at module level
+    threshold: float,
+) -> tuple[bool, float]:
+    """
+    Embed silver_doc text and compare cosine similarity to the sniper ref vector.
+
+    Returns (rescued, similarity_score).
+
+    The L2-normalised reference vector reduces cosine similarity to a dot
+    product: sim = dot(article_vec / ||article_vec||, ref_vec).
+
+    Why title + lead + truncated body: highest signal-to-noise ratio. Limiting
+    body to 512 chars bounds cost to ~100-200 tokens per rescue call (B1).
+
+    Raises:
+        Any openai API exception — callers route to DLQ (B7, §3.5).
+
+    References: Phase 7B B1, B2, §4.1A
+    """
+    import numpy as np
+
+    text = " ".join(filter(None, [
+        silver_doc.get("title", ""),
+        silver_doc.get("inverted_pyramid_lead", ""),
+        (silver_doc.get("full_text_raw", "") or "")[:512],
+    ])).strip()
+
+    if not text:
+        return False, 0.0
+
+    response = openai_client.embeddings.create(
+        model="text-embedding-3-small",
+        input=[text],
+    )
+    article_vec = np.array(response.data[0].embedding, dtype=np.float32)
+    norm = float(np.linalg.norm(article_vec))
+    if norm == 0.0:
+        return False, 0.0
+
+    # Dot product with pre-normalised ref vector = cosine similarity
+    similarity = float(np.dot(article_vec / norm, sniper_ref_vec))
+    return similarity >= threshold, similarity
+
+
 if PYFLINK_AVAILABLE:
 
     class PolymarketGoldSocialFunction(ProcessFunction):
@@ -2652,8 +2703,39 @@ if PYFLINK_AVAILABLE:
 
         def open(self, runtime_context):
             from openai import OpenAI
-            from config.settings import OPENAI_API_KEY
+            from config.settings import OPENAI_API_KEY, GOLD_SEMANTIC_RESCUE_THRESHOLD
+            from processing.keyword_sniper import SNIPER_REFERENCE_VECTOR_PATH
+            import numpy as np
+
             self._openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            self._rescue_threshold = GOLD_SEMANTIC_RESCUE_THRESHOLD
+
+            # Load sniper reference vector — hard-fail at startup if missing (B4).
+            # Prevents silent regression to keyword-only filtering.
+            if not SNIPER_REFERENCE_VECTOR_PATH.exists():
+                logger.error(
+                    "[gold/flink] sniper_reference_vector.npy not found at %s. "
+                    "Run processing/build_sniper_reference_vector.py and commit "
+                    "the .npy file (Phase 7B T7B.6).",
+                    SNIPER_REFERENCE_VECTOR_PATH,
+                )
+                raise FileNotFoundError(
+                    f"sniper_reference_vector.npy missing: {SNIPER_REFERENCE_VECTOR_PATH}"
+                )
+            self._sniper_ref_vec = np.load(str(SNIPER_REFERENCE_VECTOR_PATH)).astype(np.float32)
+            logger.info(
+                "[gold/flink] Sniper reference vector loaded — shape=%s threshold=%.2f",
+                self._sniper_ref_vec.shape, self._rescue_threshold,
+            )
+
+        def _semantic_rescue(self, silver_doc: dict) -> tuple[bool, float]:
+            """Delegate to module-level compute_semantic_rescue() for testability."""
+            return compute_semantic_rescue(
+                silver_doc,
+                self._openai_client,
+                self._sniper_ref_vec,
+                self._rescue_threshold,
+            )
 
         def process_element(self, value: str, _ctx: ProcessFunction.Context):
             from persistence.knowledge_vault import archive as kv_archive
@@ -2666,7 +2748,38 @@ if PYFLINK_AVAILABLE:
                 yield (DLQ_TAG, json.dumps(dlq))
                 return
 
-            # Archive Silver doc to knowledge_vault before Gold enrichment.
+            # Two-stage SNR gate: keyword sniper (run at Silver) + semantic rescue.
+            # Articles that fail BOTH are dropped — no kv_archive, no Gold (B2, §4.1A).
+            if not silver_doc.get("is_high_signal", False):
+                url = silver_doc.get("original_url", "unknown")[:80]
+                try:
+                    rescued, similarity = self._semantic_rescue(silver_doc)
+                except Exception as exc:
+                    # Embedding API failure — cannot make a sound decision; DLQ (B7)
+                    logger.error(
+                        "[gold/semantic_rescue] embedding API error url=%s: %s — DLQ",
+                        url, exc,
+                    )
+                    yield (DLQ_TAG, json.dumps(
+                        _dlq_record(silver_doc, [f"embedding API error: {exc}"], "semantic_rescue")
+                    ))
+                    return
+
+                if rescued:
+                    logger.info(
+                        "[gold/semantic_rescue] promoted url=%s score=%.4f threshold=%.2f",
+                        url, similarity, self._rescue_threshold,
+                    )
+                    silver_doc["is_high_signal"] = True
+                else:
+                    logger.info(
+                        "[gold/semantic_rescue] dropped url=%s score=%.4f threshold=%.2f",
+                        url, similarity, self._rescue_threshold,
+                    )
+                    return  # no kv_archive, no Gold
+
+            # Archive Silver doc to knowledge_vault.
+            # Only reached by articles that passed the two-stage gate above.
             # Returns doc_id (UUID string) or None if document_hash already exists.
             # Non-fatal: archive failure must not block Gold enrichment.
             doc_id: str | None = None

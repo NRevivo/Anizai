@@ -328,13 +328,10 @@ class TestWordBoundary:
         result = snipe(title="Ukraine conflict update", description="")
         assert "iran" not in result.matched_keywords
 
-    def test_energy_does_not_match_synergy(self):
-        result = snipe(title="Business synergy drives growth", description="")
-        assert "energy" not in result.matched_keywords
-
-    def test_energy_matches_standalone(self):
-        result = snipe(title="Energy prices surge after OPEC meeting", description="")
-        assert "energy" in result.matched_keywords
+    def test_natural_gas_matches_standalone(self):
+        """'natural gas' must match as a phrase — replaces removed 'energy' boundary test."""
+        result = snipe(title="Natural gas prices surge as winter demand rises", description="")
+        assert "natural gas" in result.matched_keywords
 
 
 # ==========================================================
@@ -648,3 +645,89 @@ class TestRealisticArticles:
         assert result.is_high_signal is True
         assert "ai regulation"    in result.matched_keywords
         assert "export controls"  in result.matched_keywords
+
+
+# ==========================================================
+# Gate 2 — Phase 7B A1 Removals + A2 Threshold (Phase 7B)
+# ==========================================================
+
+# The 10 keywords removed in Phase 7B (A1 decision) for being too noisy.
+# Compound forms that contain these words (missile defense, energy crisis,
+# nuclear energy, fusion energy, armed forces) are retained.
+A1_REMOVED_KEYWORDS: frozenset[str] = frozenset({
+    "strike", "attack", "odds", "token", "inference",
+    "default", "revenue", "vote", "energy", "defense",
+})
+
+
+class TestPhase7BRemovals:
+    """
+    Verifies Phase 7B A1 keyword removals and A2 threshold change.
+
+    A1: 10 overly-broad single-word keywords removed from MASTER_KEYWORD_LIST.
+    A2: DEFAULT_THRESHOLD raised to 0.15 (full-body newsapi.ai articles have
+        higher keyword density than the snippet era; floor raised to match).
+    """
+
+    def test_a1_removed_keywords_not_in_master_list(self):
+        """
+        All 10 A1 removal targets must be absent from MASTER_KEYWORD_LIST.
+
+        These keywords generated false positives against non-geopolitical content
+        (worker strikes, sports defense, generic token usage, etc.).
+        """
+        present = A1_REMOVED_KEYWORDS & MASTER_KEYWORD_LIST
+        assert not present, (
+            f"A1 removal targets still in MASTER_KEYWORD_LIST: {present}"
+        )
+
+    def test_compound_forms_of_removed_keywords_retained(self):
+        """
+        Compound forms that incorporate A1 removed stems must still be present.
+
+        'missile defense', 'energy crisis', 'nuclear energy', 'fusion energy',
+        and 'armed forces' carry geopolitical signal; the bare single-word forms
+        do not.
+        """
+        retained = {"missile defense", "energy crisis", "nuclear energy",
+                    "fusion energy", "armed forces"}
+        missing = retained - MASTER_KEYWORD_LIST
+        assert not missing, (
+            f"Phase 7B compound forms incorrectly removed: {missing}"
+        )
+
+    def test_default_threshold_is_015(self):
+        """
+        DEFAULT_THRESHOLD must be 0.15 (Phase 7B A2 decision).
+
+        At 0.15: one title keyword (score=0.20) passes; one content-only hit
+        (score=0.10) does not. The higher floor is correct for full-body text
+        because keyword density rises with longer articles.
+        """
+        assert DEFAULT_THRESHOLD == 0.15, (
+            f"Expected 0.15 (Phase 7B A2), got {DEFAULT_THRESHOLD}"
+        )
+
+    def test_removed_energy_no_longer_matches_standalone(self):
+        """'energy' alone must NOT match after A1 removal (only 'energy crisis' should)."""
+        result = snipe(title="Energy prices surge after OPEC meeting", description="")
+        assert "energy" not in result.matched_keywords
+
+    def test_energy_crisis_still_matches(self):
+        """'energy crisis' compound must still match after A1 removal."""
+        result = snipe(title="Europe faces worsening energy crisis this winter", description="")
+        assert "energy crisis" in result.matched_keywords
+
+    def test_removed_vote_no_longer_matches_standalone(self):
+        """'vote' alone must NOT match after A1 removal ('election', 'ballot' remain)."""
+        result = snipe(title="Oscar vote results announced tonight", description="")
+        assert "vote" not in result.matched_keywords
+        # But 'election' still works
+        result2 = snipe(title="Presidential election results certified by congress", description="")
+        assert "election" in result2.matched_keywords
+
+    def test_removed_attack_no_longer_matches(self):
+        """'attack' must NOT match — geopolitical signal comes from 'airstrike', 'bombing'."""
+        result = snipe(title="Cyber attack targets government servers", description="")
+        assert "attack" not in result.matched_keywords
+        assert "cyber attack" in result.matched_keywords  # compound form retained
