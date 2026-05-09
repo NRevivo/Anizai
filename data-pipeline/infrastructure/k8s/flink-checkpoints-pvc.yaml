@@ -1,0 +1,50 @@
+# ==========================================================
+# Anizai — Flink Checkpoints PVC (Phase C, Sprint C3.2)
+# ==========================================================
+# Why a dedicated PVC:
+#   Flink writes checkpoint state snapshots to the filesystem on
+#   every checkpoint interval (60s per §4.3). Without a persistent
+#   volume these snapshots are lost on pod restart, forcing a full
+#   job-state replay from Kafka offset 0 instead of resuming from
+#   the most recent snapshot.
+#
+#   The PVC is shared between the JobManager (checkpoints +
+#   savepoints subdirs via subPath mounts) and the TaskManager
+#   (checkpoints subdir only). Both pods land on the single main-pool
+#   node, so ReadWriteOnce is safe for V1 (two pods on the same node
+#   can hold an RWO volume concurrently). If a second TaskManager is
+#   ever added, this must move to ReadWriteMany (Filestore CSI) and
+#   both Deployment manifests must be updated — flagged as a V2
+#   prerequisite (§C3 D3).
+#
+# storageClassName: standard-rwo
+#   Matches the storage class used for Postgres + Kafka PVCs in C2
+#   (carry-forward from Sprint C2: GKE default is standard-rwo, not
+#   pd-balanced as §C3 D2 originally read — corrected in C2 closeout).
+#   pd.csi.storage.gke.io with WaitForFirstConsumer + AllowVolumeExpansion.
+#   Allows in-place PVC resize if checkpoint volume approaches 70%.
+#   5 GB covers the rolling checkpoint window at observed throughput.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/flink-checkpoints-pvc.yaml -n anizai
+#
+# Spec: cloud_deployment_implementation.md §C3.2, §C3 D3, §4.3
+# ==========================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flink-checkpoints
+  namespace: anizai
+  labels:
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  accessModes:
+    - ReadWriteOnce
+  # Matches C2 storage class (standard-rwo = pd.csi.storage.gke.io,
+  # WaitForFirstConsumer). Carry-forward from Sprint C2 — spec originally
+  # said pd-balanced but GKE default is standard-rwo.
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 5Gi

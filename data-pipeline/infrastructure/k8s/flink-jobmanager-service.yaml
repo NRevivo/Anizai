@@ -1,0 +1,67 @@
+# ==========================================================
+# Anizai — Flink JobManager Service (Phase C, Sprint C3.3b)
+# ==========================================================
+# Why this Service is critical:
+#   TaskManagers resolve "flink-jobmanager" via cluster DNS at the
+#   address set in FLINK_PROPERTIES (jobmanager.rpc.address: flink-jobmanager).
+#   If this Service does not exist, every TM start produces:
+#     "Connection refused: flink-jobmanager:6123"
+#   and the Flink cluster cannot form.
+#
+# No publishNotReadyAddresses needed:
+#   The JobManager is a Deployment, not a KRaft-mode StatefulSet.
+#   A standard ClusterIP Service publishes DNS once the pod has an IP,
+#   regardless of Ready state — no bootstrap chicken-and-egg like the
+#   Kafka headless Service (§C2 D6 and publishNotReadyAddresses fix).
+#
+# Port naming:
+#   webui   (8081) — Flink web dashboard + REST API (job submission,
+#                    checkpoint status, job monitoring).
+#   rpc     (6123) — JobManager ↔ TaskManager coordination channel.
+#   metrics (9249) — Prometheus scrape target; wired in Sprint C5
+#                    Prometheus config as flink-jobmanager:9249.
+#
+# ClusterIP only — no LoadBalancer, no NodePort, no Ingress.
+# Local access: kubectl port-forward -n anizai svc/flink-jobmanager 8081:8081
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/flink-jobmanager-service.yaml -n anizai
+#
+# Spec: cloud_deployment_implementation.md §C3.3, §C3 D1/D4, §7.2
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-jobmanager
+  namespace: anizai
+  labels:
+    app: flink-jobmanager
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  type: ClusterIP
+  selector:
+    app: flink-jobmanager
+  ports:
+    - name: webui
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+    - name: rpc
+      port: 6123
+      targetPort: 6123
+      protocol: TCP
+    # BlobServer port — TaskManagers download Python code and JAR artifacts
+    # from the JM BlobServer during task deployment. Without this port in the
+    # Service, TMs can reach the Service ClusterIP but the connection is dropped
+    # (not routed to the pod), causing all tasks to hang in DEPLOYING state.
+    # Confirmed during Sprint C3 first Silver job submission: BlobServer listens
+    # on 6124 (0x17EC in /proc/net/tcp) but Service only had 6123 + 8081 + 9249.
+    - name: blob
+      port: 6124
+      targetPort: 6124
+      protocol: TCP
+    - name: metrics
+      port: 9249
+      targetPort: 9249
+      protocol: TCP

@@ -1,0 +1,202 @@
+# ==========================================================
+# Anizai — Flink JobManager Deployment (Phase C, Sprint C3.3b)
+# ==========================================================
+# Why a Deployment (not StatefulSet):
+#   The JobManager is a stateless coordinator — its durable state
+#   (checkpoint metadata, job definitions) lives on the shared
+#   flink-checkpoints PVC, not in the JM container itself. Losing
+#   and recreating the JM pod does not lose data; the replacement
+#   pod picks up the checkpoint directory from the PVC. StatefulSet
+#   stable-identity ordering is not needed here (§C3 D1).
+#
+# jobmanager.rpc.address: flink-jobmanager
+#   Must match the Service name (flink-jobmanager-service.yaml) so
+#   TaskManagers resolve the RPC endpoint at flink-jobmanager:6123
+#   via cluster DNS. Configured in the ConfigMap, not inline, so
+#   a Service rename is a single-file change.
+#
+# Checkpoint PVC subPaths:
+#   Docker-compose mounts the same named volume at two paths:
+#     flink_checkpoints:/opt/flink/checkpoints
+#     flink_checkpoints:/opt/flink/savepoints
+#   K8s equivalent: two subPath mounts from the same PVC. The PVC
+#   root contains two subdirectories — checkpoints/ and savepoints/
+#   — which mirror the two docker-compose mount targets. The TaskManager
+#   mounts only the checkpoints subPath; savepoints are operator-triggered
+#   and written by the JobManager only.
+#
+# fsGroup: 9999:
+#   The flink user in apache/flink:1.19.1-java11 has uid/gid 9999.
+#   Without fsGroup the PVC-backed directories are root-owned and the
+#   flink user cannot write checkpoint data, causing CrashLoopBackOff
+#   with "Permission denied" on the first checkpoint attempt.
+#   Same pattern as fsGroup: 999 on the Postgres StatefulSet (§C2).
+#
+# Secret injection via secretObjects:
+#   The CSI volume (flink-secret-store) MUST be mounted even though
+#   the Deployment reads secrets via secretKeyRef (not file mounts).
+#   The mount is what triggers the secretObjects sync in the SPC that
+#   creates/updates the flink-secrets K8s Secret. Without the volume
+#   mount, flink-secrets is never populated and secretKeyRef fails.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/flink-jobmanager-deployment.yaml -n anizai
+#   kubectl wait --for=condition=Ready pod -l app=flink-jobmanager -n anizai --timeout=120s
+#
+# Spec: cloud_deployment_implementation.md §C3.3, §C3 D1-D5, §4.3, §7.2
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-jobmanager
+  namespace: anizai
+  labels:
+    app: flink-jobmanager
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink-jobmanager
+  template:
+    metadata:
+      labels:
+        app: flink-jobmanager
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: C
+    spec:
+      serviceAccountName: pipeline-runtime
+      # fsGroup 9999 = flink uid/gid in apache/flink:1.19.1-java11.
+      # Without this, PVC-backed checkpoint dirs are root-owned and the
+      # flink process cannot write checkpoint metadata (CrashLoopBackOff).
+      securityContext:
+        fsGroup: 9999
+      containers:
+        - name: flink-jobmanager
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1
+          imagePullPolicy: IfNotPresent
+          # Shell wrapper: reads CSI-mounted secret files and exports them as
+          # env vars before handing off to the Flink entrypoint.
+          #
+          # Why not command: ["jobmanager"]:
+          #   In K8s, `command` overrides the Docker ENTRYPOINT. The apache/flink
+          #   image ENTRYPOINT is /docker-entrypoint.sh, which processes the
+          #   FLINK_PROPERTIES env var into Flink's config.yaml at startup. Bypassing
+          #   it means FLINK_PROPERTIES is never applied — EXACTLY_ONCE, checkpoint
+          #   dir, and all other properties would be silently ignored.
+          #   exec passes control to /docker-entrypoint.sh (PID 1) so signals
+          #   (SIGTERM from kubectl delete pod) reach the Flink process correctly.
+          #
+          # Why read files (not secretKeyRef):
+          #   The GKE-native CSI provider does not support secretObjects → K8s Secret
+          #   sync. File mounts work. The wrapper reads the files and exports the
+          #   values before the Flink process starts — same principle as the Postgres
+          #   POSTGRES_PASSWORD_FILE pattern, adapted for Flink's startup sequence.
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              export POSTGRES_PASSWORD="$(cat /var/secrets/flink/POSTGRES_PASSWORD)"
+              export OPENAI_API_KEY="$(cat /var/secrets/flink/OPENAI_API_KEY)"
+              exec /docker-entrypoint.sh jobmanager
+          ports:
+            - name: webui
+              containerPort: 8081
+              protocol: TCP
+            - name: rpc
+              containerPort: 6123
+              protocol: TCP
+            # Prometheus metrics reporter — Section 7.2.
+            # JAR already in image at /opt/flink/plugins/metrics-prometheus/
+            # (Dockerfile.flink LAYER 4B). Port declared here for the C5
+            # Prometheus scrape target on flink-jobmanager:9249.
+            - name: metrics
+              containerPort: 9249
+              protocol: TCP
+          env:
+            # FLINK_PROPERTIES — lifted verbatim from docker-compose JM block (§C3 D2).
+            # ConfigMap key "jobmanager" contains the multi-line properties string.
+            - name: FLINK_PROPERTIES
+              valueFrom:
+                configMapKeyRef:
+                  name: flink-properties
+                  key: jobmanager
+            # Infrastructure overrides — mirrors docker-compose flink-jobmanager
+            # env block (§8.2). Replaces .env localhost values with in-cluster
+            # service DNS names. settings.py reads these via os.getenv() with
+            # localhost defaults, so the overrides must be explicit here.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:29092"
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            # POSTGRES_USER and POSTGRES_DB are not secrets (§C2 Q3 = option A).
+            # Plain env vars matching docker-compose defaults.
+            - name: POSTGRES_USER
+              value: "anizai"
+            - name: POSTGRES_DB
+              value: "anizai"
+            # POSTGRES_PASSWORD and OPENAI_API_KEY are NOT set here.
+            # They are read from the CSI-mounted files at /var/secrets/flink/
+            # and exported by the shell wrapper command above. The GKE-native
+            # CSI provider does not support secretObjects (confirmed C3), so
+            # file-read-at-startup is the correct injection pattern.
+          volumeMounts:
+            # Checkpoint PVC — subPath "checkpoints" mirrors docker-compose
+            # flink_checkpoints:/opt/flink/checkpoints mount.
+            - name: flink-checkpoints
+              mountPath: /opt/flink/checkpoints
+              subPath: checkpoints
+            # Savepoints PVC — subPath "savepoints" mirrors docker-compose
+            # flink_checkpoints:/opt/flink/savepoints mount. Same PVC,
+            # different subdirectory. TaskManager does not mount this subPath.
+            - name: flink-checkpoints
+              mountPath: /opt/flink/savepoints
+              subPath: savepoints
+            # CSI volume — REQUIRED to trigger the secretObjects sync that
+            # creates/updates the flink-secrets K8s Secret. Files are also
+            # available at /var/secrets/flink/{POSTGRES_PASSWORD,OPENAI_API_KEY}
+            # if direct file access is ever needed.
+            - name: flink-secret-store
+              mountPath: /var/secrets/flink
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /overview
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /overview
+              port: 8081
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            # Sized for V1 single-node main-pool (e2-standard-8, 8 vCPU / 32 GB).
+            # jobmanager.memory.process.size: 1600m is the total JVM process budget.
+            # Request matches the process size; limit adds 300 MiB headroom for
+            # JVM overhead above the configured process size.
+            requests:
+              cpu: "500m"
+              memory: "1600Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1900Mi"
+      volumes:
+        - name: flink-checkpoints
+          persistentVolumeClaim:
+            claimName: flink-checkpoints
+        - name: flink-secret-store
+          csi:
+            # GKE-native add-on driver name — confirmed Sprint C1.
+            # Upstream secrets-store.csi.k8s.io is NOT registered on this cluster.
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: flink-secrets-spc

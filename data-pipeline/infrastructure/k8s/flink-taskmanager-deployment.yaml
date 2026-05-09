@@ -1,0 +1,154 @@
+# ==========================================================
+# Anizai — Flink TaskManager Deployment (Phase C, Sprint C3.4)
+# ==========================================================
+# Why a Deployment (not StatefulSet):
+#   TaskManagers are stateless workers. Durable state is in checkpoints
+#   on the shared PVC. If a TM pod is lost, Flink triggers checkpoint-
+#   based recovery and the replacement pod resumes from the last snapshot
+#   without data loss (§4.3 EXACTLY_ONCE). The checkpoint recovery test
+#   in C3.9 validates this end-to-end.
+#
+# Same image as JobManager:
+#   Both containers MUST use anizai-flink:1.19.1 so the Python operator
+#   bytecode compiled by the JM is byte-for-byte identical to what the TM
+#   executes. Mismatched image tags produce Py4J bridge errors at job
+#   submission time. (Identical to docker-compose constraint — both services
+#   use `image: anizai-flink:1.19.1`.)
+#
+# taskmanager.numberOfTaskSlots: 4
+#   2 slots for the Silver Job, 2 for the Gold Job. Configured in the
+#   ConfigMap key "taskmanager" (§4.3). The TM reads this from
+#   FLINK_PROPERTIES at startup, not from a command-line flag.
+#
+# No Service:
+#   TaskManagers register with the JobManager via outbound RPC pull —
+#   they initiate the connection to flink-jobmanager:6123. No in-cluster
+#   client calls a TM directly, so no Service is needed.
+#
+# Checkpoint PVC subPath:
+#   TM mounts /opt/flink/checkpoints only (not savepoints — docker-compose
+#   flink-taskmanager does not mount the savepoints path). subPath
+#   "checkpoints" shares the exact same PVC subdirectory with the JM
+#   checkpoints mount — required because JM writes checkpoint metadata and
+#   TM writes actual state data to the same directory tree.
+#
+# No readiness probe on TM:
+#   The TM exposes no HTTP endpoint (RPC only). The operational gate for
+#   C3.5 is the Flink web UI showing "1 TaskManager + 4 free slots" — this
+#   is the definitive readiness check. Kubernetes considers the pod Ready
+#   once the container starts without a probe, which is correct here.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/flink-taskmanager-deployment.yaml -n anizai
+#   kubectl wait --for=condition=Ready pod -l app=flink-taskmanager -n anizai --timeout=120s
+#
+# Spec: cloud_deployment_implementation.md §C3.4, §C3 D1-D5, §4.3
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-taskmanager
+  namespace: anizai
+  labels:
+    app: flink-taskmanager
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink-taskmanager
+  template:
+    metadata:
+      labels:
+        app: flink-taskmanager
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: C
+    spec:
+      serviceAccountName: pipeline-runtime
+      # fsGroup 9999 = flink uid/gid in apache/flink:1.19.1-java11.
+      # Without this, the TM cannot write checkpoint state data to the
+      # PVC-backed /opt/flink/checkpoints (same fix as the JM).
+      securityContext:
+        fsGroup: 9999
+      containers:
+        - name: flink-taskmanager
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1
+          imagePullPolicy: IfNotPresent
+          # Shell wrapper — same pattern as the JobManager.
+          # Reads CSI-mounted secret files, exports as env vars, then
+          # execs /docker-entrypoint.sh so FLINK_PROPERTIES is processed
+          # and signals reach the Flink process correctly.
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              export POSTGRES_PASSWORD="$(cat /var/secrets/flink/POSTGRES_PASSWORD)"
+              export OPENAI_API_KEY="$(cat /var/secrets/flink/OPENAI_API_KEY)"
+              exec /docker-entrypoint.sh taskmanager
+          ports:
+            # Prometheus metrics — Section 7.2. TaskManager is the primary
+            # metrics source: operator throughput and latency are recorded
+            # here (JM reports cluster-level coordination metrics). Wired as
+            # a C5 Prometheus scrape target on flink-taskmanager:9249.
+            - name: metrics
+              containerPort: 9249
+              protocol: TCP
+          env:
+            # FLINK_PROPERTIES — lifted verbatim from docker-compose TM block (§C3 D2).
+            # ConfigMap key "taskmanager" contains the multi-line properties string.
+            - name: FLINK_PROPERTIES
+              valueFrom:
+                configMapKeyRef:
+                  name: flink-properties
+                  key: taskmanager
+            # Infrastructure overrides — mirrors docker-compose flink-taskmanager
+            # env block (§8.2). TM Python UDF operators write to Kafka DLQ and
+            # Postgres vaults, so they need the same internal hostname corrections
+            # as the JM. os.getenv() defaults (localhost) would fail inside the pod.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:29092"
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              value: "anizai"
+            - name: POSTGRES_DB
+              value: "anizai"
+            # POSTGRES_PASSWORD and OPENAI_API_KEY are read from
+            # CSI-mounted files and exported by the shell wrapper above.
+          volumeMounts:
+            # Checkpoint PVC — TM mounts checkpoints subPath only.
+            # Shares the same PVC subdirectory with the JM checkpoints mount.
+            - name: flink-checkpoints
+              mountPath: /opt/flink/checkpoints
+              subPath: checkpoints
+            # CSI volume — REQUIRED to trigger the secretObjects sync that
+            # creates/updates the flink-secrets K8s Secret before env vars
+            # are resolved.
+            - name: flink-secret-store
+              mountPath: /var/secrets/flink
+              readOnly: true
+          resources:
+            # taskmanager.memory.process.size: 2048m is the total JVM process budget.
+            # Request matches the process size; limit adds 512 MiB headroom for Python
+            # UDF worker subprocesses (Py4J bridge) that run outside the JVM budget.
+            # After C3, running requests total: ~2.7 vCPU / ~7.6 GB — well under
+            # main-pool capacity (8 vCPU / 32 GB) with headroom for C4 workloads.
+            requests:
+              cpu: "1000m"
+              memory: "2048Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2560Mi"
+      volumes:
+        - name: flink-checkpoints
+          persistentVolumeClaim:
+            claimName: flink-checkpoints
+        - name: flink-secret-store
+          csi:
+            # GKE-native add-on driver name — confirmed Sprint C1.
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: flink-secrets-spc

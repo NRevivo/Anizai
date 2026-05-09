@@ -1,0 +1,71 @@
+# ==========================================================
+# Anizai — Flink Properties ConfigMap (Phase C, Sprint C3.1)
+# ==========================================================
+# Why a ConfigMap:
+#   FLINK_PROPERTIES is a multi-line Java-properties string that
+#   Flink's entrypoint parses at startup. Storing it in a ConfigMap
+#   gives a single source of truth for both the JobManager and
+#   TaskManager, avoiding duplication across two Deployment manifests
+#   and enabling `kubectl edit configmap flink-properties` for
+#   operational tuning without rebuilding the image.
+#
+#   The JobManager and TaskManager have different property sets
+#   (memory sizes, slot count), so two keys live under the same
+#   ConfigMap. Each Deployment references its own key via
+#   env.valueFrom.configMapKeyRef.
+#
+#   Values are lifted VERBATIM from infrastructure/docker-compose.yml
+#   flink-jobmanager + flink-taskmanager FLINK_PROPERTIES blocks
+#   (D2 — no semantics change between local and cloud).
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/flink-properties-configmap.yaml -n anizai
+#
+# Spec: cloud_deployment_implementation.md §C3.1, §C3 D2, §4.3
+# ==========================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flink-properties
+  namespace: anizai
+  labels:
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+data:
+  # -------- JobManager properties --------
+  # Matches docker-compose flink-jobmanager FLINK_PROPERTIES verbatim.
+  # jobmanager.rpc.address must match the K8s Service name (flink-jobmanager)
+  # so TaskManagers resolve the RPC endpoint at flink-jobmanager:6123.
+  jobmanager: |
+    jobmanager.rpc.address: flink-jobmanager
+    jobmanager.rpc.port: 6123
+    jobmanager.memory.process.size: 1600m
+    execution.checkpointing.mode: EXACTLY_ONCE
+    execution.checkpointing.interval: 60000
+    execution.checkpointing.min-pause: 10000
+    execution.checkpointing.timeout: 120000
+    state.backend: hashmap
+    state.checkpoints.dir: file:///opt/flink/checkpoints
+    state.savepoints.dir: file:///opt/flink/savepoints
+    restart-strategy.fixed-delay.attempts: 10
+    restart-strategy.fixed-delay.delay: 20s
+    execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+    metrics.reporters: prom
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: 9249
+  # -------- TaskManager properties --------
+  # Matches docker-compose flink-taskmanager FLINK_PROPERTIES verbatim.
+  # taskmanager.numberOfTaskSlots: 4 — 2 slots for the Silver Job,
+  # 2 slots for the Gold Job.
+  taskmanager: |
+    jobmanager.rpc.address: flink-jobmanager
+    jobmanager.rpc.port: 6123
+    taskmanager.memory.process.size: 2048m
+    taskmanager.numberOfTaskSlots: 4
+    execution.checkpointing.mode: EXACTLY_ONCE
+    execution.checkpointing.interval: 60000
+    state.backend: hashmap
+    state.checkpoints.dir: file:///opt/flink/checkpoints
+    metrics.reporters: prom
+    metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+    metrics.reporter.prom.port: 9249
