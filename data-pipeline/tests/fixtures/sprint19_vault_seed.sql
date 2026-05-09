@@ -78,8 +78,7 @@ INSERT INTO knowledge_vault (
     inverted_pyramid_lead,
     detected_entities,
     relevance_score,
-    sniper_keywords,
-    scrape_attempted
+    sniper_keywords
 ) VALUES (
     '00000000-0000-0000-0000-000000000a01'::uuid,
     'sprint19smokekvhash0000000000000000000000000000000000000000aaaa',
@@ -94,8 +93,7 @@ INSERT INTO knowledge_vault (
     'Smoke-test lead.',
     '[]'::jsonb,
     0.5,
-    '[]'::jsonb,
-    true
+    '[]'::jsonb
 )
 ON CONFLICT (doc_id) DO NOTHING;
 

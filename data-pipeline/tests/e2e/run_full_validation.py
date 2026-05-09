@@ -106,13 +106,6 @@ def _knowledge_vault_summary() -> dict:
     )
     counts = {r["source_name"]: int(r["n"]) for r in counts_rows}
 
-    scrape_rows = _run_query(
-        "SELECT scrape_attempted, COUNT(*) AS n "
-        "FROM knowledge_vault "
-        "GROUP BY scrape_attempted"
-    )
-    scrape = {r["scrape_attempted"]: int(r["n"]) for r in scrape_rows}
-
     sample_rows = _run_query(
         "SELECT source_name, "
         "       LEFT(full_text_raw, 100) AS text_preview, "
@@ -122,8 +115,6 @@ def _knowledge_vault_summary() -> dict:
     )
     return {
         "counts": counts,
-        "scrape_attempted": scrape.get(True, 0),
-        "scrape_pending": scrape.get(False, 0),
         "sample": sample_rows[0] if sample_rows else None,
     }
 
@@ -311,13 +302,6 @@ def _print_report(
     for src in sorted(REQUIRED_KNOWLEDGE_SOURCES | set(kvec_counts)):
         n = kvec_counts.get(src, 0)
         print(f"    {src:<14}: {n:>5}")
-
-    # scraping
-    scraped = kv["scrape_attempted"]
-    pending = kv["scrape_pending"]
-    total_scrape = scraped + pending
-    pct = f"{(scraped / total_scrape * 100):.0f}%" if total_scrape else "n/a"
-    print(f"\n  Scraped articles  : {scraped}/{total_scrape} attempted  ({pct} complete)")
 
     # sample
     kv_sample = kv.get("sample")

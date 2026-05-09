@@ -108,11 +108,6 @@ data:
                                 CHECK (relevance_score BETWEEN 0.0 AND 1.0),
         sniper_keywords         JSONB           NOT NULL DEFAULT '[]', -- keywords that triggered passage through Sniper
 
-        -- Scraping enrichment (Sprint 15 — post-Silver full-text backfill)
-        -- scrape_attempted prevents infinite retry: set TRUE regardless of outcome.
-        -- full_text_raw is updated in-place only on success (Section 4.1 scraping spec).
-        scrape_attempted        BOOLEAN         NOT NULL DEFAULT FALSE,
-
         -- Audit
         ingested_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW()
     );

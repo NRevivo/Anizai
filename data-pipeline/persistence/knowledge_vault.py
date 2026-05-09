@@ -22,9 +22,6 @@ Public interface:
     exists_by_document_hash(document_hash)           → bool
     fetch_by_doc_id(doc_id)                          → dict | None
     fetch_by_canonical_event(canonical_event_id, …)  → list[dict]
-    fetch_unscraped_articles(limit)                  → list[dict]  (Sprint 15 scraping layer)
-    update_scraped_text(doc_id, scraped_text)        → None        (Sprint 15 scraping layer)
-
 References:
     - Section 5.1:  Knowledge Vault specification
     - Section 4.1B: Dual-Store Persistence routing
@@ -296,74 +293,6 @@ def fetch_by_canonical_event(
     with get_cursor() as cur:
         cur.execute(sql, params)
         return [dict(row) for row in cur.fetchall()]
-
-
-# ==========================================================
-# Scraping layer — Sprint 15
-# ==========================================================
-
-def fetch_unscraped_articles(limit: int = 20) -> list[dict]:
-    """
-    Return NewsAPI articles that have not yet had a scrape attempt.
-
-    Ordered by ingested_at DESC so the scraper works on the freshest articles
-    first. Only newsapi rows are returned — ArXiv and Telegram do not have
-    scrapable article URLs (Section 4.1 Sprint 15 scraping spec).
-
-    Why scrape_attempted rather than checking full_text_raw length: a NULL or
-    short full_text_raw is ambiguous (could be a truncated API payload, not
-    necessarily a failed scrape). scrape_attempted is authoritative — it is
-    set TRUE on every attempt regardless of outcome, preventing infinite retry.
-
-    Args:
-        limit: Maximum rows to return per cycle (default 20 = MAX_SCRAPE_PER_RUN).
-
-    Returns:
-        List of dicts with keys: doc_id (str), original_url (str).
-    """
-    sql = """
-        SELECT doc_id::text, original_url
-        FROM   knowledge_vault
-        WHERE  source_name      = 'newsapi'
-          AND  scrape_attempted = FALSE
-        ORDER  BY ingested_at DESC
-        LIMIT  %s;
-    """
-    with get_cursor() as cur:
-        cur.execute(sql, (limit,))
-        return [dict(row) for row in cur.fetchall()]
-
-
-def update_scraped_text(doc_id: str, scraped_text: Optional[str]) -> None:
-    """
-    Mark an article as scrape-attempted and optionally update its full_text_raw.
-
-    Always sets scrape_attempted = TRUE to prevent future retry regardless of
-    whether scraping succeeded. Only overwrites full_text_raw when scraped_text
-    is not None — a None value means the domain was not scrapable or the
-    request failed, and the existing API-provided text (content or description)
-    must be preserved (Section 4.1 Sprint 15 scraping spec).
-
-    Args:
-        doc_id:       UUID string (primary key of knowledge_vault).
-        scraped_text: Full article text from newspaper4k, or None on failure/skip.
-    """
-    sql = """
-        UPDATE knowledge_vault
-        SET    scrape_attempted = TRUE,
-               full_text_raw   = CASE
-                                     WHEN %(text)s IS NOT NULL THEN %(text)s
-                                     ELSE full_text_raw
-                                 END
-        WHERE  doc_id = %(doc_id)s::uuid;
-    """
-    with get_cursor() as cur:
-        cur.execute(sql, {"text": scraped_text, "doc_id": doc_id})
-    logger.debug(
-        "[knowledge_vault] update_scraped_text doc_id=%s  success=%s",
-        doc_id,
-        scraped_text is not None,
-    )
 
 
 # ==========================================================

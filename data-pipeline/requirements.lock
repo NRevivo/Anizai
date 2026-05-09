@@ -48,7 +48,6 @@ langsmith==0.8.0
 lxml==5.4.0
 lxml_html_clean==0.4.4
 msgpack==1.1.2
-newspaper4k==0.9.5
 numpy==2.4.4
 openai==1.109.1
 orjson==3.11.8

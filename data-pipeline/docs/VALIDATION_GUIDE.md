@@ -241,8 +241,6 @@ You will see 8 DAGs in the DAG list:
 | `hackernews_high_frequency` | Every 20 min | HackerNews stories (points > 50) |
 | `openweather_high_frequency` | Every 10 min | OpenWeather (10 strategic hotspots) |
 | `opensky_high_frequency` | Every 3 min | OpenSky flight density (7 bounding boxes) |
-| `newsapi_scraper` | Every 30 min | Post-Silver article full-text scraping |
-
 **Trigger order (important):**
 
 First trigger the high-frequency sources — they will produce the most data during
@@ -259,9 +257,6 @@ Wait 2 minutes, then trigger the daily sources (they run once per trigger):
 6. Click `arxiv_daily` → **▶ Run**
 7. Click `googletrends_daily` → **▶ Run**
 
-**Do NOT trigger `newsapi_scraper` yet** — it needs NewsAPI articles to be in
-`knowledge_vault` first (from step 4 above). Trigger it after 10 minutes.
-
 **How to confirm a DAG run succeeded:**
 - Click the DAG name to open the DAG detail view
 - The latest run should show a green circle (success) or spinning indicator (running)
@@ -274,23 +269,7 @@ Wait 2 minutes, then trigger the daily sources (they run once per trigger):
 
 ---
 
-### Step 4 — Trigger the Scraper DAG
-
-After waiting at least 10 minutes from Step 3 (to give NewsAPI time to land articles
-in `knowledge_vault`):
-
-8. Click `newsapi_scraper` → **▶ Run**
-
-The scraper queries `knowledge_vault` for rows where `scrape_attempted = FALSE`,
-fetches full article text from scrapable domains (BBC, Guardian, Times of Israel,
-Jerusalem Post, Ynetnews, i24 News), and updates `full_text_raw` in-place.
-
-It processes up to 20 articles per run. Trigger it again after 30 minutes to
-process the next batch.
-
----
-
-### Step 5 — Wait for Data Collection
+### Step 4 — Wait for Data Collection
 
 **Minimum wait:** 30 minutes from triggering the first DAG.
 **Recommended wait:** 60 minutes for a richer dataset (multiple NewsAPI + HackerNews + OpenSky cycles).
@@ -345,23 +324,15 @@ SELECT
     source_name,
     LEFT(full_text_raw, 200)    AS text_preview,
     relevance_score,
-    scrape_attempted,
     ingested_at
 FROM knowledge_vault
 ORDER BY ingested_at DESC
 LIMIT 3;
-
--- Check scraping progress:
-SELECT
-    scrape_attempted,
-    COUNT(*) AS count
-FROM knowledge_vault
-GROUP BY scrape_attempted;
 ```
 
 **What you should see:** Rows grouped by `newsapi`, `arxiv`, `telegram` with
-`relevance_score` between 0.0 and 1.0. After the scraper DAG runs, some rows
-will show `scrape_attempted = true` and longer `full_text_raw` values.
+`relevance_score` between 0.0 and 1.0. newsapi.ai provides full article body
+text in `full_text_raw` at Bronze time (Phase 7A) — no post-Silver scraping needed.
 
 ---
 
@@ -610,14 +581,6 @@ After a 60-minute validation run, you should see approximately the following:
 | **OpenSky** | `momentum_vault` | 140–1400 | 7 boxes x 20 polls/hour (every 3 min) |
 | **Polymarket prices** | `momentum_vault` | 10–100 | 5–10 min intervals from WebSocket producer |
 | **mapping_dict** | `mapping_dict` | 0–50 | Low on first run; grows as data volume increases |
-
-**Scraping (NewsAPI articles):**
-
-| Metric | Expected Value |
-|--------|---------------|
-| `scrape_attempted = TRUE` | 0–60 articles (up to 20 per 30-min scraper DAG run) |
-| Scrape success rate | 40–80% (CNN excluded — JS-rendered; some outlets rate-limit) |
-| Scrapable domains | BBC, Guardian, Times of Israel, Jerusalem Post, Ynetnews, i24 News |
 
 **Automation Triggers (momentum_vault):**
 
