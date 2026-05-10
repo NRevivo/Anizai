@@ -1,0 +1,98 @@
+# ==========================================================
+# Anizai — Airflow Webserver Deployment
+# ==========================================================
+# Serves the Airflow management UI on port 8080 (exposed
+# locally via kubectl port-forward 8090:8080).
+#
+# Reuses the anizai-airflow:2.9.3 image built by the scheduler.
+# Webserver does not execute tasks — only AIRFLOW__DATABASE__*
+# and AIRFLOW__CORE__FERNET_KEY are needed from Secret Manager.
+# Producer keys are NOT mounted here (no task execution).
+#
+# Shell wrapper pattern (D5): same as scheduler but exports only
+#   the secrets the webserver actually reads.
+#
+# AIRFLOW__WEBSERVER__EXPOSE_CONFIG=true: matches docker-compose
+#   setting — useful for dev debugging, acceptable for an
+#   internal port-forward-only service with no public access.
+#
+# Spec: cloud_deployment_implementation.md §C4.7 (D3, D5)
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-webserver
+  namespace: anizai
+  labels:
+    app: airflow-webserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-webserver
+  template:
+    metadata:
+      labels:
+        app: airflow-webserver
+    spec:
+      serviceAccountName: pipeline-runtime
+      containers:
+        - name: airflow-webserver
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              export AIRFLOW_POSTGRES_PASSWORD=$(cat /var/secrets/airflow/AIRFLOW_POSTGRES_PASSWORD)
+              export AIRFLOW_FERNET_KEY=$(cat /var/secrets/airflow/AIRFLOW_FERNET_KEY)
+              export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD}@airflow-postgres/airflow"
+              exec /entrypoint webserver
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: LocalExecutor
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "false"
+            - name: AIRFLOW__CORE__DAGS_FOLDER
+              value: /opt/airflow/data-pipeline/orchestration/dags
+            - name: AIRFLOW__WEBSERVER__EXPOSE_CONFIG
+              value: "true"
+            - name: PYTHONPATH
+              value: /opt/airflow/data-pipeline
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: airflow-secrets
+              mountPath: /var/secrets/airflow
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: airflow-secrets
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: airflow-secrets-spc

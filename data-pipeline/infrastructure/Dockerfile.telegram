@@ -1,0 +1,54 @@
+# ==========================================================
+# Anizai Data Pipeline — Telegram Producer Image
+# ==========================================================
+# Always-on MTProto streaming daemon: monitors 7 pre-vetted
+# Telegram channels via Telethon and emits each message as a
+# Bronze envelope to ingest.bronze.telegram (Section A.1).
+#
+# Session file handling (D2 — cloud_deployment_implementation.md §C4.12):
+#   MTProto auth requires an interactive first-login flow. The session
+#   file is generated once locally and stored in Secret Manager as
+#   TELEGRAM_SESSION_FILE. The K8s Deployment's shell wrapper (D5):
+#     1. Exports TELEGRAM_API_ID and TELEGRAM_API_HASH from CSI files.
+#     2. Copies the session file from the CSI mount to /app/anizai_telegram.session,
+#        which is the path SESSION_PATH resolves to inside this image
+#        (BASE_DIR = /app, SESSION_PATH = os.path.join(BASE_DIR, "anizai_telegram"),
+#        Telethon appends .session automatically).
+#     3. Execs the producer.
+#   TELEGRAM_PHONE is NOT needed at runtime — it is only required for the
+#   one-time interactive login (C4.12). The session file encodes the full
+#   auth state; Telethon re-authenticates silently from it.
+#
+# Build context: data-pipeline/
+# References:
+#   - Section A.1:  Telegram Channel Registry (MTProto, 7 channels)
+#   - Section 2.1:  Producer Matrix (Telegram row)
+#   - Section 9.1:  Environment parity — pinned versions
+#   cloud_deployment_implementation.md §C4.13 (D2, D5)
+# ==========================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# ----------------------------------------------------------
+# Install dependencies
+# ----------------------------------------------------------
+COPY requirements-telegram.txt /tmp/requirements-telegram.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-telegram.txt
+
+# ----------------------------------------------------------
+# Copy source code
+# ----------------------------------------------------------
+# The producer reads TELEGRAM_API_ID / TELEGRAM_API_HASH from
+# os.environ (set by the shell wrapper) and SESSION_PATH from
+# config.settings.BASE_DIR — which resolves to /app here.
+# ----------------------------------------------------------
+COPY config/   /app/config/
+COPY utils/    /app/utils/
+COPY ingestion/telegram_producer.py /app/ingestion/telegram_producer.py
+COPY ingestion/__init__.py /app/ingestion/__init__.py
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "-m", "ingestion.telegram_producer"]

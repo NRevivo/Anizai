@@ -30,11 +30,13 @@ tests/
 # (Dockerfile.flink itself is referenced by path, not COPY'd into the image)
 infrastructure/
 
-# Ingestion code — producers run in separate containers, not Flink
-ingestion/
-
-# Orchestration code — Airflow, not needed in Flink image
-orchestration/
+# ingestion/ and orchestration/ are intentionally NOT excluded here.
+# Dockerfile.flink uses explicit per-directory COPY instructions so these
+# directories are safely ignored by the Flink build regardless.
+# Dockerfile.airflow uses COPY . /opt/airflow/data-pipeline/ and requires
+# both directories to be in the build context (production mode, C4).
+# Dockerfile.polymarket, Dockerfile.telegram, Dockerfile.trigger_consumer
+# likewise need ingestion/ or orchestration/ in the build context (C4).
 
 # Local data and log files
 data/

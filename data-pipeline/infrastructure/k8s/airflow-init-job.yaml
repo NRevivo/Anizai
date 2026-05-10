@@ -1,0 +1,91 @@
+# ==========================================================
+# Anizai — Airflow Init Job
+# ==========================================================
+# One-shot Job that runs `airflow db migrate` to initialise the
+# Airflow metadata schema, then creates the admin user.
+# Mirrors the docker-compose airflow-init service exactly.
+#
+# Uses the base apache/airflow:2.9.3-python3.12 image (NOT the
+# custom anizai-airflow:2.9.3) — DB migration only needs core
+# Airflow, no producer dependencies.
+#
+# Shell wrapper pattern (D5 — confirmed Sprint C3):
+#   GKE-native CSI mounts secrets as files only. The wrapper reads
+#   each file, exports as an env var, then runs airflow commands
+#   directly. AIRFLOW__DATABASE__SQL_ALCHEMY_CONN is constructed
+#   inline from the exported AIRFLOW_POSTGRES_PASSWORD value.
+#
+# AIRFLOW_ADMIN_USERNAME uses the hardcoded value "admin"
+# (not in Secret Manager — matches docker-compose default).
+#
+# restartPolicy: OnFailure — retries if airflow-postgres is not
+# yet fully ready when the Job first fires.
+#
+# Spec: cloud_deployment_implementation.md §C4.4 (D3, D5)
+# ==========================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-init
+  namespace: anizai
+  labels:
+    app: airflow-init
+spec:
+  template:
+    metadata:
+      labels:
+        app: airflow-init
+    spec:
+      serviceAccountName: pipeline-runtime
+      restartPolicy: OnFailure
+      containers:
+        - name: airflow-init
+          image: apache/airflow:2.9.3-python3.12
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              export AIRFLOW_POSTGRES_PASSWORD=$(cat /var/secrets/airflow/AIRFLOW_POSTGRES_PASSWORD)
+              export AIRFLOW_FERNET_KEY=$(cat /var/secrets/airflow/AIRFLOW_FERNET_KEY)
+              export AIRFLOW_ADMIN_PASSWORD=$(cat /var/secrets/airflow/AIRFLOW_ADMIN_PASSWORD)
+              export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD}@airflow-postgres/airflow"
+              export AIRFLOW__CORE__EXECUTOR=LocalExecutor
+              export AIRFLOW__CORE__FERNET_KEY="${AIRFLOW_FERNET_KEY}"
+              export AIRFLOW__WEBSERVER__SECRET_KEY="${AIRFLOW_FERNET_KEY}"
+              echo "=== Airflow: running DB migration ==="
+              airflow db migrate
+              echo "=== Airflow: provisioning admin user ==="
+              if airflow users list 2>/dev/null | grep -q "admin"; then
+                echo "    Admin user already exists — skipping."
+              else
+                airflow users create \
+                  --username admin \
+                  --firstname Admin \
+                  --lastname User \
+                  --role Admin \
+                  --email admin@anizai.local \
+                  --password "${AIRFLOW_ADMIN_PASSWORD}"
+                echo "    Admin user created successfully."
+              fi
+              echo "=== Airflow initialization complete ==="
+          env:
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "false"
+          volumeMounts:
+            - name: airflow-secrets
+              mountPath: /var/secrets/airflow
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+      volumes:
+        - name: airflow-secrets
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: airflow-secrets-spc

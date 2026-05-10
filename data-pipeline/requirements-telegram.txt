@@ -1,0 +1,24 @@
+# ==========================================================
+# Anizai — Telegram Producer Dependencies
+# ==========================================================
+# Minimal subset for the always-on MTProto streaming daemon.
+# Version pins match requirements.txt (Section 9.1 parity).
+
+# .env loading
+python-dotenv==1.0.1
+
+# Telegram MTProto streaming (Section A.1)
+telethon==1.36.0
+
+# Kafka Bronze topic emission (Section 3.4)
+kafka-python-ng==2.2.3
+
+# PostgreSQL client — required because utils/__init__.py imports utils.db
+# unconditionally at the top level. The producer does not connect to Postgres
+# itself, but the import chain requires psycopg2 to be present.
+# Airflow satisfies this via apache-airflow[postgres]; standalone containers must
+# include it explicitly.
+psycopg2-binary==2.9.9
+
+# Structured JSON logging (Section 7.2)
+python-json-logger==2.0.7

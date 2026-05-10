@@ -1,0 +1,58 @@
+# ==========================================================
+# Anizai Data Pipeline — Reactive Trigger Consumer Image
+# ==========================================================
+# Always-on Kafka consumer: reads from the `ingestion_triggers`
+# topic (written by the RAG agent on knowledge gaps) and dispatches
+# each trigger to the appropriate reactive producer method in a
+# daemon thread (Section 2.4, KG-PHASE8-3).
+#
+# Supported reactive sources (VALID_SOURCES frozenset):
+#   googletrends — pytrends Interest Over Time (Section B.5)
+#   openweather  — bounded hotspot window (Section B.6)
+#   opensky      — callsign tracking window (Section B.7)
+#
+# The consumer lazy-imports each reactive producer's run_reactive()
+# inside _build_producer(), so all three producers' deps are
+# included here even though only one is loaded per trigger.
+#
+# Invalid triggers → dead-letter-queue (Section 3.5).
+# Closes KG-PHASE8-3 — runtime validation of reactive ingestion.
+#
+# Build context: data-pipeline/
+# References:
+#   - Section 2.4:  Reactive Ingestion — ingestion_triggers topic
+#   - Section 3.5:  Dead-Letter Queue
+#   cloud_deployment_implementation.md §C4.16 (D3)
+# ==========================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# ----------------------------------------------------------
+# Install dependencies
+# ----------------------------------------------------------
+# Includes deps for the three reactive producers lazy-imported
+# at dispatch time: pytrends (googletrends), requests (openweather,
+# opensky). See requirements-trigger-consumer.txt for rationale.
+# ----------------------------------------------------------
+COPY requirements-trigger-consumer.txt /tmp/requirements-trigger-consumer.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-trigger-consumer.txt
+
+# ----------------------------------------------------------
+# Copy source code
+# ----------------------------------------------------------
+# orchestration/ — ingestion_trigger_consumer.py (the consumer itself)
+# ingestion/     — googletrends, openweather, opensky producers
+#                  (lazy-imported at dispatch time by _build_producer())
+# config/ + utils/ — shared infrastructure
+# ----------------------------------------------------------
+COPY config/       /app/config/
+COPY utils/        /app/utils/
+COPY orchestration/ingestion_trigger_consumer.py /app/orchestration/ingestion_trigger_consumer.py
+COPY orchestration/__init__.py /app/orchestration/__init__.py
+COPY ingestion/    /app/ingestion/
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "-m", "orchestration.ingestion_trigger_consumer"]

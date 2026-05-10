@@ -1,0 +1,51 @@
+# ==========================================================
+# Anizai Data Pipeline — Polymarket Producer Image
+# ==========================================================
+# Always-on WebSocket daemon: connects to Polymarket's CLOB
+# WebSocket for real-time price streams and polls the Gamma
+# REST API for market snapshots and comments.
+#
+# Runs exclusively on polymarket-pool (e2-micro, always on).
+# Public endpoints only — no API key required (Section B.8).
+#
+# Source entrypoint: ingestion/polymarket_producer.py
+#
+# Build context: data-pipeline/  (same convention as all other images)
+# References:
+#   - Section B.8:  Polymarket technical parameters
+#   - Section 2.1:  Producer Matrix (Polymarket row)
+#   - Section 9.1:  Environment parity — pinned versions
+#   cloud_deployment_implementation.md §C4.10 (D1)
+# ==========================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# ----------------------------------------------------------
+# Install dependencies
+# ----------------------------------------------------------
+# Minimal set: only what polymarket_producer.py actually imports.
+# No Flink, no DB clients, no AI libs — strict service isolation
+# per Section 3.3. Pure-Python packages; no build tools needed.
+# ----------------------------------------------------------
+COPY requirements-polymarket.txt /tmp/requirements-polymarket.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-polymarket.txt
+
+# ----------------------------------------------------------
+# Copy source code
+# ----------------------------------------------------------
+# Selective COPY keeps the image lean. The producer needs:
+#   config/  — settings.py (KAFKA_BOOTSTRAP_SERVERS), kafka_topics.py
+#   utils/   — kafka_utils.py (make_producer, build_bronze_message)
+#   ingestion/polymarket_producer.py
+# ----------------------------------------------------------
+COPY config/ /app/config/
+COPY utils/  /app/utils/
+COPY ingestion/polymarket_producer.py /app/ingestion/polymarket_producer.py
+COPY ingestion/__init__.py /app/ingestion/__init__.py
+
+# PYTHONPATH makes `from config.settings import ...` resolve correctly.
+ENV PYTHONPATH=/app
+
+CMD ["python", "-m", "ingestion.polymarket_producer"]

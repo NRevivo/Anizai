@@ -1,0 +1,79 @@
+# ==========================================================
+# Anizai — Telegram Producer Deployment
+# ==========================================================
+# Always-on MTProto streaming daemon. Runs on main-pool.
+#
+# Shell wrapper (D5 — confirmed Sprint C3):
+#   GKE-native CSI mounts secrets as files only. The wrapper:
+#     1. Exports TELEGRAM_API_ID and TELEGRAM_API_HASH from CSI files.
+#     2. Copies the binary session file from the CSI mount to
+#        /app/anizai_telegram.session — the path Telethon expects
+#        (BASE_DIR=/app, SESSION_PATH=BASE_DIR/anizai_telegram,
+#        Telethon appends .session automatically, so the full path is
+#        /app/anizai_telegram.session).
+#     3. Execs the producer process.
+#   TELEGRAM_PHONE is NOT needed at runtime (session file encodes full
+#   auth state). See telegram-secretproviderclass.yaml for rationale.
+#
+# Session file rotation (when account is swapped):
+#   1. Generate new session locally and push:
+#        gcloud secrets versions add TELEGRAM_SESSION_FILE --data-file=<new.session>
+#   2. Restart the pod:
+#        kubectl rollout restart deploy/telegram -n anizai
+#
+# Spec: cloud_deployment_implementation.md §C4.14 (D1, D2, D5)
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram
+  namespace: anizai
+  labels:
+    app: telegram
+    tier: producer
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: telegram
+  template:
+    metadata:
+      labels:
+        app: telegram
+        tier: producer
+    spec:
+      serviceAccountName: pipeline-runtime
+      restartPolicy: Always
+      containers:
+        - name: telegram
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-telegram:0.1.0
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export TELEGRAM_API_ID=$(cat /var/secrets/telegram/TELEGRAM_API_ID)
+              export TELEGRAM_API_HASH=$(cat /var/secrets/telegram/TELEGRAM_API_HASH)
+              cp /var/secrets/telegram/TELEGRAM_SESSION_FILE /app/anizai_telegram.session
+              export KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+              exec python -m ingestion.telegram_producer
+          volumeMounts:
+            - name: telegram-secrets
+              mountPath: /var/secrets/telegram
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: telegram-secrets
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: telegram-secrets-spc

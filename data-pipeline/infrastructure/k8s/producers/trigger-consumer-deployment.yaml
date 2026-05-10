@@ -1,0 +1,73 @@
+# ==========================================================
+# Anizai — Reactive Trigger Consumer Deployment
+# ==========================================================
+# Always-on Kafka consumer on main-pool. Reads from the
+# ingestion_triggers topic and dispatches each trigger to the
+# appropriate reactive producer in a daemon thread (Section 2.4).
+#
+# Closes KG-PHASE8-3: runtime validation of
+# orchestration/ingestion_trigger_consumer.py.
+#
+# Shell wrapper (D5):
+#   Exports the three reactive-producer API keys from CSI files
+#   before handing off to the consumer process. The consumer itself
+#   only uses kafka-python-ng; the keys are read by the producer
+#   functions lazy-imported inside _build_producer() at dispatch time.
+#
+# Spec: cloud_deployment_implementation.md §C4.17 (D3, D5)
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trigger-consumer
+  namespace: anizai
+  labels:
+    app: trigger-consumer
+    tier: producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trigger-consumer
+  template:
+    metadata:
+      labels:
+        app: trigger-consumer
+        tier: producer
+    spec:
+      serviceAccountName: pipeline-runtime
+      restartPolicy: Always
+      containers:
+        - name: trigger-consumer
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-trigger-consumer:0.1.0
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export OPENWEATHER_API_KEY=$(cat /var/secrets/trigger-consumer/OPENWEATHER_API_KEY)
+              export OPENSKY_CLIENT_ID=$(cat /var/secrets/trigger-consumer/OPENSKY_CLIENT_ID)
+              export OPENSKY_CLIENT_SECRET=$(cat /var/secrets/trigger-consumer/OPENSKY_CLIENT_SECRET)
+              export KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+              exec python -m orchestration.ingestion_trigger_consumer
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:29092
+          volumeMounts:
+            - name: trigger-consumer-secrets
+              mountPath: /var/secrets/trigger-consumer
+              readOnly: true
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+      volumes:
+        - name: trigger-consumer-secrets
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: trigger-consumer-secrets-spc

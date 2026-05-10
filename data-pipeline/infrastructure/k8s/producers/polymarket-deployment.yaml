@@ -1,29 +1,23 @@
 # ==========================================================
-# Anizai — Polymarket producer Deployment
+# Anizai — Polymarket Producer Deployment
 # ==========================================================
-# SPRINT C1 SCAFFOLD — DO NOT APPLY UNTIL SPRINT C4
+# Always-on WebSocket daemon pinned to polymarket-pool (e2-micro).
+# Public endpoints only — no API keys, no SecretProviderClass mount.
 #
-# This file is authored in C1 to capture the dual-node-pool
-# nodeSelector decision at the architecture level. It is NOT
-# applied during C1 (no application workloads run before C2).
-# C4.11 finalizes:
-#   - the actual image tag (built and pushed in C4.10),
-#   - the SecretProviderClass mounting POLYMARKET_API_KEY
-#     and POLYMARKET_API_SECRET.
+# Why polymarket-pool (Design Decision D2 — Sprint C1 revised):
+#   Polymarket emits real-time prices over WebSocket; gaps cannot be
+#   backfilled (push-only protocol). polymarket-pool is always-on 24/7
+#   and survives when main-pool is scaled to 0 between collection windows.
 #
-# Why a dedicated node pool (Design Decision D2 — revised):
-#   Polymarket emits real-time prices over WebSocket. Gaps in the
-#   connection cannot be backfilled (push-only protocol, no
-#   historical replay). To survive when main-pool is manually
-#   scaled to zero between data-collection windows, the Polymarket
-#   pod is pinned to its own always-on e2-micro pool.
+# Why no CSI volume:
+#   POLYMARKET_API_KEY/SECRET are intentionally empty — Polymarket's
+#   public CLOB and Gamma endpoints require no authentication for the
+#   price and comment data this producer reads (project memory).
+#   The CSI DaemonSet is Pending on polymarket-pool (e2-micro resource
+#   pressure) so mounting a SecretProviderClass here would prevent the
+#   pod from starting.
 #
-#   nodeSelector uses the GKE-auto-applied label
-#   `cloud.google.com/gke-nodepool=polymarket-pool` so the pod
-#   schedules ONLY onto that pool. No tolerations are needed
-#   because polymarket-pool has no taints.
-#
-# Spec: cloud_deployment_implementation.md §C4.11 (D2 revised)
+# Spec: cloud_deployment_implementation.md §C4.11 (D1, D2)
 # ==========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -36,8 +30,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    # Recreate (not RollingUpdate) — only one WebSocket connection
-    # at a time per credential set; rolling would briefly run two.
+    # Recreate: only one WebSocket connection at a time per credential set.
     type: Recreate
   selector:
     matchLabels:
@@ -50,39 +43,21 @@ spec:
     spec:
       serviceAccountName: pipeline-runtime
       restartPolicy: Always
-      # Pin to polymarket-pool so the pod survives when main-pool
-      # is scaled to 0. This label is auto-applied by GKE to every
-      # node in the named pool — no manual node labelling needed.
       nodeSelector:
         cloud.google.com/gke-nodepool: polymarket-pool
       containers:
         - name: polymarket
-          # FILLED IN C4.10 — image built from infrastructure/Dockerfile.polymarket
           image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-polymarket:0.1.0
+          imagePullPolicy: Always
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka:29092
-            # POLYMARKET_API_KEY + POLYMARKET_API_SECRET arrive via
-            # the SecretProviderClass mount below — env projection
-            # is wired in C4.11 once the SPC is finalized.
-          volumeMounts:
-            - name: polymarket-secrets
-              mountPath: /var/secrets/polymarket
-              readOnly: true
           resources:
-            # e2-micro has 1 GB RAM total — leave headroom for the
-            # node OS and kubelet. Conservative requests.
             requests:
               cpu: "50m"
-              memory: "128Mi"
+              # e2-micro polymarket-pool has only ~34Mi allocatable remaining
+              # after system pods (fluentbit, metrics-agent, etc.) — 30Mi fits.
+              memory: "30Mi"
             limits:
               cpu: "500m"
               memory: "384Mi"
-      volumes:
-        - name: polymarket-secrets
-          csi:
-            driver: secrets-store.csi.k8s.io
-            readOnly: true
-            volumeAttributes:
-              # SPC `polymarket-secrets-spc` to be authored in C4.11.
-              secretProviderClass: polymarket-secrets-spc

@@ -1,0 +1,24 @@
+# ==========================================================
+# Anizai — Polymarket Producer Dependencies
+# ==========================================================
+# Minimal subset for the always-on WebSocket daemon.
+# Version pins match requirements.txt (Section 9.1 parity).
+
+# .env loading — config/settings.py calls load_dotenv() at import
+python-dotenv==1.0.1
+
+# Synchronous HTTP — Gamma REST API polling (Section B.8)
+requests==2.31.0
+
+# WebSocket — CLOB real-time price stream (Section B.8)
+websockets==12.0
+
+# Kafka Bronze topic emission (Section 3.4)
+kafka-python-ng==2.2.3
+
+# PostgreSQL client — required because utils/__init__.py imports utils.db
+# unconditionally. Same rationale as requirements-telegram.txt.
+psycopg2-binary==2.9.9
+
+# Structured JSON logging (Section 7.2)
+python-json-logger==2.0.7

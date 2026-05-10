@@ -1,0 +1,29 @@
+# ==========================================================
+# Anizai — Reactive Trigger Consumer Dependencies
+# ==========================================================
+# The trigger consumer lazy-imports three reactive producers:
+#   googletrends_producer  → pytrends
+#   openweather_producer   → requests
+#   opensky_producer       → requests
+# All three are included here because _build_producer() loads
+# them at dispatch time (Section 2.4).
+# Version pins match requirements.txt (Section 9.1 parity).
+
+# .env loading
+python-dotenv==1.0.1
+
+# Kafka consumer + DLQ producer (Section 2.4, 3.5)
+kafka-python-ng==2.2.3
+
+# Synchronous HTTP — openweather + opensky reactive producers
+requests==2.31.0
+
+# Google Trends — googletrends reactive producer (Section B.5)
+pytrends==4.9.2
+
+# PostgreSQL client — required because utils/__init__.py imports utils.db
+# unconditionally. Same rationale as requirements-telegram.txt.
+psycopg2-binary==2.9.9
+
+# Structured JSON logging (Section 7.2)
+python-json-logger==2.0.7

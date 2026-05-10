@@ -1,0 +1,29 @@
+# ==========================================================
+# Anizai — Airflow Postgres Service
+# ==========================================================
+# ClusterIP service for airflow-postgres StatefulSet.
+# DNS name airflow-postgres:5432 is used by airflow-init,
+# airflow-scheduler, and airflow-webserver for SQL_ALCHEMY_CONN.
+#
+# publishNotReadyAddresses is NOT set here (unlike kafka-service.yaml)
+# because postgres:16 does not need to resolve its own service DNS
+# before becoming Ready — no self-election bootstrap loop.
+#
+# Spec: cloud_deployment_implementation.md §C4.2, §8.2
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-postgres
+  namespace: anizai
+  labels:
+    app: airflow-postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: airflow-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

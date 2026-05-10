@@ -1,0 +1,27 @@
+# ==========================================================
+# Anizai — Airflow Webserver Service
+# ==========================================================
+# ClusterIP service for airflow-webserver.
+# Accessible from the local laptop via:
+#   kubectl port-forward -n anizai svc/airflow-webserver 8090:8080
+# Port 8090 chosen to avoid conflict with kafka-ui on 8080
+# (mirrors the docker-compose host port mapping 8090:8080).
+#
+# Spec: cloud_deployment_implementation.md §C4.7, §8.2
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver
+  namespace: anizai
+  labels:
+    app: airflow-webserver
+spec:
+  type: ClusterIP
+  selector:
+    app: airflow-webserver
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

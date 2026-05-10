@@ -1,0 +1,114 @@
+# ==========================================================
+# Anizai — Airflow Scheduler Deployment
+# ==========================================================
+# Runs the Airflow scheduler (LocalExecutor). Discovers and
+# executes DAGs baked into the image at:
+#   /opt/airflow/data-pipeline/orchestration/dags/
+# (production mode — no volume mount per Dockerfile.airflow D2).
+#
+# Shell wrapper pattern (D5 — confirmed Sprint C3):
+#   GKE-native CSI mounts secrets as files. The wrapper reads each
+#   file and exports as an env var before exec-ing /entrypoint.
+#   AIRFLOW__DATABASE__SQL_ALCHEMY_CONN is constructed inline from
+#   the exported AIRFLOW_POSTGRES_PASSWORD value so the password
+#   never appears as a plain environment variable in the container.
+#
+# Producer API keys (NEWSAI_API_KEY, FRED_API_KEY, etc.) are
+# exported here because LocalExecutor runs producer tasks as
+#   subprocesses of this container, inheriting its env.
+#
+# AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=false: all DAGs
+#   default to unpaused. newsapi_high_frequency overrides this
+#   per-DAG via is_paused_upon_creation=True (C4.DAG). This
+#   matches docker-compose AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION.
+#
+# Spec: cloud_deployment_implementation.md §C4.6 (D1, D3, D5)
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: anizai
+  labels:
+    app: airflow-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow-scheduler
+    spec:
+      serviceAccountName: pipeline-runtime
+      containers:
+        - name: airflow-scheduler
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3
+          imagePullPolicy: Always
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              export AIRFLOW_POSTGRES_PASSWORD=$(cat /var/secrets/airflow/AIRFLOW_POSTGRES_PASSWORD)
+              export AIRFLOW_FERNET_KEY=$(cat /var/secrets/airflow/AIRFLOW_FERNET_KEY)
+              export NEWSAI_API_KEY=$(cat /var/secrets/airflow/NEWSAI_API_KEY)
+              export FRED_API_KEY=$(cat /var/secrets/airflow/FRED_API_KEY)
+              export OPENWEATHER_API_KEY=$(cat /var/secrets/airflow/OPENWEATHER_API_KEY)
+              export OPENSKY_CLIENT_ID=$(cat /var/secrets/airflow/OPENSKY_CLIENT_ID)
+              export OPENSKY_CLIENT_SECRET=$(cat /var/secrets/airflow/OPENSKY_CLIENT_SECRET)
+              export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:${AIRFLOW_POSTGRES_PASSWORD}@airflow-postgres/airflow"
+              exec /entrypoint scheduler
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: LocalExecutor
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "false"
+            - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+              value: "false"
+            - name: AIRFLOW__CORE__DAGS_FOLDER
+              value: /opt/airflow/data-pipeline/orchestration/dags
+            - name: AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK
+              value: "true"
+            - name: AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT
+              value: "false"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:29092
+            - name: POSTGRES_HOST
+              value: postgres
+            - name: PYTHONPATH
+              value: /opt/airflow/data-pipeline
+          volumeMounts:
+            - name: airflow-secrets
+              mountPath: /var/secrets/airflow
+              readOnly: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            # The `airflow jobs check` exec probe cannot work here because
+            # the probe subprocess gets the default container env (not PID 1's
+            # environment), which lacks AIRFLOW__DATABASE__SQL_ALCHEMY_CONN.
+            # Without the PostgreSQL connection, the probe checks SQLite (which
+            # has no SchedulerJob record) and always fails → Kubernetes kills the
+            # healthy scheduler every ~150s.
+            # Fix: use the HTTP health endpoint on port 8793 (exposed by
+            # AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK=true, set in env: below).
+            httpGet:
+              path: /health
+              port: 8793
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: airflow-secrets
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: airflow-secrets-spc
