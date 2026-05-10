@@ -1,0 +1,102 @@
+# ==========================================================
+# Anizai — Prometheus Deployment + Service (Phase C, Sprint C5.7)
+# ==========================================================
+# Prometheus scrapes Flink (JM + TM :9249) and the agent worker
+# (:8000/metrics). TSDB stored on a 10GB PVC for ~15 days retention
+# at current scrape volume. --web.enable-lifecycle allows hot-reload
+# of the config via POST /-/reload without pod restart.
+#
+# serviceAccountName: pipeline-runtime — no WI-specific permissions
+# needed for Prometheus (it only scrapes in-cluster endpoints).
+#
+# Local access: kubectl port-forward -n anizai svc/prometheus 9090:9090
+#
+# Spec: cloud_deployment_implementation.md §C5.7, §C5 D3, §7.2
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: anizai
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: pipeline-runtime
+      securityContext:
+        # Prometheus runs as nobody (UID 65534). fsGroup chowns the PVC mount
+        # to GID 65534 so the process can write to /prometheus. Same pattern
+        # as the Postgres fsGroup:999 fix applied in Sprint C2.
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.51.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--web.enable-lifecycle"
+          ports:
+            - name: web
+              containerPort: 9090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: prometheus-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: anizai
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - name: web
+      port: 9090
+      targetPort: 9090
+      protocol: TCP

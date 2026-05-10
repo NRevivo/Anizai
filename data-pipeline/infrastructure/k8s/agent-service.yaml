@@ -1,0 +1,29 @@
+# ==========================================================
+# Anizai — Agent Worker Service (Phase C, Sprint C5.4)
+# ==========================================================
+# ClusterIP only — no public exposure. Local access via:
+#   kubectl port-forward -n anizai svc/agent-worker 8000:8000
+#
+# Port named "metrics" so Prometheus can reference it by name in the
+# scrape config (prometheus-configmap.yaml, Sprint C5.6). Path /metrics
+# is served by the agent's health server alongside /health (§8.8.2).
+#
+# Spec: cloud_deployment_implementation.md §C5.4, §C5 D3, §7.2
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-worker
+  namespace: anizai
+  labels:
+    app: agent-worker
+    tier: agent
+spec:
+  type: ClusterIP
+  selector:
+    app: agent-worker
+  ports:
+    - name: metrics
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

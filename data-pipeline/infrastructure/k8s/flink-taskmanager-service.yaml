@@ -1,0 +1,38 @@
+# ==========================================================
+# Anizai — Flink TaskManager Service (Phase C, Sprint C5.6)
+# ==========================================================
+# ClusterIP Service for the Flink TaskManager, added in Sprint C5
+# solely for Prometheus scraping of the Flink metrics reporter.
+#
+# Why this service was not in Sprint C3:
+#   C3 correctly stated "No Service needed" for the TaskManager —
+#   no in-cluster traffic is routed to TM pods directly (JM handles
+#   all coordination). The Prometheus metrics port (9249) was always
+#   listed as a C5 concern (C3 D4). This service satisfies C5.6's
+#   "flink-taskmanager svc port 9249" scrape target.
+#
+# Port 9249 — Flink Prometheus reporter (JAR baked into anizai-flink
+# image in Dockerfile.flink LAYER 4B). Reporter is activated via
+# FLINK_PROPERTIES in flink-properties-configmap.yaml (Sprint C3).
+#
+# Apply:
+#   kubectl apply -f infrastructure/k8s/flink-taskmanager-service.yaml -n anizai
+#
+# Spec: cloud_deployment_implementation.md §C5.6, §C3 D4, §7.2
+# ==========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-taskmanager
+  namespace: anizai
+  labels:
+    app: flink-taskmanager
+spec:
+  type: ClusterIP
+  selector:
+    app: flink-taskmanager
+  ports:
+    - name: prometheus
+      port: 9249
+      targetPort: 9249
+      protocol: TCP

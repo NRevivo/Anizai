@@ -1,0 +1,117 @@
+# ==========================================================
+# Anizai — Postgres Daily Backup CronJob (Phase C, Sprint C5.12)
+# ==========================================================
+# Schedule: 0 2 * * * (02:00 UTC daily)
+# Dumps the anizai database and streams it gzip-compressed to:
+#   gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz
+#
+# Image: google/cloud-sdk:slim (Debian-based, includes gsutil).
+# postgresql-client-16 is installed inline from the official pgdg apt
+# repo at pod startup (~15s overhead — acceptable for a daily job).
+#
+# Credentials (D5 shell wrapper pattern + Workload Identity):
+#   POSTGRES_PASSWORD — mounted from Secret Manager via CSI (same
+#   flink-secretproviderclass SPC reused; pipeline-runtime GSA holds
+#   secretmanager.secretAccessor on anizai-pipeline).
+#   gsutil GCS writes — no explicit credential needed; pipeline-runtime
+#   GSA holds roles/storage.objectCreator on gs://anizai-pipeline-backups/
+#   (granted in 07_gcs_backup_bucket.sh). GKE Workload Identity serves
+#   these credentials from the metadata server automatically.
+#
+# Restore procedure (manual, on demand):
+#   gsutil cp gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz .
+#   gunzip anizai.sql.gz
+#   psql -h localhost -U anizai -d anizai < anizai.sql
+#
+# Manual trigger for testing (C5.13):
+#   kubectl create job -n anizai --from=cronjob/postgres-backup backup-test-run
+#
+# Spec: cloud_deployment_implementation.md §C5.12, §C5 D2, §9.1
+# ==========================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: anizai
+  labels:
+    app: postgres-backup
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: postgres-backup
+        spec:
+          serviceAccountName: pipeline-runtime
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: google/cloud-sdk:slim
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+
+                  # --- Install postgresql-client-16 ---
+                  # pg_dump must match or exceed the server version (16).
+                  # google/cloud-sdk:slim is Debian bookworm; pgdg repo
+                  # provides pg_dump 16 as postgresql-client-16.
+                  # apt-key add is deprecated in bookworm — use gpg --dearmor
+                  # with a signed-by sources entry instead.
+                  echo "Installing postgresql-client-16..."
+                  apt-get update -qq
+                  apt-get install -y --no-install-recommends gnupg curl lsb-release
+                  DISTRO=$(lsb_release -cs)
+                  curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+                    | gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+                  echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] \
+                    https://apt.postgresql.org/pub/repos/apt ${DISTRO}-pgdg main" \
+                    > /etc/apt/sources.list.d/pgdg.list
+                  apt-get update -qq
+                  apt-get install -y --no-install-recommends postgresql-client-16
+                  echo "pg_dump version: $(pg_dump --version)"
+
+                  # --- Read POSTGRES_PASSWORD from CSI mount ---
+                  export PGPASSWORD=$(cat /var/secrets/postgres/POSTGRES_PASSWORD)
+
+                  # --- Stream pg_dump → gzip → GCS ---
+                  DATE=$(date -u +%F)
+                  DEST="gs://anizai-pipeline-backups/postgres/${DATE}/anizai.sql.gz"
+                  echo "Dumping anizai database to ${DEST}..."
+                  pg_dump \
+                    --host=postgres \
+                    --port=5432 \
+                    --username=anizai \
+                    --dbname=anizai \
+                    --no-password \
+                    --format=plain \
+                    --no-owner \
+                    --no-acl \
+                    | gzip \
+                    | gsutil cp - "${DEST}"
+
+                  echo "Backup complete: ${DEST}"
+              volumeMounts:
+                - name: postgres-secrets
+                  mountPath: /var/secrets/postgres
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+          volumes:
+            - name: postgres-secrets
+              csi:
+                driver: secrets-store-gke.csi.k8s.io
+                readOnly: true
+                volumeAttributes:
+                  secretProviderClass: postgres-secrets-spc

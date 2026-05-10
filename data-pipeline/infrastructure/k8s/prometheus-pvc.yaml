@@ -1,0 +1,27 @@
+# ==========================================================
+# Anizai — Prometheus PVC (Phase C, Sprint C5.7)
+# ==========================================================
+# 10 GB for Prometheus TSDB. Matches the docker-compose volume size
+# and the spec (cloud_deployment_implementation.md §C5 D3).
+# standard-rwo = GKE default pd.csi.storage.gke.io class; consistent
+# with C2 (Postgres 20GB, Kafka 10GB) and C3 (checkpoints 5GB).
+#
+# Apply:
+#   kubectl apply -f infrastructure/k8s/prometheus-pvc.yaml -n anizai
+#
+# Spec: cloud_deployment_implementation.md §C5.7, §C5 D3
+# ==========================================================
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: anizai
+  labels:
+    app: prometheus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 10Gi

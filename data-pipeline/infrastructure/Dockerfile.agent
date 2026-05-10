@@ -92,20 +92,26 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 
 # ==========================================================
-# LAYER 5 — Agent source tree
+# LAYER 5 — Agent source tree + required pipeline modules
 # ==========================================================
-# Only agent/ — pipeline modules (producers/, processing/, persistence/,
-# utils/, config/, prompts/) are intentionally excluded. The hub does
-# not import them, so excluding them keeps the image scoped and reduces
-# blast radius if a pipeline file ever leaks credentials in a comment
-# or default value.
+# agent/ is the hub's own package (worker, graph, nodes, tools, agents,
+# prompts, health, firestore_client, config/settings.py).
 #
-# Note that agent/config/ is the hub's OWN config package
-# (agent/config/__init__.py + agent/config/settings.py — the 24 hub env
-# vars per §8.11, Patch 14), distinct from the pipeline's config/
-# directory at the repo root.
+# persistence/, utils/, config/ are pipeline modules the agent imports
+# transitively: agent/tools/*.py → persistence/*.py → utils/db.py →
+# config/settings.py. They were excluded from the original Sprint 18
+# image (stub-only processing, no real vault queries). Sprint 19+ added
+# actual psycopg2 vault reads, making them required at runtime.
+# Added in Sprint C5 to fix ModuleNotFoundError on first real query.
+#
+# Note: agent/config/ is the hub's OWN config package (hub env vars per
+# §8.11, Patch 14), distinct from the pipeline's config/ at the repo
+# root which holds POSTGRES_* and other pipeline-level settings.
 # ==========================================================
 COPY agent/ /app/agent/
+COPY persistence/ /app/persistence/
+COPY utils/ /app/utils/
+COPY config/ /app/config/
 
 
 # ==========================================================

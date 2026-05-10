@@ -1,0 +1,123 @@
+# ==========================================================
+# Anizai — Agent Worker Deployment (Phase C, Sprint C5.4)
+# ==========================================================
+# Always-on Firestore worker. Subscribes to forecastQueries where
+# status=='pending', atomically claims docs, runs the LangGraph
+# forecast pipeline (vault retrieval → synthesis → Firestore write).
+#
+# Image rebuilt in Sprint C5 Bundle 0 to include persistence/,
+# utils/, config/ modules required by agent/tools/*.py → persistence/*.py.
+#
+# Cross-project Firestore access (D1):
+#   serviceAccountName: agent-worker-ksa (KSA bound to agent-worker GSA
+#   via Workload Identity). The GSA holds roles/datastore.user on the
+#   anizai-ai project. GOOGLE_APPLICATION_CREDENTIALS is NOT set;
+#   the Firebase Admin SDK picks up credentials from the GKE metadata server.
+#
+# Shell wrapper (D5 — confirmed Sprint C3):
+#   GKE-native CSI mounts secrets as files only. The wrapper exports
+#   OPENAI_API_KEY and POSTGRES_PASSWORD from the CSI mount before
+#   exec-ing the Python process. Exec form ensures SIGTERM goes directly
+#   to the worker (not swallowed by /bin/sh) for graceful drain (§8.8.2).
+#
+# Health endpoint (§8.8.2):
+#   K8s httpGet probes use the kubelet — no curl needed inside the image.
+#   /health returns 200 (ready) or 503 (starting/draining). readinessProbe
+#   guards traffic; livenessProbe triggers restart on hung worker.
+#
+# Spec: cloud_deployment_implementation.md §C5.4, §C5 D1, §8.10, §8.11
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-worker
+  namespace: anizai
+  labels:
+    app: agent-worker
+    tier: agent
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agent-worker
+  template:
+    metadata:
+      labels:
+        app: agent-worker
+        tier: agent
+    spec:
+      serviceAccountName: agent-worker-ksa
+      restartPolicy: Always
+      containers:
+        - name: agent-worker
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-agent:0.1.0
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export OPENAI_API_KEY=$(cat /var/secrets/agent/OPENAI_API_KEY)
+              export POSTGRES_PASSWORD=$(cat /var/secrets/agent/POSTGRES_PASSWORD)
+              exec python -m agent.worker
+          env:
+            # Cross-project Firestore — agent-worker GSA holds datastore.user on anizai-ai.
+            # GOOGLE_APPLICATION_CREDENTIALS is intentionally absent; WI serves credentials
+            # from the metadata server (cloud_deployment_implementation.md §C5 D1).
+            - name: FIREBASE_PROJECT_ID
+              value: "anizai-ai"
+            # Postgres — plain env vars matching docker-compose defaults.
+            # POSTGRES_PASSWORD comes from the shell wrapper above (Secret Manager CSI).
+            - name: POSTGRES_HOST
+              value: "postgres"
+            - name: POSTGRES_USER
+              value: "anizai"
+            - name: POSTGRES_DB
+              value: "anizai"
+            - name: POSTGRES_PORT
+              value: "5432"
+            # Kafka — internal listener (not used for queries but imported by kafka_utils).
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:29092"
+            # Health server — bind to all interfaces so K8s probes reach it (§8.8.2).
+            - name: HUB_HEALTH_HOST
+              value: "0.0.0.0"
+            - name: HUB_HEALTH_PORT
+              value: "8000"
+          ports:
+            - name: health
+              containerPort: 8000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - name: agent-secrets
+              mountPath: /var/secrets/agent
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+      volumes:
+        - name: agent-secrets
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: agent-secrets-spc

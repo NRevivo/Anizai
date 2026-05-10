@@ -1,0 +1,127 @@
+# ==========================================================
+# Anizai — Grafana Deployment + Service (Phase C, Sprint C5.9)
+# ==========================================================
+# Grafana provisioned from ConfigMap (grafana-provisioning):
+#   datasource — Prometheus at http://prometheus:9090 (ClusterIP DNS)
+#   dashboard provider — reads from /var/lib/grafana/dashboards
+#   dashboard JSON — Anizai Pipeline (uid: anizai-pipeline-v1)
+#
+# GRAFANA_ADMIN_PASSWORD from Secret Manager via shell wrapper (D5):
+#   GKE-native CSI mounts the secret as a file at
+#   /var/secrets/grafana/GRAFANA_ADMIN_PASSWORD. The shell wrapper
+#   exports it as GF_SECURITY_ADMIN_PASSWORD before exec /run.sh.
+#   GF_SECURITY_ADMIN_USER set as a plain env var (not a secret).
+#
+# securityContext.fsGroup: 472 — Grafana's default user UID inside the
+# official image. Ensures the Grafana process can write to emptyDir
+# volumes used for SQLite state and plugin cache.
+#
+# Local access: kubectl port-forward -n anizai svc/grafana 3000:3000
+#
+# Spec: cloud_deployment_implementation.md §C5.9, §C5 D3, §C5 D4, §7.2
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: anizai
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      serviceAccountName: pipeline-runtime
+      securityContext:
+        # Grafana runs as UID 472 (grafana user inside the official image).
+        # fsGroup ensures volume ownership is set correctly on startup.
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.4.2
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export GF_SECURITY_ADMIN_PASSWORD=$(cat /var/secrets/grafana/GRAFANA_ADMIN_PASSWORD)
+              exec /run.sh
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - name: grafana-secrets
+              mountPath: /var/secrets/grafana
+              readOnly: true
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/datasources/prometheus.yml
+              subPath: prometheus.yml
+              readOnly: true
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/dashboard.yml
+              subPath: dashboard.yml
+              readOnly: true
+            - name: provisioning
+              mountPath: /var/lib/grafana/dashboards/anizai_pipeline.json
+              subPath: anizai_pipeline.json
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: grafana-secrets
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: grafana-secrets-spc
+        - name: provisioning
+          configMap:
+            name: grafana-provisioning
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: anizai
+  labels:
+    app: grafana
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
