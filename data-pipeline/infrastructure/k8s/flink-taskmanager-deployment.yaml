@@ -115,6 +115,10 @@ spec:
               value: "anizai"
             - name: POSTGRES_DB
               value: "anizai"
+            # OPENAI_MODEL_NAME — overrides the config/settings.py default (gpt-4o)
+            # to gpt-4o-mini. Same fix as JM — explicit override avoids image rebuild.
+            - name: OPENAI_MODEL_NAME
+              value: "gpt-4o-mini"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are read from
             # CSI-mounted files and exported by the shell wrapper above.
           volumeMounts:

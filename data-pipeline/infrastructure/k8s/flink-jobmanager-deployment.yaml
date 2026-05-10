@@ -137,6 +137,12 @@ spec:
               value: "anizai"
             - name: POSTGRES_DB
               value: "anizai"
+            # OPENAI_MODEL_NAME — overrides the config/settings.py default (gpt-4o)
+            # to gpt-4o-mini for Gold-layer enrichment. Fixed locally in settings.py
+            # and .env; explicit override here ensures the cloud Flink pods use the
+            # correct (cheaper) model without requiring an image rebuild.
+            - name: OPENAI_MODEL_NAME
+              value: "gpt-4o-mini"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are NOT set here.
             # They are read from the CSI-mounted files at /var/secrets/flink/
             # and exported by the shell wrapper command above. The GKE-native

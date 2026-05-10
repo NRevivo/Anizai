@@ -66,7 +66,7 @@ POSTGRES_DB = os.getenv("POSTGRES_DB", "anizai")
 # Used by Flink Gold Job for Cognitive Metadata Extraction,
 # Consensus Bundling (GPT-4o), and real-time translation.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o")
+OPENAI_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
 
 # ==========================================================
 # 5b. AI — Gold Semantic Rescue (Phase 7B, §4.1A)
