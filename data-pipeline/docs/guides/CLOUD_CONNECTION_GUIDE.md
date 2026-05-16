@@ -53,6 +53,32 @@ gcloud container clusters resize anizai-cluster `
 | Grafana | `kubectl port-forward -n anizai svc/grafana 3000:3000` | http://localhost:3000 | Pipeline metrics dashboards |
 | Prometheus | `kubectl port-forward -n anizai svc/prometheus 9090:9090` | http://localhost:9090 | Raw metrics |
 | PostgreSQL | `kubectl port-forward -n anizai svc/postgres 5432:5432` | `psql -h localhost -U anizai -d anizai` | Query vault tables directly |
+| Agent worker | `kubectl port-forward -n anizai svc/agent-worker 8000:8000` | http://localhost:8000/health | Agent /health + /metrics endpoint |
+
+**Start all port-forwards in one PowerShell window (background jobs):**
+
+```powershell
+$services = @(
+  "svc/postgres 5432:5432",
+  "svc/kafka 9092:9092",
+  "svc/kafka-ui 8080:8080",
+  "svc/flink-jobmanager 8081:8081",
+  "svc/airflow-webserver 8090:8080",
+  "svc/prometheus 9090:9090",
+  "svc/grafana 3000:3000",
+  "svc/agent-worker 8000:8000"
+)
+foreach ($svc in $services) {
+    Start-Job -ScriptBlock { param($s) kubectl port-forward -n anizai $s.Split(" ") } -ArgumentList $svc
+}
+Get-Job   # verify all Running
+```
+
+**Stop all port-forwards:**
+
+```powershell
+Get-Job | Stop-Job; Get-Job | Remove-Job
+```
 
 ---
 
@@ -422,7 +448,109 @@ kubectl get pods -n anizai -l app=postgres
 
 ---
 
-## Section 1.7 — Scaling the Cluster (Start / Stop Data Collection)
+## Section 1.7 — Agent Worker (Phase 8 Hub)
+
+The agent worker exposes a health endpoint and Prometheus metrics endpoint on port 8000.
+
+### Port-Forward
+
+```powershell
+kubectl port-forward -n anizai svc/agent-worker 8000:8000
+```
+
+### Health Check
+
+```powershell
+curl http://localhost:8000/health
+# Expected: {"status": "ok", "worker_id": "worker-1", "agent_version": "0.4.0-sprint21-..."}
+```
+
+### Metrics (Prometheus exposition format)
+
+```powershell
+curl http://localhost:8000/metrics
+# Sample output keys:
+#   agent_node_duration_ms{node_name=...}
+#   agent_session_total{outcome=done|failed|clarification_needed}
+#   agent_llm_cost_usd_total{model=...}
+#   agent_queue_depth
+#   agent_active_sessions
+```
+
+These metrics are also scraped automatically by the Prometheus pod (Section 1.5).
+
+### Pod Logs
+
+```powershell
+# Stream agent logs (forecast pipeline node sequence):
+kubectl logs -f -n anizai deploy/agent-worker --tail=100
+```
+
+Expected log sequence per session:
+`claim_session → query_understand → build_embedding → vault_query → rate_evidence → synthesize → write_to_firestore`
+
+### Pod Status
+
+```powershell
+kubectl get pods -n anizai -l app=agent-worker
+```
+
+---
+
+## Section 1.8 — Local Frontend → Cloud Firestore (E2E Testing)
+
+The frontend connects to **cloud Firestore** (`anizai-ai`) directly — no port-forward needed
+for Firestore (Firebase SDK uses HTTPS). Port-forward Postgres and the agent health endpoint
+for any local dev that needs them.
+
+### Frontend `.env` Configuration
+
+**Frontend `.env` (or `client/.env`) variables for cloud mode:**
+
+```env
+VITE_FIREBASE_PROJECT_ID=anizai-ai
+VITE_FIREBASE_API_KEY=<same as local dev>
+VITE_FIREBASE_AUTH_DOMAIN=anizai-ai.firebaseapp.com
+# No POSTGRES_HOST needed by the frontend — Postgres is accessed by the agent
+```
+
+### E2E Forecast Submission Walkthrough
+
+1. Start all port-forwards (see Quick-Start Cheat Sheet above).
+2. Open the local frontend with `VITE_FIREBASE_PROJECT_ID=anizai-ai`.
+3. Submit a question (e.g., "Will the Fed cut rates by Q2 2026?").
+4. Watch agent logs in real time:
+   ```powershell
+   kubectl logs -f -n anizai deploy/agent-worker
+   ```
+5. Expect the log sequence shown in Section 1.7 above.
+6. Frontend renders the four BI cards when Firestore `sessionResults` is written.
+
+---
+
+## Section 1.9 — Backup & Restore
+
+**Backup runs daily at 02:00 UTC** → `gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz`
+
+### Manual Restore to Local Postgres
+
+```powershell
+# Download a specific day's backup
+gsutil cp gs://anizai-pipeline-backups/postgres/2026-05-10/anizai.sql.gz .
+
+# Restore to local scratch (requires local Postgres with TimescaleDB)
+gunzip anizai.sql.gz
+psql -h localhost -U anizai -d anizai_scratch < anizai.sql
+
+# Compare row counts
+psql -h localhost -U anizai -d anizai_scratch -c "SELECT relname, n_live_tup FROM pg_stat_user_tables WHERE schemaname='public' ORDER BY relname;"
+```
+
+Lifecycle: backups older than 30 days are auto-deleted from the bucket.
+
+---
+
+## Section 1.10 — Scaling the Cluster (Start / Stop Data Collection)
 
 The cluster has two node pools:
 
@@ -479,7 +607,7 @@ yet been processed by Flink will be lost unless Kafka topic retention is set
 
 ---
 
-## Section 1.8 — Check All Pod Status at Once
+## Section 1.11 — Check All Pod Status at Once
 
 ```powershell
 # All pods in the anizai namespace with status:
@@ -729,3 +857,10 @@ If pods persist, check for PodDisruptionBudgets blocking eviction:
 ```powershell
 kubectl get pdb -n anizai
 ```
+
+### OpenAI quota (KG-PHASE-C-5)
+
+Gold job and agent synthesis both call OpenAI. If Gold embeddings fail (429) or the
+agent synthesis fails with a quota error, check the OpenAI dashboard for the key
+stored in Secret Manager (`openai-api-key`). The agent uses GPT-4o for synthesis and
+GPT-4o-mini for other nodes — verify both have quota.
