@@ -38,24 +38,25 @@ export function Sidebar({
         .map((part) => part[0]?.toUpperCase() ?? '')
         .join('') || 'U';
     const membershipLabel = userPlan === 'premium' ? 'Premium plan' : 'Free plan';
+    // Status colour lives in the dot only; the label stays quiet slate.
     const getStatusView = (status: PredictionSession['status']) => {
         if (status === 'queued') {
-            return { label: 'Queued', dot: 'bg-slate-400', text: 'text-slate-600' };
+            return { label: 'Queued', dot: 'bg-slate-400' };
         }
         if (status === 'claimed') {
-            return { label: 'Claimed', dot: 'bg-indigo-500', text: 'text-indigo-700' };
+            return { label: 'Claimed', dot: 'bg-slate-400' };
         }
         if (status === 'running') {
-            return { label: 'Running', dot: 'bg-amber-500', text: 'text-amber-700' };
+            return { label: 'Running', dot: 'bg-amber-500' };
         }
         if (status === 'failed') {
-            return { label: 'Failed', dot: 'bg-red-500', text: 'text-red-700' };
+            return { label: 'Failed', dot: 'bg-rose-500' };
         }
         if (status === 'awaiting_clarification') {
-            return { label: 'Needs clarification', dot: 'bg-violet-500', text: 'text-violet-700' };
+            return { label: 'Needs clarification', dot: 'bg-anizai-purple-400' };
         }
 
-        return { label: 'Done', dot: 'bg-green-500', text: 'text-green-700' };
+        return { label: 'Done', dot: 'bg-anizai-teal-500' };
     };
 
     return (
@@ -97,7 +98,7 @@ export function Sidebar({
             {/* Sessions List - Scrollable */}
             <div className="flex-1 overflow-y-auto bg-white">
                 <div className="px-3 sm:px-4 py-2">
-                    <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3 mt-4 px-2">Forecasts</h3>
+                    <h3 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-3 mt-4 px-2">Forecasts</h3>
                     <div className="space-y-1">
                         {sessions.length === 0 ? (
                             <StateMessage
@@ -113,8 +114,8 @@ export function Sidebar({
                             <div
                                 key={session.id}
                                 className={`relative w-full min-w-0 text-left px-3 py-3 rounded-md transition-all duration-200 group border ${activeSessionId === session.id
-                                    ? 'bg-anizai-blue-50 border-anizai-blue-100 shadow-sm'
-                                    : 'hover:bg-gray-50 border-transparent hover:border-gray-100'
+                                    ? 'bg-anizai-purple-50 border-anizai-purple-100'
+                                    : 'hover:bg-slate-50 border-transparent hover:border-slate-100'
                                     }`}
                             >
                                 <button
@@ -125,17 +126,17 @@ export function Sidebar({
                                         <p className={`min-w-0 break-words text-sm leading-snug line-clamp-2 ${activeSessionId === session.id ? 'font-medium text-gray-900' : 'text-gray-600'}`}>
                                             {session.question}
                                         </p>
-                                        <span className={`text-xs font-semibold shrink-0 ${activeSessionId === session.id ? 'text-anizai-blue-600' : 'text-gray-400'}`}>
+                                        <span className={`text-xs font-normal shrink-0 ${activeSessionId === session.id ? 'text-slate-500' : 'text-slate-400'}`}>
                                             {session.probability === null ? '—' : formatProbability(session.probability)}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-2">
                                         <div className="flex items-center gap-1.5">
                                             <div className={`w-1.5 h-1.5 rounded-full ${statusView.dot}`} />
-                                            <span className={`text-[10px] font-medium uppercase tracking-wide ${statusView.text}`}>{statusView.label}</span>
+                                            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{statusView.label}</span>
                                         </div>
-                                        <span className="text-[10px] text-gray-300">/</span>
-                                        <span className="text-[10px] text-gray-400">{formatRelativeTime(session.lastUpdated)}</span>
+                                        <span className="text-[10px] text-slate-300">/</span>
+                                        <span className="text-[10px] text-slate-400">{formatRelativeTime(session.lastUpdated)}</span>
                                     </div>
                                 </button>
                                 {onDeleteSession && (

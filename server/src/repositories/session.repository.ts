@@ -176,7 +176,7 @@ export const sessionRepository = {
             finalProbability: data.finalProbability,
             confidence: data.confidence,
             marketComparison: data.marketComparison ?? [],
-            summaryMarkdown: data.summaryMarkdown,
+            summaryMarkdown: data.summaryMarkdown ?? null,
             createdAt: toISOString(data.createdAt) ?? '',
             updatedAt: toISOString(data.updatedAt) ?? '',
             confidenceLabel: data.confidenceLabel ?? null,

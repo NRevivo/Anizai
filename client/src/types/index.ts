@@ -15,8 +15,17 @@ export interface Prediction {
     probability: number; // 0-1 float
     confidenceIndex: number; // 0-1 float
     status: SessionStatus;
+    /** @deprecated Collapsed narrative fallback. New code should read bottomLineAnswer / detailedExplanation / summaryMarkdown directly. */
     explanation: string;
+    bottomLineAnswer?: string | null;
+    detailedExplanation?: string | null;
+    summaryMarkdown?: string | null;
+    confidenceLabel?: 'High Confidence' | 'Medium Confidence' | 'Low Confidence' | null;
+    consensusStrength?: 'Strong' | 'Moderate' | 'Weak' | null;
     marketProbability?: number | null;
+    marketComparisonInsight?: string | null;
+    sentimentAnalysisInsight?: string | null;
+    evidenceFeedSummary?: string | null;
     errorMessage?: string | null;
     clarificationCandidates?: ClarificationCandidate[] | null;
     keyFactors?: KeyFactor[];
@@ -73,10 +82,11 @@ export interface TimelineEvent {
     credibilityTier?: string | null;
     recencyWeight?: number | null;
     usedInAnswer?: boolean | null;
-    impactOnForecast?: string | null;
+    // Canonical impact rating from the agent's synthesis step. The legacy
+    // `impact` field was removed — the pipeline only populates this one.
+    impactOnForecast?: 'positive' | 'negative' | 'neutral' | null;
     justification?: string | null;
     rank?: number | null;
-    impact: 'positive' | 'negative' | 'neutral';
     impactLabel?: string;
     isKeyEvidence?: boolean;
     description: string;

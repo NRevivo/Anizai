@@ -6,9 +6,10 @@ interface MarketComparisonProps {
     anizaiProbability: number;
     marketProbability?: number | null;
     tier?: 'tier_1' | 'tier_2' | null;
+    insight?: string | null;
 }
 
-export function MarketComparison({ anizaiProbability, marketProbability, tier = null }: MarketComparisonProps) {
+export function MarketComparison({ anizaiProbability, marketProbability, tier = null, insight = null }: MarketComparisonProps) {
     const hasMarketProbability = marketProbability != null;
     const isFreeformTier = tier === 'tier_2';
     const anizaiPct = anizaiProbability * 100;
@@ -24,11 +25,13 @@ export function MarketComparison({ anizaiProbability, marketProbability, tier = 
     const difference = hasMarketProbability ? anizaiPct - marketPct : 0;
     const isBullish = difference > 0;
 
-    const insightTitle = !hasMarketProbability
-        ? 'No market benchmark available'
-        : isBullish
-            ? `Anizai is ${difference.toFixed(1)} points above the market benchmark`
-            : `Anizai is ${Math.abs(difference).toFixed(1)} points below the market benchmark`;
+    const insightTitle = insight?.trim()
+        ? insight.trim()
+        : !hasMarketProbability
+            ? 'No market benchmark available'
+            : isBullish
+                ? `Anizai is ${difference.toFixed(1)} points above the market benchmark`
+                : `Anizai is ${Math.abs(difference).toFixed(1)} points below the market benchmark`;
 
     const emptyDescription = isFreeformTier
         ? 'No market benchmark available for this freeform forecast.'

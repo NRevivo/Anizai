@@ -6,9 +6,10 @@ import { formatProbability } from '../../lib/utils';
 
 interface SentimentAnalysisProps {
     data: SentimentDataPoint[];
+    insight?: string | null;
 }
 
-export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
+export function SentimentAnalysis({ data, insight = null }: SentimentAnalysisProps) {
     const latestPoint = data[data.length - 1];
     const chartData = data.map((point) => ({
         ...point,
@@ -36,7 +37,9 @@ export function SentimentAnalysis({ data }: SentimentAnalysisProps) {
         <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm">
             <CardHeader className="p-4 sm:p-5 pb-2">
                 <CardTitle className="text-base font-semibold text-gray-900">Sentiment Signals</CardTitle>
-                <CardDescription className="text-xs text-gray-500">Expert and public sentiment as supporting context</CardDescription>
+                <CardDescription className="text-xs text-gray-500">
+                    {insight?.trim() ? insight.trim() : 'Expert and public sentiment as supporting context'}
+                </CardDescription>
             </CardHeader>
             <CardContent className="p-4 sm:p-5 pt-2">
                 {data.length > 0 ? (

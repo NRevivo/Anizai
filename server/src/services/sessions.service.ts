@@ -97,7 +97,7 @@ export interface SessionResult {
     finalProbability: number;
     confidence: number;
     marketComparison: { source: string; value: number }[];
-    summaryMarkdown: string;
+    summaryMarkdown: string | null;
     createdAt: string;
     updatedAt: string;
     // New: Confidence & Consensus metrics
