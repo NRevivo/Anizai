@@ -2,6 +2,7 @@ import { apiRequest } from '../lib/api';
 import { db } from '../lib/firebase';
 import {
     collection,
+    doc,
     onSnapshot,
     orderBy,
     query,
@@ -243,6 +244,49 @@ export async function clarifySession(
         method: 'POST',
         body: input,
     });
+}
+
+export interface SessionDocData {
+    id: string;
+    status: SessionStatus;
+    latestProbability: number | null;
+    latestConfidence: number | null;
+    errorCode: string | null;
+    errorMessage: string | null;
+    clarificationCandidates: ClarificationCandidate[] | null;
+}
+
+export function subscribeToSession(
+    sessionId: string,
+    handlers: {
+        onData: (session: SessionDocData) => void;
+        onError?: (error: Error) => void;
+    }
+): Unsubscribe {
+    return onSnapshot(
+        doc(db, 'sessions', sessionId),
+        (snapshot) => {
+            if (!snapshot.exists()) {
+                return;
+            }
+
+            const data = snapshot.data();
+            handlers.onData({
+                id: snapshot.id,
+                status: data.status as SessionStatus,
+                latestProbability: typeof data.latestProbability === 'number' ? data.latestProbability : null,
+                latestConfidence: typeof data.latestConfidence === 'number' ? data.latestConfidence : null,
+                errorCode: typeof data.errorCode === 'string' ? data.errorCode : null,
+                errorMessage: typeof data.errorMessage === 'string' ? data.errorMessage : null,
+                clarificationCandidates: Array.isArray(data.clarificationCandidates)
+                    ? (data.clarificationCandidates as ClarificationCandidate[])
+                    : null,
+            });
+        },
+        (error) => {
+            handlers.onError?.(error);
+        }
+    );
 }
 
 export function subscribeToAgentEvents(

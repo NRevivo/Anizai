@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
@@ -39,6 +39,7 @@ import {
   fetchSessionDetail,
   fetchSessions,
   subscribeToAgentEvents,
+  subscribeToSession,
   subscribeToSessionMessages,
   type SessionDetail,
   type SessionMessage,
@@ -292,11 +293,23 @@ function App() {
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
 
+  // Mirrors the status of the currently loaded SessionDetail. The session
+  // listener compares live Firestore snapshots against this to decide when
+  // the BFF aggregate is stale and needs a re-fetch — kept in a ref so the
+  // listener effect doesn't re-subscribe on every detail change.
+  const loadedStatusRef = useRef<{ id: string; status: SessionStatus } | null>(null);
+
   const loadSession = useCallback(async (sessionId: string) => {
     const detail = await fetchSessionDetail(sessionId);
     setActiveSessionId(sessionId);
     setActiveSessionDetail(detail);
   }, []);
+
+  useEffect(() => {
+    loadedStatusRef.current = activeSessionDetail
+      ? { id: activeSessionDetail.session.id, status: activeSessionDetail.session.status }
+      : null;
+  }, [activeSessionDetail]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -312,7 +325,12 @@ function App() {
         setAgentEvents(events);
         setIsAgentEventsLoading(false);
       },
-      onError: () => {
+      onError: (error) => {
+        // An empty agentEvents collection is valid and does NOT surface here
+        // (onSnapshot reports it as an empty snapshot). Reaching onError means
+        // a real failure — e.g. a missing/incorrect Firestore read rule. Log
+        // it so the regression is visible rather than silently empty.
+        console.warn('[agentEvents] subscription error:', error);
         setAgentEvents([]);
         setIsAgentEventsLoading(false);
       },
@@ -350,6 +368,48 @@ function App() {
       unsubscribe();
     };
   }, [activeSessionId]);
+
+  // Watch the active session document in real time. The agent worker flips
+  // sessions/{id}.status as it progresses; without this the UI would sit on
+  // the status captured at load time until a manual reload.
+  useEffect(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    const unsubscribe = subscribeToSession(activeSessionId, {
+      onData: (session) => {
+        // Keep the sidebar pill in sync with the live status.
+        setSessions((current) =>
+          current.map((item) =>
+            item.id === session.id
+              ? {
+                  ...item,
+                  status: session.status,
+                  latestProbability: session.latestProbability,
+                  latestConfidence: session.latestConfidence,
+                  errorCode: session.errorCode,
+                  errorMessage: session.errorMessage,
+                  clarificationCandidates: session.clarificationCandidates,
+                }
+              : item
+          )
+        );
+
+        // When the live status diverges from the loaded SessionDetail,
+        // re-pull the full aggregate from the BFF (the Firestore doc does
+        // not carry result/evidence).
+        const loaded = loadedStatusRef.current;
+        if (loaded && loaded.id === session.id && loaded.status !== session.status) {
+          void loadSession(session.id);
+        }
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [activeSessionId, loadSession]);
 
   const enterDashboard = useCallback(async () => {
     setIsDashboardLoading(true);

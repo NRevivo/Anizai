@@ -77,6 +77,16 @@ service cloud.firestore {
         allow read: if isSessionOwner(sessionId);
         allow write: if false;
       }
+
+      // AGENT EVENTS (read-only for client)
+      // Sprint 25: the agent worker emits a real-time reasoning trace into
+      // this subcollection. Client read is gated on session ownership of the
+      // parent session doc, mirroring the messages/evidence rules. Writes are
+      // server-side only (Admin SDK bypasses these rules).
+      match /agentEvents/{eventId} {
+        allow read: if isSessionOwner(sessionId);
+        allow write: if false;
+      }
     }
 
     // SESSION RESULTS (read-only for client)

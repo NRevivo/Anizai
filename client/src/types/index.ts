@@ -133,7 +133,7 @@ export type AgentEventType =
     | 'followup_response_complete'
     | 'error';
 
-export type AgentEventStatus = 'in_progress' | 'complete' | 'failed';
+export type AgentEventStatus = 'pending' | 'running' | 'done' | 'failed';
 
 export interface AgentEvent {
     eventId: string;
