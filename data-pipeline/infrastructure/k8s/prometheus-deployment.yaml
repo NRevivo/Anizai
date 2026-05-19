@@ -46,6 +46,11 @@ spec:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
             - "--web.enable-lifecycle"
+            # 7-day retention bounds WAL growth. Phase 9.5 F2 finding: by
+            # Sprint C5 + 9 days the TSDB had 871 WAL segments and replay
+            # OOMKilled the pod at the 512Mi limit. Shorter retention +
+            # higher memory limit (below) prevents recurrence.
+            - "--storage.tsdb.retention.time=7d"
           ports:
             - name: web
               containerPort: 9090
@@ -56,12 +61,17 @@ spec:
               port: 9090
             initialDelaySeconds: 10
             periodSeconds: 10
+          # Long initialDelaySeconds + permissive failureThreshold: on a cold
+          # restart with significant WAL accumulation, Prometheus needs minutes
+          # to finish WAL replay before /-/healthy starts responding 200. The
+          # previous 30s delay was inadequate.
           livenessProbe:
             httpGet:
               path: /-/healthy
               port: 9090
-            initialDelaySeconds: 30
+            initialDelaySeconds: 300
             periodSeconds: 30
+            failureThreshold: 5
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus/prometheus.yml
@@ -69,13 +79,17 @@ spec:
               readOnly: true
             - name: data
               mountPath: /prometheus
+          # Memory raised from 512Mi → 2Gi (Phase 9.5 F2). WAL replay of
+          # 871 segments needs ~1.2-1.5 GiB working set; 2Gi gives headroom.
+          # If retention=7d holds the WAL bounded, normal operation uses
+          # ~600 MiB.
           resources:
             requests:
               cpu: "100m"
-              memory: "256Mi"
+              memory: "512Mi"
             limits:
               cpu: "500m"
-              memory: "512Mi"
+              memory: "2Gi"
       volumes:
         - name: config
           configMap:

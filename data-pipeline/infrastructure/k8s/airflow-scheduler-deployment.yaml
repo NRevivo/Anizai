@@ -44,7 +44,7 @@ spec:
       serviceAccountName: pipeline-runtime
       containers:
         - name: airflow-scheduler
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3-p95
           imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
           args:
@@ -96,11 +96,21 @@ spec:
             # Without the PostgreSQL connection, the probe checks SQLite (which
             # has no SchedulerJob record) and always fails → Kubernetes kills the
             # healthy scheduler every ~150s.
-            # Fix: use the HTTP health endpoint on port 8793 (exposed by
-            # AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK=true, set in env: below).
+            # Fix: use the scheduler's HTTP health endpoint on port 8974
+            # (exposed by AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK=true, set in
+            # env: below).
+            #
+            # IMPORTANT (Phase 9.5 F2 correction, 2026-05-19):
+            #   Port 8793 — used previously by KG-PHASE-C-4 fix — is the
+            #   log-serving API (serve_logs.py), which requires a signed JWT
+            #   Authorization header. Without the header it returns 403 to
+            #   the kube-probe; this caused the scheduler to be killed every
+            #   ~150s in a runaway crashloop (111 restarts in 10h before this
+            #   fix). The correct port for scheduler health-check (when
+            #   ENABLE_HEALTH_CHECK=true) is 8974.
             httpGet:
               path: /health
-              port: 8793
+              port: 8974
             initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 10
