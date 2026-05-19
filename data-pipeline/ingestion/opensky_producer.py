@@ -601,6 +601,22 @@ class OpenSkyProducer:
             "[opensky] Static run complete — emitted %d / %d boxes",
             run_emitted, len(BOUNDING_BOXES),
         )
+
+        # Phase 9.5 Stage B Item 4 — raise on 0% success.
+        # Previous behavior: every box's fetch could fail (KG-PHASE-C-6:
+        # GKE cluster cannot reach opensky-network.org) and the producer
+        # would still return cleanly. Airflow saw `task: success`, masking
+        # a 100% failure. Now: if 0-of-N boxes succeeded, raise so the
+        # Airflow DAG task is correctly marked `failed`. Stage C
+        # monitoring then has a single clean signal to alert on.
+        if run_emitted == 0 and len(BOUNDING_BOXES) > 0:
+            raise RuntimeError(
+                f"[opensky] All {len(BOUNDING_BOXES)} bounding-box fetches "
+                f"failed — emitted 0 Bronze messages. See per-box ERROR "
+                f"logs above for upstream cause (typically network "
+                f"timeout to opensky-network.org from GKE: KG-PHASE-C-6)."
+            )
+
         return run_emitted
 
     # ----------------------------------------------------------

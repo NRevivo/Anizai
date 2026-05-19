@@ -439,6 +439,22 @@ class GoogleTrendsProducer:
             "[googletrends] Static run complete — emitted %d messages across %d geos",
             run_emitted, len(GEO_MATRIX),
         )
+
+        # Phase 9.5 Stage B Item 4 — raise on 0% success.
+        # Previous behavior: pytrends 404 errors on every geo (KG-PHASE-C-7)
+        # were caught + logged + skipped, and the producer returned 0 cleanly.
+        # Airflow saw `task: success` despite zero Bronze messages emitted.
+        # Now: if 0-of-N geos produced any messages, raise so the DAG task
+        # is correctly marked `failed` and the monitoring layer has a
+        # single clean signal to alert on.
+        if run_emitted == 0 and len(GEO_MATRIX) > 0:
+            raise RuntimeError(
+                f"[googletrends] All {len(GEO_MATRIX)} geo fetches failed "
+                f"— emitted 0 Bronze messages. See per-geo ERROR logs above "
+                f"for upstream cause (typically pytrends ResponseError 404 "
+                f"from Google's unofficial Trends endpoint: KG-PHASE-C-7)."
+            )
+
         return run_emitted
 
     # ----------------------------------------------------------
