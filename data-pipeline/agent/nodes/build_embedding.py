@@ -71,9 +71,13 @@ def _get_default_client() -> Any:
     """
     global _default_client
     if _default_client is None:
-        from openai import OpenAI  # local import keeps cold-start cheap
+        # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+        from utils.openai_client import get_openai_client
 
-        _default_client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=TIMEOUT_S)
+        _default_client = get_openai_client(
+            api_key=settings.OPENAI_API_KEY,
+            timeout=TIMEOUT_S,
+        )
     return _default_client
 
 

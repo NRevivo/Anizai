@@ -78,7 +78,9 @@ def build_reference_vector() -> np.ndarray:
         print("[build_sniper_vec] ERROR: OPENAI_API_KEY not set in .env.")
         sys.exit(1)
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+    from utils.openai_client import get_openai_client
+    client = get_openai_client(api_key=OPENAI_API_KEY)
 
     terms = sorted(MASTER_KEYWORD_LIST)
     print(f"[build_sniper_vec] Embedding {len(terms)} keywords ...")

@@ -543,9 +543,10 @@ def process_social_pulse_message(
 
     if openai_client is None:
         try:
-            from openai import OpenAI
+            # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+            from utils.openai_client import get_openai_client
             from config.settings import OPENAI_API_KEY
-            openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            openai_client = get_openai_client(api_key=OPENAI_API_KEY)
         except ImportError:
             logger.error("[gold/polymarket] openai package not installed")
             return DEAD_LETTER_QUEUE, _dlq_record(
@@ -1007,9 +1008,10 @@ def process_newsapi_gold_message(
 
     if openai_client is None:
         try:
-            from openai import OpenAI
+            # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+            from utils.openai_client import get_openai_client
             from config.settings import OPENAI_API_KEY
-            openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            openai_client = get_openai_client(api_key=OPENAI_API_KEY)
         except ImportError:
             logger.error("[gold/newsapi] openai package not installed")
             return DEAD_LETTER_QUEUE, _newsapi_gold_dlq_record(
@@ -1249,9 +1251,10 @@ def process_arxiv_gold_message(
 
     if openai_client is None:
         try:
-            from openai import OpenAI
+            # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+            from utils.openai_client import get_openai_client
             from config.settings import OPENAI_API_KEY
-            openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            openai_client = get_openai_client(api_key=OPENAI_API_KEY)
         except ImportError:
             logger.error("[gold/arxiv] openai package not installed")
             return DEAD_LETTER_QUEUE, _arxiv_gold_dlq_record(
@@ -1487,9 +1490,10 @@ def process_telegram_gold_message(
 
     if openai_client is None:
         try:
-            from openai import OpenAI
+            # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+            from utils.openai_client import get_openai_client
             from config.settings import OPENAI_API_KEY
-            openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            openai_client = get_openai_client(api_key=OPENAI_API_KEY)
         except ImportError:
             logger.error("[gold/telegram] openai package not installed")
             return DEAD_LETTER_QUEUE, _telegram_gold_dlq_record(
@@ -1826,9 +1830,10 @@ def process_hackernews_gold_message(
 
     if openai_client is None:
         try:
-            from openai import OpenAI
+            # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+            from utils.openai_client import get_openai_client
             from config.settings import OPENAI_API_KEY
-            openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            openai_client = get_openai_client(api_key=OPENAI_API_KEY)
         except ImportError:
             logger.error("[gold/hackernews] openai package not installed")
             return DEAD_LETTER_QUEUE, _hackernews_gold_dlq_record(
@@ -2515,9 +2520,10 @@ if PYFLINK_AVAILABLE:
         """
 
         def open(self, runtime_context):
-            from openai import OpenAI
+            # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+            from utils.openai_client import get_openai_client
             from config.settings import OPENAI_API_KEY
-            self._openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            self._openai_client = get_openai_client(api_key=OPENAI_API_KEY)
 
         def process_element(self, value: str, _ctx: ProcessFunction.Context):
             from persistence.social_vectors import insert as sv_insert
@@ -2539,14 +2545,20 @@ if PYFLINK_AVAILABLE:
             # so the RAG agent can drill down from the Gold vector to the raw
             # Silver comments in social_vault (Gap 1 fix, Sprint 11, Section 5.1).
             social_id: str | None = None
+            # Phase 9.5 Stage B Item 1b: retry transient DB errors (DNS race,
+            # Postgres restart) before falling through to the non-fatal warning.
             try:
+                from utils.retry import retry_on_transient
                 content_hash = silver_social.get("content_hash", "")
                 if content_hash and exists_by_content_hash(content_hash):
                     # Batch already archived — look up existing social_id rather
                     # than re-inserting, so silver_data_ref is always populated.
                     social_id = fetch_social_id_by_content_hash(content_hash)
                 else:
-                    social_id = sv_archive(silver_social)   # capture return value
+                    social_id = retry_on_transient(
+                        sv_archive, silver_social,
+                        op_name="social_vault.archive",
+                    )
             except Exception as exc:
                 # Non-fatal: archive failure must not block Gold enrichment.
                 # silver_data_ref will remain None (unknown) — correct sentinel.
@@ -2578,8 +2590,13 @@ if PYFLINK_AVAILABLE:
                 record["metadata"]["silver_data_ref"] = social_id
 
             # Persist Gold vector to PostgreSQL social_vectors (Section 5.2)
+            # Phase 9.5 Stage B Item 1b: retry transient DB errors.
             try:
-                sv_insert(record)
+                from utils.retry import retry_on_transient
+                retry_on_transient(
+                    sv_insert, record,
+                    op_name="social_vectors.insert",
+                )
             except Exception as exc:
                 logger.error("[gold/flink] social_vectors.insert failed: %s", exc)
                 yield (DLQ_TAG, json.dumps(
@@ -2650,9 +2667,23 @@ if PYFLINK_AVAILABLE:
             # Persist Gold metric to momentum_vault TimescaleDB hypertable (Section 5.3).
             # ON CONFLICT (metric_id, timestamp_utc) DO NOTHING ensures Flink
             # exactly-once re-deliveries never create duplicate rows.
+            #
+            # Phase 9.5 Stage B Item 1b: wrap the insert in retry_on_transient
+            # so a DNS-resolution failure during cluster scale-up (or a brief
+            # Postgres restart) does not immediately drop the message to DLQ.
+            # 5 attempts × exponential backoff (1s, 2s, 4s, 8s) covers a ~15s
+            # transient window — long enough for a normal Postgres recovery,
+            # short enough that a true outage degrades gracefully.
+            # Permanent errors (schema mismatch, constraint violation) are
+            # not retried by retry_on_transient and still route to DLQ on the
+            # first failure (correct behaviour — they cannot self-heal).
             try:
                 from persistence.momentum_vault import insert as mv_insert
-                mv_insert(gold_record)
+                from utils.retry import retry_on_transient
+                retry_on_transient(
+                    mv_insert, gold_record,
+                    op_name="momentum_vault_insert",
+                )
             except Exception as exc:
                 logger.error("[gold/flink] momentum_vault.insert failed: %s", exc)
                 yield (DLQ_TAG, json.dumps(
@@ -2702,12 +2733,13 @@ if PYFLINK_AVAILABLE:
         """
 
         def open(self, runtime_context):
-            from openai import OpenAI
+            # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
+            from utils.openai_client import get_openai_client
             from config.settings import OPENAI_API_KEY, GOLD_SEMANTIC_RESCUE_THRESHOLD
             from processing.keyword_sniper import SNIPER_REFERENCE_VECTOR_PATH
             import numpy as np
 
-            self._openai_client = OpenAI(api_key=OPENAI_API_KEY)
+            self._openai_client = get_openai_client(api_key=OPENAI_API_KEY)
             self._rescue_threshold = GOLD_SEMANTIC_RESCUE_THRESHOLD
 
             # Load sniper reference vector — hard-fail at startup if missing (B4).
@@ -2783,8 +2815,13 @@ if PYFLINK_AVAILABLE:
             # Returns doc_id (UUID string) or None if document_hash already exists.
             # Non-fatal: archive failure must not block Gold enrichment.
             doc_id: str | None = None
+            # Phase 9.5 Stage B Item 1b: retry transient DB errors.
             try:
-                doc_id = kv_archive(silver_doc)
+                from utils.retry import retry_on_transient
+                doc_id = retry_on_transient(
+                    kv_archive, silver_doc,
+                    op_name="knowledge_vault.archive",
+                )
             except Exception as exc:
                 logger.warning("[gold/flink] knowledge_vault.archive failed: %s", exc)
 
@@ -2824,8 +2861,13 @@ if PYFLINK_AVAILABLE:
                 record["metadata"]["silver_data_ref"] = doc_id
 
             # Persist Gold vector to PostgreSQL knowledge_vectors (Section 5.2).
+            # Phase 9.5 Stage B Item 1b: retry transient DB errors.
             try:
-                kv_insert(record)
+                from utils.retry import retry_on_transient
+                retry_on_transient(
+                    kv_insert, record,
+                    op_name="knowledge_vectors.insert",
+                )
             except Exception as exc:
                 logger.error("[gold/flink] knowledge_vectors.insert failed: %s", exc)
                 yield (DLQ_TAG, json.dumps(
