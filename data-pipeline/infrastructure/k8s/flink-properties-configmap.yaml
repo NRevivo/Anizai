@@ -22,6 +22,28 @@
 #   kubectl apply -f infrastructure/k8s/flink-properties-configmap.yaml -n anizai
 #
 # Spec: cloud_deployment_implementation.md §C3.1, §C3 D2, §4.3
+#
+# Flink HA Enablement (post-Sprint C5, corrected 2026-05-19):
+#   high-availability.type: kubernetes — correct Flink 1.19 key. The alias
+#     'high-availability' is deprecated and emits WARN at every startup;
+#     corrected here. Enables KubernetesHaServicesFactory: job graphs +
+#     leader-election state stored in K8s ConfigMaps rather than JM heap.
+#   high-availability.cluster-id: anizai-flink — prefix for all HA
+#     ConfigMaps (anizai-flink-dispatcher-leader, anizai-flink-
+#     resourcemanager-leader, anizai-flink-<job-id>-jobgraph, etc.).
+#   high-availability.storageDir: file:///opt/flink/checkpoints/ha —
+#     HA metadata that overflows ConfigMap size limits lands in the ha/
+#     subdirectory of the existing flink-checkpoints PVC. Flink creates
+#     the ha/ directory on first startup; no PVC change required.
+#   kubernetes.cluster-id: anizai-flink — REQUIRED by Fabric8FlinkKubeClient
+#     in Flink 1.19 to initialize the K8s API client (Fabric8FlinkKubeClient
+#     .java:98). Distinct from high-availability.cluster-id despite sharing
+#     the same value; both must be set explicitly or the JM crashes with
+#     "Configuration option 'kubernetes.cluster-id' is not set."
+#   kubernetes.namespace: anizai — tells Flink's K8s client which
+#     namespace to create ConfigMaps in. Must match the pod namespace.
+#   RBAC prerequisite: pipeline-runtime KSA needs ConfigMap CRUD in the
+#     anizai namespace — see flink-rbac.yaml (new file, this sprint).
 # ==========================================================
 apiVersion: v1
 kind: ConfigMap
@@ -53,6 +75,11 @@ data:
     metrics.reporters: prom
     metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
     metrics.reporter.prom.port: 9249
+    high-availability.type: kubernetes
+    high-availability.cluster-id: anizai-flink
+    high-availability.storageDir: file:///opt/flink/checkpoints/ha
+    kubernetes.cluster-id: anizai-flink
+    kubernetes.namespace: anizai
   # -------- TaskManager properties --------
   # Matches docker-compose flink-taskmanager FLINK_PROPERTIES verbatim.
   # taskmanager.numberOfTaskSlots: 4 — 2 slots for the Silver Job,
@@ -69,3 +96,8 @@ data:
     metrics.reporters: prom
     metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
     metrics.reporter.prom.port: 9249
+    high-availability.type: kubernetes
+    high-availability.cluster-id: anizai-flink
+    high-availability.storageDir: file:///opt/flink/checkpoints/ha
+    kubernetes.cluster-id: anizai-flink
+    kubernetes.namespace: anizai

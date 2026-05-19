@@ -1,0 +1,69 @@
+# ==========================================================
+# Anizai — Flink HA RBAC (Phase 9 follow-up, 2026-05-19)
+# ==========================================================
+# Why this Role is needed:
+#   Flink Kubernetes HA (high-availability: kubernetes) persists job
+#   graphs and leader-election state as ConfigMaps in the anizai
+#   namespace. The pipeline-runtime KSA is bound to the pipeline-runtime
+#   GSA via Workload Identity (Sprint C1.12-C1.13) for GCP secret access
+#   but has no Kubernetes RBAC permissions. Without ConfigMap CRUD rights
+#   the JM crashes with 403 Forbidden on its first ConfigMap write.
+#
+#   This Role is scoped narrowly: ConfigMap operations only, anizai
+#   namespace only. No cluster-scoped permissions. No access to Secrets,
+#   Pods, Deployments, or any other resource type.
+#
+# ConfigMaps Flink creates (all prefixed anizai-flink-):
+#   anizai-flink-dispatcher-leader      — leader election for Dispatcher
+#   anizai-flink-resourcemanager-leader — leader election for ResourceManager
+#   anizai-flink-<job-id>-jobgraph      — serialized job graph (one per job)
+#   anizai-flink-<job-id>-checkpoint-counter — checkpoint sequence number
+#
+# Why pipeline-runtime (not a new KSA):
+#   Both the JM and TM pods already run under pipeline-runtime (Sprint C3).
+#   Creating a dedicated KSA would require updating both Deployment
+#   serviceAccountName fields and re-binding Workload Identity — extra
+#   complexity for no operational benefit. pipeline-runtime is the correct
+#   subject.
+#
+# OQ-2 follow-up: if JM logs show 403 on leases.coordination.k8s.io
+#   after rollout, add a second rule block:
+#     - apiGroups: ["coordination.k8s.io"]
+#       resources: ["leases"]
+#       verbs: ["create", "get", "update", "patch", "list", "watch"]
+#   RBAC changes take effect without a pod restart.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/flink-rbac.yaml -n anizai
+#
+# Spec: Phase 9 follow-up — Flink HA Enablement sprint
+# ==========================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: flink-ha-role
+  namespace: anizai
+  labels:
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "update", "patch", "delete", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flink-ha-rolebinding
+  namespace: anizai
+  labels:
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: flink-ha-role
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-runtime
+    namespace: anizai
