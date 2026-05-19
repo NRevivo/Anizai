@@ -1,0 +1,220 @@
+# ==========================================================
+# Anizai — Kafka topic-reassertion CronJob (Phase 9.5 F1, 2026-05-19)
+# ==========================================================
+# Purpose:
+#   Self-healing mechanism for Kafka topic existence. Runs the same
+#   idempotent topic-creation script as `kafka-init-job.yaml` on an
+#   hourly schedule, ensuring that if Kafka data is ever lost (PVC
+#   reset, manual operator action, log.dirs misconfiguration like the
+#   Phase 9.5 root-cause finding) the 19 expected topics self-restore
+#   within the hour.
+#
+# Why a CronJob (and not an initContainer / sidecar):
+#   - CronJob is independent of Kafka pod lifecycle. Re-asserts even
+#     when Kafka has been Ready for days. Survives pod restarts.
+#   - An initContainer on the Kafka StatefulSet would run BEFORE the
+#     Kafka broker is up — but the topic-creation needs a Ready broker
+#     to connect to. The dependency is impossible to express via
+#     initContainers.
+#   - A sidecar on the Kafka pod could work but adds complexity and a
+#     long-running idle container; CronJob is the canonical K8s pattern
+#     for "do X periodically against a Service".
+#   - Idempotency via `--if-not-exists` on every topic ensures
+#     repeated runs are no-op when topics already exist; the only side
+#     effect of an hourly run is a single Job pod that runs ~10 seconds.
+#   - The first-time bootstrap is handled by manually applying
+#     `kafka-init-job.yaml` (so an operator doesn't have to wait
+#     up to an hour for the first topic creation after a fresh install).
+#
+# Why hourly (not every 10 min / every day):
+#   - 1 hour = small enough that a topic-loss incident self-resolves
+#     before pipeline silence becomes operationally significant.
+#   - 1 hour = small enough churn (24 Job pods/day, each ~10s).
+#   - 1 day = too long; we'd lose Bronze data for hours before topics
+#     came back.
+#   - 10 min = unnecessary churn; topic loss is rare enough that
+#     hourly is the right cadence.
+#
+# Manual trigger for on-demand reassert:
+#   kubectl create job kafka-init-manual --from=cronjob/kafka-init -n anizai
+#
+# concurrencyPolicy: Forbid — if a previous run hasn't finished yet,
+#   skip the next scheduled run. Topic creation is fast; this prevents
+#   pile-up if the broker is slow.
+#
+# successfulJobsHistoryLimit: 3, failedJobsHistoryLimit: 3 — keep only
+#   the 3 most recent Jobs to bound cluster object count.
+#
+# Spec: phase95_cluster_robustness_implementation.md F1.4 (Stage A.2)
+#       Supersedes the one-shot-only behavior of kafka-init-job.yaml
+#       (which remains as the operator bootstrap shortcut).
+# ==========================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kafka-init
+  namespace: anizai
+  labels:
+    app: kafka-init
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: "9.5"
+spec:
+  # Hourly, on the hour. Times are UTC (CronJob does not use the
+  # cluster's TZ; explicit timezone field can be added if needed).
+  schedule: "0 * * * *"
+  # Skip if the prior run hasn't finished. Topic creation is fast
+  # (~10s); concurrent runs would just race on --if-not-exists.
+  concurrencyPolicy: Forbid
+  # If a scheduled run is missed (e.g. main-pool was at 0 nodes when
+  # the CronJob fired), allow up to 200s to start. After that, skip
+  # this hour and try again next hour.
+  startingDeadlineSeconds: 200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        app: kafka-init
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: "9.5"
+    spec:
+      # 5 min TTL after Job completion. successfulJobsHistoryLimit
+      # also keeps the 3 most recent Job objects in the API, so the
+      # operator can `kubectl logs job/kafka-init-<id>` to see recent
+      # runs' output.
+      ttlSecondsAfterFinished: 300
+      backoffLimit: 3
+      template:
+        metadata:
+          labels:
+            app: kafka-init
+            app.kubernetes.io/part-of: anizai-pipeline
+            phase: "9.5"
+        spec:
+          serviceAccountName: pipeline-runtime
+          restartPolicy: OnFailure
+          containers:
+            - name: kafka-init
+              image: apache/kafka:3.7.0
+              imagePullPolicy: IfNotPresent
+              # Script kept BYTE-IDENTICAL to kafka-init-job.yaml's
+              # script. Drift between the two would be a fertile source
+              # of bugs. If editing one, edit both — and remove the
+              # one-shot Job in a future cleanup once the CronJob has
+              # proven reliable.
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+                  KAFKA=/opt/kafka/bin/kafka-topics.sh
+                  BS=kafka:29092
+
+                  echo "=== Waiting for Kafka broker readiness ==="
+                  for i in $(seq 1 30); do
+                    if $KAFKA --bootstrap-server $BS --list >/dev/null 2>&1; then
+                      echo "  broker ready (attempt $i)"
+                      break
+                    fi
+                    echo "  waiting for broker (attempt $i/30)..."
+                    sleep 2
+                  done
+
+                  echo "=== Creating Bronze topics (7-day retention) ==="
+                  BRONZE_RETENTION=604800000
+                  for TOPIC in \
+                    ingest.bronze.polymarket \
+                    ingest.bronze.predictit \
+                    ingest.bronze.telegram \
+                    ingest.bronze.reddit \
+                    ingest.bronze.hackernews \
+                    ingest.bronze.newsapi \
+                    ingest.bronze.arxiv \
+                    ingest.bronze.fred \
+                    ingest.bronze.googletrends \
+                    ingest.bronze.openweather \
+                    ingest.bronze.opensky
+                  do
+                    $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                      --topic "$TOPIC" \
+                      --partitions 3 \
+                      --replication-factor 1 \
+                      --config retention.ms=$BRONZE_RETENTION \
+                      --config cleanup.policy=delete
+                    echo "  [OK] $TOPIC"
+                  done
+
+                  echo "=== Creating Silver topics (3-day retention) ==="
+                  SILVER_RETENTION=259200000
+                  for TOPIC in \
+                    process.silver.social_pulse \
+                    process.silver.global_news
+                  do
+                    $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                      --topic "$TOPIC" \
+                      --partitions 3 \
+                      --replication-factor 1 \
+                      --config retention.ms=$SILVER_RETENTION \
+                      --config cleanup.policy=delete
+                    echo "  [OK] $TOPIC"
+                  done
+
+                  echo "=== Creating Silver structured_metrics (3-day delete) ==="
+                  $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                    --topic process.silver.structured_metrics \
+                    --partitions 3 \
+                    --replication-factor 1 \
+                    --config cleanup.policy=delete \
+                    --config retention.ms=$SILVER_RETENTION
+                  echo "  [OK] process.silver.structured_metrics"
+
+                  echo "=== Creating Gold topics (3-day retention) ==="
+                  GOLD_RETENTION=259200000
+                  for TOPIC in \
+                    serve.gold.social_pulse \
+                    serve.gold.global_news
+                  do
+                    $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                      --topic "$TOPIC" \
+                      --partitions 3 \
+                      --replication-factor 1 \
+                      --config retention.ms=$GOLD_RETENTION \
+                      --config cleanup.policy=delete
+                    echo "  [OK] $TOPIC"
+                  done
+
+                  echo "=== Creating Gold structured_metrics (3-day delete) ==="
+                  $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                    --topic serve.gold.structured_metrics \
+                    --partitions 3 \
+                    --replication-factor 1 \
+                    --config cleanup.policy=delete \
+                    --config retention.ms=$GOLD_RETENTION
+                  echo "  [OK] serve.gold.structured_metrics"
+
+                  echo "=== Creating System topics ==="
+                  $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                    --topic ingestion_triggers \
+                    --partitions 1 \
+                    --replication-factor 1 \
+                    --config retention.ms=604800000 \
+                    --config cleanup.policy=delete
+                  echo "  [OK] ingestion_triggers"
+
+                  $KAFKA --bootstrap-server $BS --create --if-not-exists \
+                    --topic dead-letter-queue \
+                    --partitions 3 \
+                    --replication-factor 1 \
+                    --config retention.ms=2592000000 \
+                    --config cleanup.policy=delete
+                  echo "  [OK] dead-letter-queue"
+
+                  echo "=== Reassert pass complete ==="
+                  $KAFKA --bootstrap-server $BS --list
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"

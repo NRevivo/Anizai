@@ -61,6 +61,15 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       # Log settings
       KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+      # Phase 9.5 F1.2 (2026-05-19): explicitly direct broker storage to
+      # the named volume mount. Without this env var, apache/kafka:3.7.0
+      # defaults log.dirs to /tmp/kafka-logs inside the container
+      # (ephemeral) — the kafka_data volume gets mounted but never
+      # written to. Same latent bug fixed in cloud (kafka-statefulset.yaml).
+      # Use the kafka-logs subdirectory so the volume's lost+found
+      # ext4 metadata directory (if any) doesn't collide with Kafka's
+      # strict log dir parsing.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data/kafka-logs
     volumes:
       - kafka_data:/var/lib/kafka/data
     networks:

@@ -37,10 +37,22 @@
 #   silently produce topics with default retention (7 days) and
 #   cleanup.policy=delete, masking misconfigurations.
 #
-# Why /var/lib/kafka/data:
-#   Default Kafka log directory in apache/kafka:3.7.0. Same path
-#   docker-compose uses; mounting the PVC here gives durable broker
-#   storage across pod restarts.
+# Why /var/lib/kafka/data + KAFKA_LOG_DIRS env var:
+#   The apache/kafka:3.7.0 entrypoint defaults `log.dirs` to
+#   `/tmp/kafka-logs` (ephemeral) when no override is provided.
+#   To make the broker actually use the PVC mounted at
+#   /var/lib/kafka/data, we MUST set the env var explicitly.
+#
+#   This was the PRIMARY ROOT CAUSE of the May 11–18 pipeline
+#   silence (Phase 9.5 Stage A.1 Area 1 finding): for 11 days the
+#   PVC was mounted but unused while topic data lived on /tmp,
+#   which was wiped on every pod restart. The original Sprint C2
+#   comment block in this file incorrectly claimed /var/lib/kafka/data
+#   was the image default — corrected in Phase 9.5 F1 (2026-05-19).
+#
+#   Setting KAFKA_LOG_DIRS=/var/lib/kafka/data is also applied to
+#   `docker-compose.yml` for dev/cloud parity (same latent bug
+#   existed locally but was masked by infrequent container restarts).
 #
 # Apply with:
 #   kubectl apply -f infrastructure/k8s/kafka-statefulset.yaml
@@ -113,6 +125,19 @@ spec:
               value: "false"
             - name: KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS
               value: "300000"
+            # Phase 9.5 F1: explicitly direct broker storage to the
+            # PVC mount. Without this env var the apache/kafka:3.7.0
+            # image defaults to /tmp/kafka-logs (ephemeral). See file
+            # header for the full root-cause rationale.
+            #
+            # The PVC is mounted at /var/lib/kafka/data (volumeMounts
+            # below). Kafka stores logs in a SUBDIRECTORY of the mount
+            # (kafka-logs/) so the `lost+found` ext4 metadata dir at
+            # the mount root does not collide with Kafka's strict log
+            # dir parsing — Kafka 3.7 errors out on any non-topic dir
+            # in log.dirs. Same pattern as Postgres pgdata/data subdir.
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data/kafka-logs"
           volumeMounts:
             - name: kafka-data
               mountPath: /var/lib/kafka/data
