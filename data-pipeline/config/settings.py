@@ -93,6 +93,13 @@ GOLD_SEMANTIC_RESCUE_THRESHOLD = float(
 POLYMARKET_API_KEY = os.getenv("POLYMARKET_API_KEY", "")
 POLYMARKET_API_SECRET = os.getenv("POLYMARKET_API_SECRET", "")
 
+# Phase 9.5 Stage B Item 3 — Polymarket Gamma API /comments endpoint has had
+# a breaking change (now requires parent_entity_id + entity_entity_type;
+# discovery of the correct enum value is pending). Until upstream is
+# resolved, the comment-fetch loop exits early. Set to "true" to re-enable
+# once the API call signature is repaired.
+POLYMARKET_COMMENTS_ENABLED = os.getenv("POLYMARKET_COMMENTS_ENABLED", "false").lower() == "true"
+
 # --- PredictIt — API permanently shut down (CFTC 2022-2024) ---
 # Constant retained so existing imports in test archives do not break.
 # No producer or pipeline is active. Value is irrelevant at runtime.

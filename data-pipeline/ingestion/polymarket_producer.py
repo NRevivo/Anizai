@@ -508,7 +508,25 @@ class PolymarketProducer:
 
         A 60-second startup offset staggers REST calls against the price
         poll loop to smooth Gamma API rate-limit usage.
+
+        Phase 9.5 Stage B Item 3 — Gated behind POLYMARKET_COMMENTS_ENABLED.
+        Polymarket's Gamma API /comments endpoint made a breaking change
+        (now requires parent_entity_id + entity_entity_type; correct enum
+        value pending discovery). Until upstream is resolved, the loop
+        exits early so the producer doesn't spam ~100 422 warnings every
+        20-min cycle. Re-enable via `POLYMARKET_COMMENTS_ENABLED=true`
+        once the API call signature is repaired.
         """
+        from config.settings import POLYMARKET_COMMENTS_ENABLED
+        if not POLYMARKET_COMMENTS_ENABLED:
+            logger.info(
+                "[polymarket] _comment_poll_loop disabled "
+                "(POLYMARKET_COMMENTS_ENABLED=false). Gamma API /comments "
+                "endpoint has a breaking change pending upstream fix — see "
+                "phase95 Stage B Item 3."
+            )
+            return
+
         await asyncio.sleep(60)
 
         while True:
