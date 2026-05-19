@@ -74,7 +74,7 @@ spec:
         fsGroup: 9999
       containers:
         - name: flink-jobmanager
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-p95
           imagePullPolicy: IfNotPresent
           # Shell wrapper: reads CSI-mounted secret files and exports them as
           # env vars before handing off to the Flink entrypoint.
