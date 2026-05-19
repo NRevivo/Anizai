@@ -1,23 +1,40 @@
 # ==========================================================
 # Anizai — Polymarket Producer Deployment
 # ==========================================================
-# Always-on WebSocket daemon pinned to polymarket-pool (e2-micro).
+# Always-on WebSocket daemon on main-pool (Phase 9.5 F0 revert, 2026-05-19).
 # Public endpoints only — no API keys, no SecretProviderClass mount.
 #
-# Why polymarket-pool (Design Decision D2 — Sprint C1 revised):
-#   Polymarket emits real-time prices over WebSocket; gaps cannot be
-#   backfilled (push-only protocol). polymarket-pool is always-on 24/7
-#   and survives when main-pool is scaled to 0 between collection windows.
+# Design decision (Phase 9.5 Stage A.2, Ron 2026-05-19):
+#   The original polymarket-pool design (Sprint C1 D2 revised) was REVERTED.
+#   Rationale:
+#     - Polymarket emits real-time prices via WebSocket; gaps cannot be
+#       backfilled (push-only protocol).
+#     - polymarket-pool was created to keep the producer always-on so that
+#       no events would be missed — but Kafka, its destination, only runs
+#       during main-pool's daily window.
+#     - Result of the original design: Polymarket crash-looped with
+#       NoBrokersAvailable for ~14 hours/day (1,577 restarts in 6d1h
+#       observed at Phase 9.5 entry). The "buffer on Polymarket while
+#       everything else is down" intent was never how the system works —
+#       there is no buffering; the WebSocket data is dropped on the floor.
+#     - Decision: Polymarket now runs on main-pool with every other
+#       workload. When main-pool scales to 0, Polymarket stops with
+#       everything else. The data gap during off-hours is acceptable;
+#       the crash-loop is not.
+#   The polymarket-pool node pool itself is deleted as part of F0
+#   (gcloud container node-pools delete polymarket-pool ...).
 #
 # Why no CSI volume:
 #   POLYMARKET_API_KEY/SECRET are intentionally empty — Polymarket's
 #   public CLOB and Gamma endpoints require no authentication for the
 #   price and comment data this producer reads (project memory).
-#   The CSI DaemonSet is Pending on polymarket-pool (e2-micro resource
-#   pressure) so mounting a SecretProviderClass here would prevent the
-#   pod from starting.
 #
-# Spec: cloud_deployment_implementation.md §C4.11 (D1, D2)
+# Why Recreate strategy:
+#   Only one WebSocket connection at a time per credential set
+#   (no rolling-update style).
+#
+# Spec: phase95_cluster_robustness_implementation.md F0 (Stage A.2)
+#       supersedes cloud_deployment_implementation.md §C4.11 (D1, D2)
 # ==========================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -30,7 +47,6 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    # Recreate: only one WebSocket connection at a time per credential set.
     type: Recreate
   selector:
     matchLabels:
@@ -43,21 +59,23 @@ spec:
     spec:
       serviceAccountName: pipeline-runtime
       restartPolicy: Always
-      nodeSelector:
-        cloud.google.com/gke-nodepool: polymarket-pool
+      # No nodeSelector — schedules on main-pool by default
+      # (polymarket-pool deleted in F0; only main-pool remains).
       containers:
         - name: polymarket
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-polymarket:0.1.0
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-polymarket:0.2.0-p95
           imagePullPolicy: Always
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka:29092
+          # Resources increased now that the pod runs on main-pool
+          # (e2-standard-8, 32 GB RAM available). The previous
+          # 30Mi request was a constraint of polymarket-pool's
+          # e2-small ~34Mi allocatable budget.
           resources:
             requests:
               cpu: "50m"
-              # e2-micro polymarket-pool has only ~34Mi allocatable remaining
-              # after system pods (fluentbit, metrics-agent, etc.) — 30Mi fits.
-              memory: "30Mi"
+              memory: "128Mi"
             limits:
               cpu: "500m"
-              memory: "384Mi"
+              memory: "512Mi"
