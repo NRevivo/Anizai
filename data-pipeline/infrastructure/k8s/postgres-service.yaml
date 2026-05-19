@@ -36,6 +36,22 @@ spec:
   # consistency with the StatefulSet pattern (and forward-compat
   # with replicas in the future).
   clusterIP: None
+  # publishNotReadyAddresses: true is REQUIRED to avoid DLQ-on-scale-cycle.
+  # Without it, the headless Service does not publish DNS records for the
+  # postgres pod until its readiness probe passes. The Flink Gold job
+  # tries to write to momentum_vault the moment the Flink TaskManager
+  # comes back during a scale 0→1 cycle, which is usually BEFORE the
+  # postgres pod has finished initialisation. The DNS lookup of
+  # "postgres" returns NXDOMAIN → psycopg2 raises
+  # "could not translate host name 'postgres' to address" → Gold routes
+  # the message to DLQ with `momentum_vault_insert` failure.
+  # Phase 9.5 Stage A F6 dropped 70 momentum_vault rows this way in a
+  # 28-second window. Phase 9.5 Stage B Item 1a corrects this here;
+  # Stage B Item 1b adds tenacity-style retry in Gold for the residual
+  # transient-error class (Postgres restart mid-write, network partition).
+  # Same pattern + same rationale as kafka-service.yaml (C2 D6).
+  # Spec: phase95_cluster_robustness_implementation.md Stage B fix 1a.
+  publishNotReadyAddresses: true
   selector:
     app: postgres
   ports:
