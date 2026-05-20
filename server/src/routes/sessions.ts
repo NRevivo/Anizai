@@ -156,6 +156,30 @@ router.post('/sessions/:id/clarify', authMiddleware, async (req, res, next) => {
 });
 
 /**
+ * POST /sessions/:id/retry
+ * Replace a failed session with a new attempt using the original question.
+ * The failed session is hard-deleted (subcollections + sessionResults +
+ * forecastQueries) and a fresh session is enqueued for the agent. Only valid
+ * when the session's status is `failed`.
+ */
+router.post('/sessions/:id/retry', authMiddleware, async (req, res, next) => {
+    try {
+        const user = req.user as AuthUser;
+        const sessionId = req.params.id as string;
+
+        const session = await sessionsService.retryFailedSession(sessionId, user.uid);
+
+        const response: ApiSuccessResponse = {
+            data: session,
+        };
+
+        res.status(201).json(response);
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
  * DELETE /sessions/:id
  * Delete a session and all related records
  */

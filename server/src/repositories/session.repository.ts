@@ -37,6 +37,39 @@ function mapSessionDoc(doc: FirebaseFirestore.QueryDocumentSnapshot): Session {
     };
 }
 
+// The data-pipeline agent writes finalProbability into sessionResults/{id}
+// but never copies it onto the sessions doc, so sessions/{id}.latestProbability
+// stays null. For done sessions missing it, derive from the result doc so the
+// sidebar can show a probability. A directly-emitted value always wins, so this
+// is a no-op once the pipeline starts writing latestProbability itself.
+async function enrichLatestProbability(sessions: Session[]): Promise<Session[]> {
+    const needsEnrichment = sessions.filter(
+        (session) => session.status === 'done' && session.latestProbability === null
+    );
+
+    if (needsEnrichment.length === 0) {
+        return sessions;
+    }
+
+    const derived = await Promise.all(
+        needsEnrichment.map(async (session) => {
+            const resultDoc = await collectionRef('sessionResults').doc(session.id).get();
+            const finalProbability = resultDoc.exists ? resultDoc.data()?.finalProbability : undefined;
+            return [
+                session.id,
+                typeof finalProbability === 'number' ? finalProbability : null,
+            ] as const;
+        })
+    );
+    const probabilityById = new Map(derived);
+
+    return sessions.map((session) =>
+        probabilityById.has(session.id)
+            ? { ...session, latestProbability: probabilityById.get(session.id)! }
+            : session
+    );
+}
+
 function byDateAsc<T extends { createdAt?: string; ts?: string }>(a: T, b: T): number {
     const aDate = new Date(a.ts ?? a.createdAt ?? '').getTime();
     const bDate = new Date(b.ts ?? b.createdAt ?? '').getTime();
@@ -114,7 +147,7 @@ export const sessionRepository = {
                 .limit(limit)
                 .get();
 
-            return snapshot.docs.map(mapSessionDoc);
+            return enrichLatestProbability(snapshot.docs.map(mapSessionDoc));
         } catch (error) {
             // Local/dev fallback when composite index is not deployed yet.
             if (!isFailedPrecondition(error)) {
@@ -125,10 +158,12 @@ export const sessionRepository = {
                 .where('userId', '==', userId)
                 .get();
 
-            return snapshot.docs
-                .map(mapSessionDoc)
-                .sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime())
-                .slice(0, limit);
+            return enrichLatestProbability(
+                snapshot.docs
+                    .map(mapSessionDoc)
+                    .sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime())
+                    .slice(0, limit)
+            );
         }
     },
 
@@ -141,7 +176,7 @@ export const sessionRepository = {
 
         const data = doc.data()!;
 
-        return {
+        const session: Session = {
             id: doc.id,
             userId: data.userId,
             question: data.question,
@@ -159,6 +194,9 @@ export const sessionRepository = {
             updatedAt: toISOString(data.updatedAt) ?? '',
             lastActivityAt: toISOString(data.lastActivityAt) ?? '',
         };
+
+        const [enriched] = await enrichLatestProbability([session]);
+        return enriched;
     },
 
     async getSessionResult(sessionId: string): Promise<SessionResult | null> {
@@ -496,6 +534,7 @@ export const sessionRepository = {
             'predictionSeries',
             'evidence',
             'sentimentTimeSeries',
+            'agentEvents',
         ] as const;
 
         await Promise.all(

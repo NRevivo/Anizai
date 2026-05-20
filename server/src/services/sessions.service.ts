@@ -3,6 +3,7 @@
  * Firestore operations for sessions and related subcollections
  */
 
+import { randomUUID } from 'node:crypto';
 import { AppError } from '../middleware/error.js';
 import { sessionRepository } from '../repositories/session.repository.js';
 import * as usersService from './users.service.js';
@@ -336,4 +337,40 @@ export async function deleteSession(sessionId: string, userId: string): Promise<
     // Verify ownership first
     await getSession(sessionId, userId);
     await sessionRepository.deleteSession(sessionId);
+}
+
+/**
+ * Replace a failed session with a new attempt using the original question.
+ * The failed session and all its subcollections are hard-deleted; a fresh
+ * session is created and enqueued for the agent. Returns the new session.
+ *
+ * Delete-then-create order: if delete partially fails, the create still
+ * happens so the user is never stuck without a retry session. Per Slice 12.
+ */
+export async function retryFailedSession(sessionId: string, userId: string): Promise<Session> {
+    const session = await getSession(sessionId, userId);
+
+    if (session.status !== 'failed') {
+        throw new AppError('Retry is only valid on failed sessions', 400, 'INVALID_SESSION_STATUS');
+    }
+
+    const question = session.question?.trim();
+    if (!question) {
+        throw new AppError('Failed session is missing the original question', 400, 'MISSING_QUESTION');
+    }
+
+    try {
+        await sessionRepository.deleteSession(sessionId);
+    } catch (error) {
+        // Per Slice 12: better to lose the old failed record than to leave
+        // the user without a retry session. Log for operator visibility but
+        // continue to the create step.
+        console.warn(`[retryFailedSession] partial delete for ${sessionId}:`, error);
+    }
+
+    return createSession(userId, {
+        question,
+        title: session.title ?? undefined,
+        idempotencyKey: randomUUID(),
+    });
 }

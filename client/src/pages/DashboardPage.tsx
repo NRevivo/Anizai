@@ -36,6 +36,7 @@ interface DashboardPageProps {
         id: string;
         question: string;
         status: SessionStatus;
+        errorCode: string | null;
         errorMessage: string | null;
         clarificationCandidates: ClarificationCandidate[] | null;
     } | null;
@@ -62,6 +63,36 @@ interface DashboardPageProps {
     isAgentEventsLoading?: boolean;
     userProfile: UserProfile | null;
     onPlanChange?: (updated: UserProfile) => void;
+}
+
+// Map agent `errorCode` to user-facing copy. Raw `errorMessage` from the
+// pipeline carries internal details (OpenAI org IDs, model names, Python
+// traceback fragments) and must never be rendered. Today the agent emits a
+// single code, `AGENT_PROCESSING_ERROR`; the other entries are forward
+// wiring for the Sprint 26 taxonomy.
+function getErrorDisplay(errorCode: string | null): { title: string; body: string } {
+    switch (errorCode) {
+        case 'RATE_LIMITED':
+            return {
+                title: 'Service temporarily busy',
+                body: 'The forecasting service is at capacity. Please try again in a few minutes.',
+            };
+        case 'TIMEOUT':
+            return {
+                title: 'Forecast timed out',
+                body: 'This forecast took longer than expected. Please try again — most forecasts complete in under a minute.',
+            };
+        case 'AGENT_PROCESSING_ERROR':
+            return {
+                title: 'Forecast unavailable',
+                body: "We couldn't complete this forecast right now. This is usually temporary — please try again in a few moments.",
+            };
+        default:
+            return {
+                title: 'Forecast unavailable',
+                body: 'Something went wrong while generating this forecast. Please try again.',
+            };
+    }
 }
 
 export function DashboardPage({
@@ -269,19 +300,20 @@ export function DashboardPage({
 
         if (activeSessionState.status === 'failed') {
             const canRetry = activeSessionState.question.trim().length > 0;
+            const { title: errorTitle, body: errorBody } = getErrorDisplay(activeSessionState.errorCode);
 
             return (
-                <div className="rounded-lg border border-red-200 bg-white p-4 sm:p-5 shadow-sm space-y-4">
+                <div className="rounded-lg border border-amber-200 bg-white p-4 sm:p-5 shadow-sm space-y-4">
                     <StateMessage
-                        variant="error"
+                        variant="warning"
                         align="center"
-                        title="Forecast could not be completed"
-                        description={activeSessionState.errorMessage ?? 'This session ended with an error before a final result was produced.'}
+                        title={errorTitle}
+                        description={errorBody}
                     />
                     {failedRetryError ? (
                         <StateMessage
                             compact
-                            variant="error"
+                            variant="warning"
                             title="Retry was not started"
                             description={failedRetryError}
                         />

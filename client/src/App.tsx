@@ -38,6 +38,7 @@ import {
   deleteSession,
   fetchSessionDetail,
   fetchSessions,
+  retrySession,
   subscribeToAgentEvents,
   subscribeToSession,
   subscribeToSessionMessages,
@@ -152,6 +153,7 @@ interface ActiveSessionState {
   id: string;
   question: string;
   status: SessionStatus;
+  errorCode: string | null;
   errorMessage: string | null;
   clarificationCandidates: ClarificationCandidate[] | null;
 }
@@ -165,6 +167,7 @@ function toActiveSessionState(detail: SessionDetail | null): ActiveSessionState 
     id: detail.session.id,
     question: detail.session.question,
     status: detail.session.status,
+    errorCode: detail.session.errorCode,
     errorMessage: detail.session.errorMessage,
     clarificationCandidates: detail.session.clarificationCandidates,
   };
@@ -386,8 +389,12 @@ function App() {
               ? {
                   ...item,
                   status: session.status,
-                  latestProbability: session.latestProbability,
-                  latestConfidence: session.latestConfidence,
+                  // The Firestore session doc does not carry latestProbability
+                  // (the Express layer derives it from sessionResults), so a
+                  // null here means "not in this snapshot" — keep the value
+                  // already on the row rather than erasing it.
+                  latestProbability: session.latestProbability ?? item.latestProbability,
+                  latestConfidence: session.latestConfidence ?? item.latestConfidence,
                   errorCode: session.errorCode,
                   errorMessage: session.errorMessage,
                   clarificationCandidates: session.clarificationCandidates,
@@ -721,17 +728,27 @@ function App() {
   };
 
   const handleRetrySession = async (sessionId: string) => {
-    const detail = activeSessionDetail;
-    if (!detail || detail.session.id !== sessionId) {
-      throw new Error('Open the failed forecast before retrying.');
-    }
+    try {
+      setAuthError(null);
+      setIsDashboardLoading(true);
 
-    const originalQuestion = detail.session.question.trim();
-    if (!originalQuestion) {
-      throw new Error('This forecast cannot be retried because the original question is missing.');
-    }
+      const created = await retrySession(sessionId);
 
-    await handleCreateSession(originalQuestion, crypto.randomUUID());
+      // Drop the failed row immediately so the sidebar reflects the
+      // replacement before the next fetch settles. The new session lands
+      // via fetchSessions below.
+      setSessions((current) => current.filter((item) => item.id !== sessionId));
+
+      const sessionsData = await fetchSessions();
+      setSessions(sessionsData);
+      await loadSession(created.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not retry this forecast.';
+      setAuthError(message);
+      throw error instanceof Error ? error : new Error(message);
+    } finally {
+      setIsDashboardLoading(false);
+    }
   };
 
   const sidebarSessions = useMemo(() => sessions.map(toSidebarSession), [sessions]);

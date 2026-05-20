@@ -30,6 +30,11 @@ export function Sidebar({
     onGoHome,
 }: SidebarProps) {
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const filteredSessions = normalizedQuery
+        ? sessions.filter((session) => session.question.toLowerCase().includes(normalizedQuery))
+        : sessions;
     const name = userDisplayName?.trim() || 'User';
     const initials = name
         .split(' ')
@@ -90,6 +95,8 @@ export function Sidebar({
                     <input
                         type="text"
                         placeholder="Search forecasts..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
                         className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-anizai-blue-500/20 focus:border-anizai-blue-500 transition-all placeholder-gray-400 text-gray-700"
                     />
                 </div>
@@ -106,8 +113,14 @@ export function Sidebar({
                                 title="No forecasts yet"
                                 description="Create a forecast and it will appear here."
                             />
+                        ) : filteredSessions.length === 0 ? (
+                            <StateMessage
+                                compact
+                                title="No matching forecasts"
+                                description="Try a different search term."
+                            />
                         ) : null}
-                        {sessions.map((session) => {
+                        {filteredSessions.map((session) => {
                             const statusView = getStatusView(session.status);
 
                             return (

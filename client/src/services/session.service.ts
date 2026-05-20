@@ -340,3 +340,14 @@ export async function deleteSession(sessionId: string): Promise<void> {
         method: 'DELETE',
     });
 }
+
+/**
+ * Replace a failed session with a new attempt. The old session is removed
+ * from Firestore and a fresh session is returned. Only valid when the
+ * session's status is `failed`.
+ */
+export async function retrySession(sessionId: string): Promise<SessionListItem> {
+    return apiRequest<SessionListItem>(`/sessions/${sessionId}/retry`, {
+        method: 'POST',
+    });
+}
