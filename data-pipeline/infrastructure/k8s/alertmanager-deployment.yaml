@@ -1,0 +1,147 @@
+# ==========================================================
+# Anizai — Alertmanager (Phase 9.5 Stage C Item 4)
+# ==========================================================
+# Receives firing alerts from Prometheus (Item 2 added the
+# alerting.alertmanagers config pointing here) and routes them
+# via Gmail SMTP to ron.mintz21@gmail.com with the
+# [anizai-pipeline] subject prefix.
+#
+# Image: prom/alertmanager:v0.27.0 (current stable as of Phase 9.5).
+#
+# Config: from alertmanager-configmap.yaml (sibling). Loaded via
+# --config.file, with --watch-config so a `kubectl edit configmap
+# alertmanager-config` triggers an automatic reload (no pod restart
+# needed for config changes).
+#
+# Shell wrapper:
+#   - Reads GMAIL_APP_PASSWORD from CSI-mounted file
+#   - Substitutes ${GMAIL_APP_PASSWORD} placeholder in the config
+#     using envsubst, writing the resulting file to a writable path
+#   - Execs alertmanager with the substituted config
+# Same template-substitute pattern Alertmanager supports natively
+# but we keep the shell wrapper for consistency with the other
+# Anizai pods + to avoid relying on Alertmanager's still-evolving
+# env-var-in-config support.
+#
+# No persistent storage. Alertmanager's silences + state are
+# ephemeral V1 (acceptable — silences are infrequent operator action).
+#
+# Spec: phase95_cluster_robustness_implementation.md Stage C Item 4.
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: anizai
+  labels:
+    app: alertmanager
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: "9.5"
+spec:
+  replicas: 1
+  strategy:
+    # Recreate: only one Alertmanager instance at a time (single-replica
+    # V1; clustering deferred). Avoids two pods both trying to send
+    # the same alert email during a rollout window.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: "9.5"
+    spec:
+      serviceAccountName: pipeline-runtime
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.27.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              GMAIL_APP_PASSWORD=$(cat /var/secrets/alertmanager/GMAIL_APP_PASSWORD)
+              # envsubst is NOT in the prom/alertmanager image, so we use
+              # busybox sed for the template substitution. The password is
+              # 16-char + spaces (Gmail app-password format) — no sed-meta
+              # characters, so direct s/// is safe.
+              mkdir -p /tmp/alertmanager-cfg
+              sed "s|\${GMAIL_APP_PASSWORD}|${GMAIL_APP_PASSWORD}|g" \
+                  /etc/alertmanager-template/alertmanager.yml \
+                  > /tmp/alertmanager-cfg/alertmanager.yml
+              exec /bin/alertmanager \
+                --config.file=/tmp/alertmanager-cfg/alertmanager.yml \
+                --storage.path=/alertmanager \
+                --web.listen-address=:9093 \
+                --cluster.listen-address=
+          ports:
+            - name: web
+              containerPort: 9093
+              protocol: TCP
+          volumeMounts:
+            - name: config-template
+              mountPath: /etc/alertmanager-template
+              readOnly: true
+            - name: gmail-password
+              mountPath: /var/secrets/alertmanager
+              readOnly: true
+            - name: data
+              mountPath: /alertmanager
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9093
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9093
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: config-template
+          configMap:
+            name: alertmanager-config
+            items:
+              - key: alertmanager.yml
+                path: alertmanager.yml
+        - name: gmail-password
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: alertmanager-secrets-spc
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: anizai
+  labels:
+    app: alertmanager
+spec:
+  type: ClusterIP
+  selector:
+    app: alertmanager
+  ports:
+    - name: web
+      port: 9093
+      targetPort: 9093
+      protocol: TCP

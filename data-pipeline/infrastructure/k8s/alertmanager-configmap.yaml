@@ -1,0 +1,72 @@
+# ==========================================================
+# Anizai — Alertmanager Config (Phase 9.5 Stage C Item 4)
+# ==========================================================
+# Single receiver: gmail_receiver — sends alerts via Gmail SMTP
+# to ron.mintz21@gmail.com with the [anizai-pipeline] subject prefix.
+#
+# Why Gmail SMTP (Path A — per Ron 2026-05-20):
+#   Simplest workable email path. App-Password (16-char) authenticates
+#   without exposing the account password. Alternative architectures
+#   (Path B — Cloud Logging-based bridge) were considered but A is
+#   canonical and well-documented.
+#
+# auth_password is templated as ${GMAIL_APP_PASSWORD} — the shell
+# wrapper in alertmanager-deployment.yaml exports this env var from
+# the CSI-mounted file before exec-ing alertmanager.
+#
+# Repeat interval set conservatively (4h) so a long-running alert
+# doesn't spam the inbox once acknowledged. Group_interval 5min so
+# alerts in the same group (e.g. multiple flink rules firing) batch
+# into one email rather than per-rule emails.
+#
+# Spec: phase95_cluster_robustness_implementation.md Stage C Item 4.
+# ==========================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: anizai
+  labels:
+    app: alertmanager
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: "9.5"
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'smtp.gmail.com:587'
+      smtp_from: 'ron.mintz21@gmail.com'
+      smtp_auth_username: 'ron.mintz21@gmail.com'
+      smtp_auth_password: '${GMAIL_APP_PASSWORD}'
+      smtp_require_tls: true
+
+    route:
+      receiver: gmail_receiver
+      group_by: ['alertname', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+
+    receivers:
+      - name: gmail_receiver
+        email_configs:
+          - to: 'ron.mintz21@gmail.com'
+            from: 'ron.mintz21@gmail.com'
+            smarthost: 'smtp.gmail.com:587'
+            auth_username: 'ron.mintz21@gmail.com'
+            auth_password: '${GMAIL_APP_PASSWORD}'
+            require_tls: true
+            headers:
+              Subject: '[anizai-pipeline] [{{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.alertname }}'
+            html: |
+              <h3>{{ .CommonLabels.alertname }}</h3>
+              <p><strong>Severity:</strong> {{ .CommonLabels.severity }}<br>
+              <strong>Component:</strong> {{ .CommonLabels.component }}<br>
+              <strong>Cluster:</strong> anizai-cluster (anizai namespace)</p>
+              <hr>
+              {{ range .Alerts }}
+              <h4>{{ .Annotations.summary }}</h4>
+              <pre>{{ .Annotations.description }}</pre>
+              <p><em>Started at: {{ .StartsAt }}</em></p>
+              {{ if .EndsAt.IsZero }}<p><em>Status: FIRING</em></p>{{ else }}<p><em>Resolved at: {{ .EndsAt }}</em></p>{{ end }}
+              <hr>
+              {{ end }}
