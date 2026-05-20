@@ -1,0 +1,117 @@
+# ==========================================================
+# Anizai — postgres_exporter custom queries (Phase 9.5 Stage C Item 1b)
+# ==========================================================
+# Exposes Anizai-specific metrics on top of the built-in
+# pg_stat_database_* / pg_settings_* / pg_stat_user_tables_* set.
+#
+# Each query runs on every Prometheus scrape (15s). The columns become
+# Prometheus labels (LABEL) or values (GAUGE/COUNTER) per the YAML.
+#
+# Metrics defined here:
+#   pg_anizai_vault_rows_total{table}             — current row counts per vault table
+#   pg_anizai_momentum_vault_rows_1h{source}      — rows in past 1h per source (alert P-Postgres-1)
+#   pg_anizai_knowledge_vault_rows_6h{source}     — rows in past 6h per source (alert P-Postgres-2)
+#   pg_anizai_knowledge_vault_rows_24h{source}    — rows in past 24h per source (dashboard)
+#   pg_anizai_social_vault_rows_6h{source}        — rows in past 6h per source (dashboard)
+#   pg_anizai_oldest_row_age_seconds{table}       — age of the oldest row (sanity check on retention)
+#
+# Spec: phase95_cluster_robustness_implementation.md Stage C Item 1b.
+# ==========================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-exporter-queries
+  namespace: anizai
+  labels:
+    app: postgres-exporter
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: "9.5"
+data:
+  queries.yaml: |
+    pg_anizai_vault_rows_total:
+      query: |
+        SELECT 'knowledge_vault'  AS tbl, COUNT(*)::float AS rows FROM knowledge_vault
+        UNION ALL SELECT 'knowledge_vectors', COUNT(*)::float FROM knowledge_vectors
+        UNION ALL SELECT 'social_vault',      COUNT(*)::float FROM social_vault
+        UNION ALL SELECT 'social_vectors',    COUNT(*)::float FROM social_vectors
+        UNION ALL SELECT 'momentum_vault',    COUNT(*)::float FROM momentum_vault
+        UNION ALL SELECT 'mapping_dict',      COUNT(*)::float FROM mapping_dict
+        UNION ALL SELECT 'divergence_alerts', COUNT(*)::float FROM divergence_alerts
+      master: true
+      metrics:
+        - tbl:
+            usage: "LABEL"
+            description: "Vault table name"
+        - rows:
+            usage: "GAUGE"
+            description: "Current row count for the vault table"
+
+    pg_anizai_momentum_vault_rows_1h:
+      query: |
+        SELECT source_name AS source, COUNT(*)::float AS rows
+        FROM momentum_vault
+        WHERE ingested_at > NOW() - INTERVAL '1 hour'
+        GROUP BY source_name
+      master: true
+      metrics:
+        - source:
+            usage: "LABEL"
+            description: "Source name from momentum_vault.source_name"
+        - rows:
+            usage: "GAUGE"
+            description: "Rows added to momentum_vault per source in the past 1 hour"
+
+    pg_anizai_knowledge_vault_rows_6h:
+      query: |
+        SELECT source_name AS source, COUNT(*)::float AS rows
+        FROM knowledge_vault
+        WHERE ingested_at > NOW() - INTERVAL '6 hours'
+        GROUP BY source_name
+      master: true
+      metrics:
+        - source:
+            usage: "LABEL"
+        - rows:
+            usage: "GAUGE"
+            description: "Rows added to knowledge_vault per source in the past 6 hours"
+
+    pg_anizai_knowledge_vault_rows_24h:
+      query: |
+        SELECT source_name AS source, COUNT(*)::float AS rows
+        FROM knowledge_vault
+        WHERE ingested_at > NOW() - INTERVAL '24 hours'
+        GROUP BY source_name
+      master: true
+      metrics:
+        - source:
+            usage: "LABEL"
+        - rows:
+            usage: "GAUGE"
+            description: "Rows added to knowledge_vault per source in the past 24 hours"
+
+    pg_anizai_social_vault_rows_6h:
+      query: |
+        SELECT source_name AS source, COUNT(*)::float AS rows
+        FROM social_vault
+        WHERE ingested_at > NOW() - INTERVAL '6 hours'
+        GROUP BY source_name
+      master: true
+      metrics:
+        - source:
+            usage: "LABEL"
+        - rows:
+            usage: "GAUGE"
+            description: "Rows added to social_vault per source in the past 6 hours"
+
+    pg_anizai_oldest_row_age_seconds:
+      query: |
+        SELECT 'knowledge_vault' AS tbl, EXTRACT(EPOCH FROM (NOW() - MIN(ingested_at)))::float AS age FROM knowledge_vault
+        UNION ALL SELECT 'momentum_vault',   EXTRACT(EPOCH FROM (NOW() - MIN(ingested_at))) FROM momentum_vault
+        UNION ALL SELECT 'social_vault',     EXTRACT(EPOCH FROM (NOW() - MIN(ingested_at))) FROM social_vault
+      master: true
+      metrics:
+        - tbl:
+            usage: "LABEL"
+        - age:
+            usage: "GAUGE"
+            description: "Age in seconds of the oldest row in the vault table (sanity check)"

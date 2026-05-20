@@ -1,0 +1,141 @@
+# ==========================================================
+# Anizai — postgres_exporter (Phase 9.5 Stage C Item 1b)
+# ==========================================================
+# Exposes Postgres internal metrics + Anizai-specific custom queries
+# on :9187. Required by Phase 9.5 Stage C alert rules:
+#   - P-Postgres-1: momentum_vault row freshness (custom query)
+#   - P-Postgres-2: knowledge_vault row freshness (custom query)
+#   - P-Postgres-3: connection pool saturation (built-in pg_stat_database_numbackends)
+# And by the Stage C Grafana dashboard (vault row counts + freshness).
+#
+# Image: prometheuscommunity/postgres-exporter:v0.15.0 (per Ron's Q4).
+#
+# Connection:
+#   DATA_SOURCE_URI=postgres:5432/anizai?sslmode=disable
+#   DATA_SOURCE_USER=anizai
+#   DATA_SOURCE_PASS=<from postgres-secrets-spc CSI file>
+# The exporter's entrypoint reads these env vars (or PG* fallback);
+# combining URI + USER + PASS env triplet avoids exposing the password
+# in the URI string. Shell-wrapper pattern lifts the password from the
+# CSI-mounted file before the exporter process starts.
+#
+# Custom queries: provided via --extend.query-path mounting the
+# postgres-exporter-queries ConfigMap (sibling file).
+#
+# Resources: lightweight on scrape (15s polling cycle) but the custom
+# queries do per-row COUNT scans on knowledge_vault (~9k rows today,
+# growing). 100m CPU / 128Mi memory is conservative.
+#
+# Spec: phase95_cluster_robustness_implementation.md Stage C Item 1b.
+# ==========================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter
+  namespace: anizai
+  labels:
+    app: postgres-exporter
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: "9.5"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+        app.kubernetes.io/part-of: anizai-pipeline
+        phase: "9.5"
+    spec:
+      # pipeline-runtime KSA is bound to the GSA that has Secret Manager
+      # access (Sprint C1.12-C1.13). Required for the CSI volume below.
+      serviceAccountName: pipeline-runtime
+      containers:
+        - name: postgres-exporter
+          image: prometheuscommunity/postgres-exporter:v0.15.0
+          imagePullPolicy: IfNotPresent
+          # Shell wrapper lifts the password from CSI mount, then
+          # execs the postgres-exporter binary so signals reach the
+          # right process. Same pattern as Flink JM/TM + agent.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              export DATA_SOURCE_PASS=$(cat /var/secrets/postgres/POSTGRES_PASSWORD)
+              exec /bin/postgres_exporter \
+                --extend.query-path=/etc/postgres-exporter/queries.yaml
+          env:
+            - name: DATA_SOURCE_URI
+              value: "postgres:5432/anizai?sslmode=disable"
+            - name: DATA_SOURCE_USER
+              value: "anizai"
+            # DATA_SOURCE_PASS exported by the shell wrapper above.
+            # PG_EXPORTER_WEB_LISTEN_ADDRESS is the default :9187 — no override.
+          ports:
+            - name: metrics
+              containerPort: 9187
+              protocol: TCP
+          volumeMounts:
+            - name: postgres-password
+              mountPath: /var/secrets/postgres
+              readOnly: true
+            - name: queries
+              mountPath: /etc/postgres-exporter
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          # /metrics returns 200 once the exporter has connected to
+          # Postgres successfully — good readiness gate.
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 9187
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9187
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: postgres-password
+          csi:
+            driver: secrets-store-gke.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: postgres-secrets-spc
+        - name: queries
+          configMap:
+            name: postgres-exporter-queries
+            items:
+              - key: queries.yaml
+                path: queries.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter
+  namespace: anizai
+  labels:
+    app: postgres-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres-exporter
+  ports:
+    - name: metrics
+      port: 9187
+      targetPort: 9187
+      protocol: TCP
