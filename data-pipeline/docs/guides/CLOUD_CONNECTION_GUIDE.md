@@ -158,11 +158,10 @@ Open http://localhost:8090 in a browser.
 **Credentials:**
 
 ```powershell
-# Username:
-gcloud secrets versions access latest --secret=airflow-admin-username --project=anizai-pipeline
+# Username: hardcoded "admin" (set in airflow-init-job.yaml — not stored as a secret).
 
 # Password:
-gcloud secrets versions access latest --secret=airflow-admin-password --project=anizai-pipeline
+gcloud secrets versions access latest --secret=AIRFLOW_ADMIN_PASSWORD --project=anizai-pipeline
 ```
 
 ### What You Can Do Here
@@ -290,11 +289,10 @@ Open http://localhost:3000 in a browser.
 **Credentials:**
 
 ```powershell
-# Username:
-gcloud secrets versions access latest --secret=grafana-admin-username --project=anizai-pipeline
+# Username: hardcoded "admin" (set in grafana-deployment.yaml as GF_SECURITY_ADMIN_USER env var — not stored as a secret).
 
 # Password:
-gcloud secrets versions access latest --secret=grafana-admin-password --project=anizai-pipeline
+gcloud secrets versions access latest --secret=GRAFANA_ADMIN_PASSWORD --project=anizai-pipeline
 ```
 
 ### What You Can Do Here
@@ -381,7 +379,7 @@ In a separate terminal (leave the port-forward terminal open):
 
 ```powershell
 # Retrieve password first:
-gcloud secrets versions access latest --secret=postgres-anizai-password --project=anizai-pipeline
+gcloud secrets versions access latest --secret=POSTGRES_PASSWORD --project=anizai-pipeline
 
 # Connect:
 psql -h localhost -U anizai -d anizai
@@ -395,7 +393,7 @@ Host:     localhost
 Port:     5432
 Database: anizai
 Username: anizai
-Password: (retrieved from Secret Manager — secret: postgres-anizai-password)
+Password: (retrieved from Secret Manager — secret: POSTGRES_PASSWORD)
 ```
 
 ### What You Can Do Here
@@ -739,20 +737,18 @@ gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipe
 
 | Secret Name | Used By |
 |-------------|---------|
-| `postgres-anizai-password` | PostgreSQL `anizai` user |
-| `airflow-admin-username` | Airflow web login |
-| `airflow-admin-password` | Airflow web login |
-| `grafana-admin-username` | Grafana web login |
-| `grafana-admin-password` | Grafana web login |
-| `airflow-fernet-key` | Airflow connection encryption |
-| `openai-api-key` | Gold enrichment (GPT-4o-mini) |
-| `newsai-api-key` | newsapi.ai / Event Registry |
-| `fred-api-key` | FRED economic data |
-| `openweather-api-key` | OpenWeather source |
-| `opensky-client-id` | OpenSky OAuth2 |
-| `opensky-client-secret` | OpenSky OAuth2 |
-| `telegram-api-id` | Telegram MTProto |
-| `telegram-api-hash` | Telegram MTProto |
+| `POSTGRES_PASSWORD` | PostgreSQL `anizai` user |
+| `AIRFLOW_ADMIN_PASSWORD` | Airflow web login (username is plain env var `admin`) |
+| `AIRFLOW_FERNET_KEY` | Airflow connection encryption |
+| `GRAFANA_ADMIN_PASSWORD` | Grafana web login (username is plain env var `admin`) |
+| `OPENAI_API_KEY` | Gold enrichment + agent synthesis (GPT-4o / GPT-4o-mini) |
+| `NEWSAI_API_KEY` | NewsAPI ingestion (TheNewsAPI provider since Sprint 21.5) |
+| `FRED_API_KEY` | FRED economic data |
+| `OPENWEATHER_API_KEY` | OpenWeather source |
+| `OPENSKY_CLIENT_ID` | OpenSky OAuth2 |
+| `OPENSKY_CLIENT_SECRET` | OpenSky OAuth2 |
+| `TELEGRAM_API_ID` | Telegram MTProto |
+| `TELEGRAM_API_HASH` | Telegram MTProto |
 
 ---
 
@@ -862,5 +858,5 @@ kubectl get pdb -n anizai
 
 Gold job and agent synthesis both call OpenAI. If Gold embeddings fail (429) or the
 agent synthesis fails with a quota error, check the OpenAI dashboard for the key
-stored in Secret Manager (`openai-api-key`). The agent uses GPT-4o for synthesis and
+stored in Secret Manager (`OPENAI_API_KEY`). The agent uses GPT-4o for synthesis and
 GPT-4o-mini for other nodes — verify both have quota.

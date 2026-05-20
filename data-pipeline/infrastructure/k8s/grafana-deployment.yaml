@@ -91,6 +91,13 @@ spec:
               mountPath: /var/lib/grafana/dashboards/anizai_pipeline.json
               subPath: anizai_pipeline.json
               readOnly: true
+            # Phase 9.5 Stage C Item 6: Pipeline Health dashboard
+            # (single-screen at-a-glance overview; existing
+            # anizai_pipeline.json kept for detailed Flink drill-down).
+            - name: provisioning
+              mountPath: /var/lib/grafana/dashboards/anizai_pipeline_health.json
+              subPath: anizai_pipeline_health.json
+              readOnly: true
           resources:
             requests:
               cpu: "100m"

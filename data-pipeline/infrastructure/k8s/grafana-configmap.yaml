@@ -553,3 +553,251 @@ data:
       "uid": "anizai-pipeline-v1",
       "version": 1
     }
+
+  # ==========================================================
+  # Phase 9.5 Stage C Item 6: Pipeline Health dashboard
+  # ==========================================================
+  # Single-screen at-a-glance "is the pipeline healthy?" view.
+  # 10 panels:
+  #   Row 1 (vault freshness, 4 stat panels):
+  #     - knowledge_vault total + 24h delta
+  #     - knowledge_vectors total + 24h delta
+  #     - momentum_vault total + 1h delta
+  #     - social_vault total + 6h delta
+  #   Row 2 (Bronze topic activity, 1 timeseries):
+  #     - messages/min per ingest.bronze.* topic
+  #   Row 3 (DLQ + Flink, 2 panels):
+  #     - DLQ depth gauge
+  #     - Flink job state (running/canceled/failed per job)
+  #   Row 4 (operational signals, 3 panels):
+  #     - Recent Flink job restart count (proxy for trouble)
+  #     - Recent Gold checkpoint failures
+  #     - Known-silent producers (static text — operator awareness)
+  #
+  # All Prometheus targets use ${datasource} variable, same as the
+  # existing detailed dashboard.
+  anizai_pipeline_health.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [
+        {
+          "title": "Anizai Pipeline (detailed)",
+          "url": "/d/anizai-pipeline-v1",
+          "type": "link",
+          "icon": "external link",
+          "tags": []
+        }
+      ],
+      "liveNow": false,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "knowledge_vault rows",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "options": {
+            "graphMode": "area",
+            "colorMode": "value",
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+          },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "pg_anizai_vault_rows_total_rows{tbl=\"knowledge_vault\"}",
+              "legendFormat": "total",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(pg_anizai_knowledge_vault_rows_24h_rows)",
+              "legendFormat": "added 24h",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "knowledge_vectors rows",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "options": { "graphMode": "area", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "pg_anizai_vault_rows_total_rows{tbl=\"knowledge_vectors\"}",
+              "legendFormat": "total",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "momentum_vault rows",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "options": { "graphMode": "area", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "pg_anizai_vault_rows_total_rows{tbl=\"momentum_vault\"}",
+              "legendFormat": "total",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(pg_anizai_momentum_vault_rows_1h_rows)",
+              "legendFormat": "added 1h",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "social_vault rows",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "options": { "graphMode": "area", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "pg_anizai_vault_rows_total_rows{tbl=\"social_vault\"}",
+              "legendFormat": "total",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(pg_anizai_social_vault_rows_6h_rows)",
+              "legendFormat": "added 6h",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Bronze topic activity (messages/min)",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+          "options": {
+            "legend": { "calcs": ["mean", "max", "lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 10 } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "rate(kafka_topic_partition_current_offset{topic=~\"ingest.bronze..*\"}[5m]) * 60",
+              "legendFormat": "{{topic}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "gauge",
+          "title": "DLQ depth",
+          "gridPos": { "h": 6, "w": 8, "x": 0, "y": 12 },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showThresholdLabels": false, "showThresholdMarkers": true },
+          "fieldConfig": { "defaults": { "min": 0, "max": 20000, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1000 }, { "color": "red", "value": 10000 }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "sum(kafka_topic_partition_current_offset{topic=\"dead-letter-queue\"} - kafka_topic_partition_oldest_offset{topic=\"dead-letter-queue\"})",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "Flink job uptime (s)",
+          "gridPos": { "h": 6, "w": 16, "x": 8, "y": 12 },
+          "options": { "graphMode": "area", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+          "fieldConfig": { "defaults": { "unit": "s", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 60 }, { "color": "green", "value": 600 }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "flink_jobmanager_job_uptime / 1000",
+              "legendFormat": "{{job_name}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "stat",
+          "title": "Flink job restarts (1h)",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 18 },
+          "options": { "graphMode": "none", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "increase(flink_jobmanager_job_numRestarts[1h])",
+              "legendFormat": "{{job_name}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "stat",
+          "title": "Gold failed checkpoints (1h)",
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 18 },
+          "options": { "graphMode": "none", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 3 }] } } },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${datasource}" },
+              "expr": "increase(flink_jobmanager_job_numberOfFailedCheckpoints{job_name=\"anizai-gold-all-sources\"}[1h])",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "text",
+          "title": "Known silent producers (by design)",
+          "gridPos": { "h": 6, "w": 12, "x": 12, "y": 18 },
+          "options": {
+            "mode": "markdown",
+            "content": "These producers are **intentionally silent** under current configuration. Don't alarm on their zero-rate.\n\n- **newsapi_high_frequency** — DAG paused (Sprint C4 design; `is_paused=True`).\n- **opensky_high_frequency** — GKE cluster can't reach `opensky-network.org` (KG-PHASE-C-6 firewall issue). Producer now raises on 100% box-failure (Phase 9.5 Stage B Item 4).\n- **googletrends_daily** — pytrends 4.9.2 returns 404 on Google's unofficial Trends API (KG-PHASE-9.5-5). No upgrade exists. Producer raises on 100% geo-failure.\n- **polymarket comments** — `POLYMARKET_COMMENTS_ENABLED=false` (Phase 9.5 Stage B Item 3; Gamma API breaking change pending KG-PHASE-9.5-4 reverse-engineering).\n\nIf any of these statuses change, update this panel + remove from the deferral list in `task_plan.md`."
+          }
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["anizai", "pipeline", "health"],
+      "templating": {
+        "list": [
+          {
+            "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+            "hide": 2,
+            "includeAll": false,
+            "label": "Datasource",
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Anizai Pipeline Health",
+      "uid": "anizai-pipeline-health-v1",
+      "version": 1
+    }

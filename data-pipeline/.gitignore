@@ -35,6 +35,8 @@ worker.log
 /docs/pipeline_core.md
 /docs/project_overview.md
 /docs/storage_and_agent.md
+/docs/phase95_investigation_log.md
+/docs/phase95_cluster_robustness_implementation.md
 
 /task_plan.md
 /task_plan_archive.md
