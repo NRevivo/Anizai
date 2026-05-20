@@ -13,7 +13,10 @@ export interface TrendingForecast {
 
 export async function fetchTrendingForecasts(limit = 20): Promise<TrendingForecast[]> {
     try {
-        const data = await apiRequest<TrendingForecast[]>('/trending', { requireAuth: false });
+        const data = await apiRequest<TrendingForecast[]>(
+            `/trending?limit=${encodeURIComponent(String(limit))}`,
+            { requireAuth: false }
+        );
         return data.slice(0, limit);
     } catch (error) {
         console.warn('Using demo trending forecasts because the API is unavailable.', error);

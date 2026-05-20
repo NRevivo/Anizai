@@ -8,9 +8,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ContactPage } from './pages/ContactPage';
 import { FeaturesPage } from './pages/FeaturesPage';
 import { MethodologyPage } from './pages/MethodologyPage';
-import { ChangelogPage } from './pages/ChangelogPage';
 import { AboutPage } from './pages/AboutPage';
-import { BlogPage } from './pages/BlogPage';
 import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { CookiesPage } from './pages/CookiesPage';
@@ -59,9 +57,7 @@ type AppState =
   | 'contact'
   | 'features'
   | 'methodology'
-  | 'changelog'
   | 'about'
-  | 'blog'
   | 'terms'
   | 'privacy'
   | 'cookies';
@@ -559,9 +555,7 @@ function App() {
     home: () => setAppState('landing'),
     features: () => setAppState('features'),
     methodology: () => setAppState('methodology'),
-    changelog: () => setAppState('changelog'),
     about: () => setAppState('about'),
-    blog: () => setAppState('blog'),
     terms: () => setAppState('terms'),
     privacy: () => setAppState('privacy'),
     cookies: () => setAppState('cookies'),
@@ -802,14 +796,19 @@ function App() {
     );
   }
 
+  const shellProps = {
+    onHome: handleBackToLanding,
+    onSignIn: handleGoToLogin,
+    onSignUp: handleGoToSignup,
+    onContact: () => setAppState('contact'),
+    onNavigation: navigationHandlers,
+    isSignedIn: !!userProfile,
+    onOpenWorkspace: () => setAppState('dashboard'),
+    onSignOut: handleLogout,
+  };
+
   if (appState === 'landing') {
-    return (
-      <LandingPage
-        onAuth={handleGoToLogin}
-        onContact={() => setAppState('contact')}
-        onNavigation={navigationHandlers}
-      />
-    );
+    return <LandingPage {...shellProps} />;
   }
 
   if (appState === 'login') {
@@ -822,10 +821,9 @@ function App() {
           </div>
         ) : null}
         <LoginPage
+          {...shellProps}
           onGoogleAuth={handleGoogleAuth}
           onEmailAuth={handleEmailAuth}
-          onBack={handleBackToLanding}
-          onSignUp={handleGoToSignup}
         />
       </>
     );
@@ -841,59 +839,51 @@ function App() {
           </div>
         ) : null}
         <SignupPage
+          {...shellProps}
           onCreateAccount={handleCreateAccount}
           onGoogleSignup={handleGoogleSignup}
-          onBack={handleGoToLogin}
-          onSignIn={handleGoToLogin}
         />
       </>
     );
   }
 
   if (appState === 'contact') {
-    return <ContactPage onBack={handleBackToLanding} />;
+    return <ContactPage {...shellProps} activeNav="contact" />;
   }
 
   if (appState === 'features') {
-    return <FeaturesPage onBack={handleBackToLanding} onGetStarted={handleGoToLogin} />;
+    return <FeaturesPage {...shellProps} activeNav="features" onGetStarted={handleGoToSignup} />;
   }
 
   if (appState === 'methodology') {
-    return <MethodologyPage onBack={handleBackToLanding} />;
-  }
-
-  if (appState === 'changelog') {
-    return <ChangelogPage onBack={handleBackToLanding} />;
+    return <MethodologyPage {...shellProps} activeNav="methodology" />;
   }
 
   if (appState === 'about') {
     return (
       <AboutPage
-        onBack={handleBackToLanding}
-        onGetStarted={handleGoToLogin}
+        {...shellProps}
+        activeNav="about"
+        onGetStarted={handleGoToSignup}
         onMethodology={() => setAppState('methodology')}
       />
     );
   }
 
-  if (appState === 'blog') {
-    return <BlogPage onBack={handleBackToLanding} />;
-  }
-
   if (appState === 'terms') {
-    return <TermsPage onBack={handleBackToLanding} />;
+    return <TermsPage {...shellProps} />;
   }
 
   if (appState === 'privacy') {
-    return <PrivacyPage onBack={handleBackToLanding} />;
+    return <PrivacyPage {...shellProps} />;
   }
 
   if (appState === 'cookies') {
-    return <CookiesPage onBack={handleBackToLanding} />;
+    return <CookiesPage {...shellProps} />;
   }
 
   if (appState === 'plan-selection') {
-    return <PlanSelection onSelectPlan={handleSelectPlan} onBack={handleBackToLanding} />;
+    return <PlanSelection {...shellProps} activeNav="pricing" onSelectPlan={handleSelectPlan} />;
   }
 
   return (

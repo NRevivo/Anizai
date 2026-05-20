@@ -38,6 +38,16 @@
     .card {
         @apply bg-white rounded-lg shadow-sm border border-gray-200 p-6;
     }
+
+    /* Hide the scrollbar for horizontal overflow nav strips (used by the
+       mobile site nav). Content remains horizontally scrollable. */
+    .no-scrollbar {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
 }
 
 /* Smooth scrollbar */

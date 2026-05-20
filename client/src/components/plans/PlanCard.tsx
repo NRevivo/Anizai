@@ -8,44 +8,97 @@ interface PlanFeature {
 interface PlanCardProps {
     name: string;
     price: string;
+    priceSuffix?: string;
     description: string;
     features: PlanFeature[];
     onSelect: () => void;
     isPremium?: boolean;
 }
 
-export function PlanCard({ name, price, description, features, onSelect, isPremium }: PlanCardProps) {
+/**
+ * Card used by the pricing page. Matches the bento card visual language —
+ * rounded-2xl + soft elevation + hairline ring. The "premium" variant is
+ * marked with a subtle lavender accent on the ring and a recommended pill,
+ * not by switching to a gradient background.
+ */
+export function PlanCard({
+    name,
+    price,
+    priceSuffix,
+    description,
+    features,
+    onSelect,
+    isPremium,
+}: PlanCardProps) {
     return (
-        <div className={`bg-white rounded-lg border shadow-sm p-8 flex flex-col ${isPremium ? 'border-anizai-teal-400 shadow-lg' : 'border-gray-200'
-            }`}>
+        <article
+            className={`relative rounded-2xl bg-white p-8 flex flex-col shadow-[0_4px_24px_rgba(15,23,42,0.05),0_1px_3px_rgba(15,23,42,0.04)] ${
+                isPremium
+                    ? 'ring-1 ring-anizai-purple-300/70'
+                    : 'ring-1 ring-slate-900/[0.05]'
+            }`}
+        >
             {isPremium && (
-                <div className="mb-4">
-                    <span className="inline-block px-3 py-1 text-xs font-medium bg-gradient-to-r from-anizai-teal-100 to-anizai-blue-100 text-anizai-teal-700 rounded-full">
-                        Recommended
+                <div className="absolute -top-3 left-7">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-anizai-purple-50 px-3 py-1 ring-1 ring-anizai-purple-200">
+                        <span className="h-1.5 w-1.5 rounded-full bg-anizai-purple-500" />
+                        <span className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-anizai-purple-700">
+                            Recommended
+                        </span>
                     </span>
                 </div>
             )}
 
-            <h3 className="text-2xl font-semibold text-gray-900 mb-2">{name}</h3>
-            <div className="mb-4">
-                <span className="text-4xl font-bold text-gray-900">{price}</span>
-                {price !== 'Free' && <span className="text-gray-500 ml-2">/month</span>}
+            <div className="mb-6">
+                <p className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                    {name}
+                </p>
+                <div className="mt-3 flex items-baseline gap-2">
+                    <span className="text-5xl font-light tracking-tight text-gray-900 tabular-nums">
+                        {price}
+                    </span>
+                    {priceSuffix ? (
+                        <span className="text-[13px] text-slate-500">{priceSuffix}</span>
+                    ) : null}
+                </div>
+                <p className="mt-4 text-[14px] leading-[1.6] text-slate-600 max-w-xs">
+                    {description}
+                </p>
             </div>
-            <p className="text-sm text-gray-600 mb-8">{description}</p>
 
-            <ul className="space-y-3 mb-8 flex-1">
-                {features.map((feature, index) => (
-                    <li key={index} className="flex items-start gap-3">
+            <div className="h-px bg-slate-200/70 my-2" />
+
+            <ul className="space-y-3 my-6 flex-1">
+                {features.map((feature) => (
+                    <li key={feature.text} className="flex items-start gap-3">
                         {feature.included ? (
-                            <svg className="w-5 h-5 text-anizai-teal-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            <svg
+                                className="w-4 h-4 text-anizai-teal-500 shrink-0 mt-0.5"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={2.5}
+                                aria-hidden
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                             </svg>
                         ) : (
-                            <svg className="w-5 h-5 text-gray-300 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            <svg
+                                className="w-4 h-4 text-slate-300 shrink-0 mt-0.5"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                                aria-hidden
+                            >
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         )}
-                        <span className={`text-sm ${feature.included ? 'text-gray-700' : 'text-gray-400'}`}>
+                        <span
+                            className={`text-[14px] leading-snug ${
+                                feature.included ? 'text-slate-700' : 'text-slate-400'
+                            }`}
+                        >
                             {feature.text}
                         </span>
                     </li>
@@ -54,13 +107,14 @@ export function PlanCard({ name, price, description, features, onSelect, isPremi
 
             <Button
                 onClick={onSelect}
-                className={`w-full justify-center ${isPremium
-                        ? 'bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 hover:from-anizai-teal-600 hover:via-anizai-blue-600 hover:to-anizai-purple-600 text-white border-0'
-                        : 'bg-white hover:bg-gray-50 text-gray-900 border border-gray-300'
-                    }`}
+                className={
+                    isPremium
+                        ? 'w-full h-11 justify-center text-[14.5px] font-medium bg-gray-900 text-white hover:bg-gray-800 rounded-lg shadow-[0_1px_2px_rgba(15,23,42,0.08)]'
+                        : 'w-full h-11 justify-center text-[14.5px] font-medium bg-white text-gray-900 hover:bg-slate-50 rounded-lg ring-1 ring-slate-200'
+                }
             >
-                {isPremium ? 'Start Premium' : 'Start for Free'}
+                {isPremium ? 'Start Premium' : 'Start for free'}
             </Button>
-        </div>
+        </article>
     );
 }

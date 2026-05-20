@@ -8,9 +8,13 @@ const router = Router();
  * GET /trending
  * List trending forecasts (public endpoint)
  */
-router.get('/trending', async (_req, res, next) => {
+router.get('/trending', async (req, res, next) => {
     try {
-        const forecasts = await trendingService.getTopTrending(20);
+        const requested = Number.parseInt(String(req.query.limit ?? ''), 10);
+        const limit = Number.isFinite(requested) && requested > 0
+            ? Math.min(requested, 100)
+            : 20;
+        const forecasts = await trendingService.getTopTrending(limit);
 
         const response: ApiSuccessResponse = {
             data: forecasts,

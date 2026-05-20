@@ -1,147 +1,201 @@
-import { GoogleAuthButton } from '../auth/GoogleAuthButton';
+import { Button } from '../ui/button';
 
 interface HeroProps {
-    onAuth: () => void;
-    onTerms?: () => void;
-    onPrivacy?: () => void;
+    onPrimary: () => void;
+    onSecondary?: () => void;
 }
 
-export function Hero({ onAuth, onTerms, onPrivacy }: HeroProps) {
+const CAPABILITIES = [
+    'GPT-4o synthesis',
+    'Multi-source vault',
+    'Every claim cited',
+];
+
+export function Hero({ onPrimary, onSecondary }: HeroProps) {
     return (
-        <section className="min-h-screen w-full flex flex-col items-center justify-center px-6 py-24 relative overflow-hidden bg-[#fafbfc]">
-            {/* Animated gradient orbs */}
-            <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                {/* Large teal orb */}
-                <div
-                    className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full opacity-30"
-                    style={{
-                        background: 'radial-gradient(circle, rgba(20, 184, 166, 0.4) 0%, transparent 70%)',
-                        animation: 'float 20s ease-in-out infinite',
-                    }}
-                />
-                {/* Large purple orb */}
-                <div
-                    className="absolute -bottom-40 -right-40 w-[500px] h-[500px] rounded-full opacity-25"
-                    style={{
-                        background: 'radial-gradient(circle, rgba(168, 85, 247, 0.35) 0%, transparent 70%)',
-                        animation: 'float 25s ease-in-out infinite reverse',
-                    }}
-                />
-                {/* Subtle blue accent */}
-                <div
-                    className="absolute top-1/3 right-1/4 w-[300px] h-[300px] rounded-full opacity-20"
-                    style={{
-                        background: 'radial-gradient(circle, rgba(59, 130, 246, 0.3) 0%, transparent 70%)',
-                        animation: 'float 18s ease-in-out infinite',
-                    }}
-                />
-            </div>
+        <section className="relative w-full px-6 py-16 lg:py-20 min-h-[calc(100vh-4rem)] flex items-center">
+            <div className="w-full max-w-6xl mx-auto">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-10 items-center">
+                    <div className="lg:col-span-7">
+                        <div className="mb-6 inline-flex items-center gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-anizai-purple-400" aria-hidden />
+                            <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">
+                                For prediction markets and decision-makers
+                            </span>
+                        </div>
 
-            {/* Grid pattern overlay */}
-            <div
-                className="absolute inset-0 pointer-events-none opacity-[0.03]"
-                style={{
-                    backgroundImage: 'linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)',
-                    backgroundSize: '60px 60px',
-                }}
-            />
-
-            <div className="relative z-10 flex flex-col items-center max-w-3xl text-center">
-                {/* Logo with glow */}
-                <div className="mb-8 relative">
-                    <div className="absolute inset-0 blur-2xl opacity-40 scale-150">
-                        <div className="w-full h-full bg-gradient-to-r from-anizai-teal-400 via-anizai-blue-400 to-anizai-purple-400 rounded-full" />
-                    </div>
-                    <img
-                        src="/logo-brain.png"
-                        alt="Anizai"
-                        className="h-48 sm:h-52 w-auto relative mix-blend-multiply"
-                    />
-                </div>
-
-                {/* Product Name with gradient */}
-                <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-[-0.03em] mb-6">
-                    <span className="bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 bg-clip-text text-transparent">
-                        Anizai
-                    </span>
-                </h1>
-
-                {/* Tagline - impactful */}
-                <h2 className="text-xl sm:text-2xl lg:text-3xl font-medium text-gray-700 mb-5 tracking-[-0.01em] leading-snug max-w-2xl">
-                    Forecast the future with
-                    <span className="bg-gradient-to-r from-anizai-teal-600 via-anizai-blue-600 to-anizai-purple-600 bg-clip-text text-transparent font-semibold"> evidence</span>,
-                    not guesses.
-                </h2>
-
-                {/* Subheadline */}
-                <p className="text-base sm:text-lg text-gray-500 mb-10 max-w-lg leading-relaxed">
-                    AI-powered probabilities, confidence scores, and real-time evidence tracking — all in one place.
-                </p>
-
-                {/* CTA with emphasis */}
-                <div className="flex flex-col items-center gap-4 w-full max-w-sm">
-                    <GoogleAuthButton onClick={onAuth} className="w-full shadow-lg hover:shadow-xl !h-14 !text-base">
-                        Get started — it's free
-                    </GoogleAuthButton>
-
-                    <p className="text-[11px] text-gray-400 leading-relaxed">
-                        No credit card required •{' '}
-                        <button
-                            onClick={onTerms}
-                            className="text-gray-500 hover:text-gray-700 underline underline-offset-2 bg-transparent border-none p-0 cursor-pointer"
+                        <h1
+                            className="text-5xl sm:text-6xl lg:text-[4.5rem] font-medium leading-[1.02] tracking-[-0.035em] text-gray-900"
+                            style={{ textWrap: 'balance' } as React.CSSProperties}
                         >
-                            Terms
-                        </button>
-                        {' '}•{' '}
-                        <button
-                            onClick={onPrivacy}
-                            className="text-gray-500 hover:text-gray-700 underline underline-offset-2 bg-transparent border-none p-0 cursor-pointer"
-                        >
-                            Privacy
-                        </button>
-                    </p>
-                </div>
+                            Decision-grade forecasts.
+                            <br />
+                            <span className="text-slate-400 font-light">With receipts.</span>
+                        </h1>
 
-                {/* Stats bar - social proof */}
-                <div className="mt-16 flex items-center gap-8 sm:gap-12 text-center">
-                    <div>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900">10K+</p>
-                        <p className="text-xs text-gray-500 mt-1">Forecasts made</p>
-                    </div>
-                    <div className="w-px h-10 bg-gray-200" />
-                    <div>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900">92%</p>
-                        <p className="text-xs text-gray-500 mt-1">Accuracy rate</p>
-                    </div>
-                    <div className="w-px h-10 bg-gray-200" />
-                    <div>
-                        <p className="text-2xl sm:text-3xl font-bold text-gray-900">500+</p>
-                        <p className="text-xs text-gray-500 mt-1">Active users</p>
-                    </div>
-                </div>
+                        <p className="mt-7 max-w-xl text-[17px] leading-[1.6] text-slate-600">
+                            Anizai turns future-event questions into structured
+                            forecasts — probability, confidence, drivers and headwinds,
+                            with every piece of evidence cited.
+                        </p>
 
-                {/* Scroll indicator */}
-                <div className="mt-20 flex flex-col items-center gap-1.5 opacity-40 hover:opacity-70 transition-opacity cursor-pointer">
-                    <span className="text-[10px] uppercase tracking-widest text-gray-400 font-medium">
-                        See how it works
-                    </span>
-                    <svg className="w-4 h-4 text-gray-400 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
+                        <div className="mt-9 flex flex-wrap items-center gap-3">
+                            <Button
+                                onClick={onPrimary}
+                                className="h-12 px-7 text-[15px] font-medium bg-gray-900 text-white hover:bg-gray-800 shadow-[0_1px_2px_rgba(15,23,42,0.08)] rounded-lg"
+                            >
+                                Get started
+                            </Button>
+                            <button
+                                onClick={onSecondary}
+                                className="h-12 px-5 text-[15px] font-medium text-slate-700 hover:text-gray-900 transition-colors inline-flex items-center gap-2"
+                            >
+                                See an example forecast
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <ul className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3 text-[12.5px] text-slate-500">
+                            {CAPABILITIES.map((capability) => (
+                                <li key={capability} className="inline-flex items-center gap-2">
+                                    <CheckMark />
+                                    <span>{capability}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+
+                    <div className="lg:col-span-5">
+                        <HeroPreview />
+                    </div>
                 </div>
             </div>
-
-            {/* CSS Keyframes */}
-            <style>{`
-                @keyframes float {
-                    0%, 100% { transform: translate(0, 0) scale(1); }
-                    25% { transform: translate(30px, -30px) scale(1.05); }
-                    50% { transform: translate(-20px, 20px) scale(0.95); }
-                    75% { transform: translate(20px, 10px) scale(1.02); }
-                }
-            `}</style>
         </section>
     );
 }
 
+function CheckMark() {
+    return (
+        <svg className="w-3.5 h-3.5 text-anizai-teal-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+    );
+}
 
+function HeroPreview() {
+    return (
+        <div className="relative">
+            {/* soft gradient halo */}
+            <div
+                className="absolute -inset-8 -z-10 opacity-60 blur-3xl pointer-events-none"
+                style={{
+                    background:
+                        'radial-gradient(ellipse 60% 60% at 30% 30%, rgba(168,85,247,0.18), transparent 60%), radial-gradient(ellipse 60% 60% at 70% 70%, rgba(20,184,166,0.18), transparent 60%)',
+                }}
+                aria-hidden
+            />
+
+            <div className="rounded-2xl bg-white ring-1 ring-slate-900/[0.06] shadow-[0_20px_50px_-12px_rgba(15,23,42,0.18),0_4px_12px_-4px_rgba(15,23,42,0.06)] overflow-hidden">
+                <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-anizai-purple-400" />
+                    <span className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                        Active forecast
+                    </span>
+                    <span className="ml-auto text-[10.5px] tabular-nums text-slate-400">
+                        #f3a-2026
+                    </span>
+                </div>
+
+                <div className="p-5 sm:p-6">
+                    <p className="text-[13px] font-medium leading-snug text-gray-900">
+                        Will the US enter a recession by end of 2026?
+                    </p>
+
+                    <div className="mt-5 flex items-center gap-5">
+                        <div className="relative w-[88px] h-[88px] shrink-0">
+                            <svg viewBox="0 0 88 88" className="w-full h-full -rotate-90">
+                                <defs>
+                                    <linearGradient id="heroRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stopColor="#c084fc" />
+                                        <stop offset="100%" stopColor="#2dd4bf" />
+                                    </linearGradient>
+                                </defs>
+                                <circle cx="44" cy="44" r="36" fill="none" stroke="#eef0f4" strokeWidth="8" />
+                                <circle
+                                    cx="44"
+                                    cy="44"
+                                    r="36"
+                                    fill="none"
+                                    stroke="url(#heroRingGrad)"
+                                    strokeWidth="8"
+                                    strokeLinecap="round"
+                                    strokeDasharray={2 * Math.PI * 36}
+                                    strokeDashoffset={2 * Math.PI * 36 * (1 - 0.62)}
+                                />
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                <span className="text-2xl font-light text-gray-900 tabular-nums leading-none">
+                                    62<span className="text-base text-slate-400">%</span>
+                                </span>
+                                <span className="mt-1 text-[8px] font-medium uppercase tracking-[0.14em] text-slate-400">
+                                    Probability
+                                </span>
+                            </div>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className="inline-flex items-center gap-1.5 rounded-full bg-anizai-teal-50 px-2.5 py-0.5">
+                                <span className="h-1.5 w-1.5 rounded-full bg-anizai-teal-500" />
+                                <span className="text-[10.5px] font-medium text-anizai-teal-800">
+                                    Lean Yes · High confidence
+                                </span>
+                            </div>
+                            <p className="mt-2.5 text-[12px] leading-snug text-slate-700">
+                                Yield-curve inversion and weakening labor data outweigh
+                                resilient consumer spending.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="mt-5 pt-4 border-t border-slate-100">
+                        <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400 mb-2.5">
+                            Top drivers
+                        </p>
+                        <ul className="space-y-1.5">
+                            {[
+                                { label: 'Yield curve inversion', dir: 'up' as const, weight: 0.85 },
+                                { label: 'Labor market softening', dir: 'up' as const, weight: 0.55 },
+                                { label: 'Consumer spending resilient', dir: 'down' as const, weight: 0.65 },
+                            ].map((driver) => (
+                                <li key={driver.label} className="flex items-center gap-3 text-[11.5px]">
+                                    <span className="text-slate-700 w-44 truncate">
+                                        {driver.label}
+                                    </span>
+                                    <div className="flex-1 h-1 rounded-full bg-slate-100 overflow-hidden">
+                                        <div
+                                            className={`h-full rounded-full ${
+                                                driver.dir === 'up'
+                                                    ? 'bg-anizai-teal-400'
+                                                    : 'bg-rose-400'
+                                            }`}
+                                            style={{ width: `${driver.weight * 100}%` }}
+                                        />
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            {/* small floating evidence pill */}
+            <div className="hidden lg:flex absolute -bottom-4 -right-3 items-center gap-2 rounded-full bg-white ring-1 ring-slate-900/[0.06] shadow-[0_6px_20px_-6px_rgba(15,23,42,0.15)] px-3.5 py-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-anizai-purple-500" />
+                <span className="text-[11px] text-slate-700">
+                    47 evidence items cited
+                </span>
+            </div>
+        </div>
+    );
+}

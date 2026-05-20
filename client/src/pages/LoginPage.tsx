@@ -1,17 +1,20 @@
 import { useState } from 'react';
 import { GoogleAuthButton } from '../components/auth/GoogleAuthButton';
-import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
-import { cn } from '../lib/utils';
+import { PageShell, type PageShellProps } from '../components/site/PageShell';
+import {
+    AuthCard,
+    AuthDivider,
+    AuthInput,
+} from '../components/site/AuthShell';
 
-interface LoginPageProps {
+interface LoginPageProps extends Omit<PageShellProps, 'children'> {
     onGoogleAuth: () => void;
     onEmailAuth: (email: string, password?: string) => void;
-    onBack: () => void;
-    onSignUp: () => void;
 }
 
-export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: LoginPageProps) {
+export function LoginPage(props: LoginPageProps) {
+    const { onGoogleAuth, onEmailAuth, onSignUp, ...shellProps } = props;
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isEmailMode, setIsEmailMode] = useState(false);
@@ -23,121 +26,80 @@ export function LoginPage({ onGoogleAuth, onEmailAuth, onBack, onSignUp }: Login
         }
     };
 
+    const isDisabled = !email.trim() || !password.trim();
+
     return (
-        <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-white to-anizai-teal-50/20 flex flex-col items-center justify-center px-4">
-            {/* Back Button */}
-            <button
-                onClick={onBack}
-                className="absolute top-6 left-6 flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors text-sm font-medium"
-            >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-                Back
-            </button>
-
-            {/* Main Content */}
-            <div className="w-full max-w-[400px] flex flex-col items-center">
-                {/* Logo */}
-                <div className="mb-4">
-                    <img
-                        src="/logo-brain.png"
-                        alt="Anizai"
-                        className="w-30 h-30 object-contain mix-blend-multiply"
-                    />
-                </div>
-
-                {/* Title */}
-                <h1 className="text-2xl font-semibold text-gray-900 mb-2 text-center">
-                    Welcome back
-                </h1>
-                <p className="text-gray-500 text-sm mb-8 text-center">
-                    Sign in to continue to Anizai
-                </p>
-
-                {/* Auth Options */}
-                <div className="w-full space-y-4">
-                    {/* Google Auth */}
-                    <GoogleAuthButton onClick={onGoogleAuth}>
-                        Continue with Google
-                    </GoogleAuthButton>
-
-                    {/* Divider */}
-                    <div className="relative flex items-center justify-center my-6">
-                        <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-gray-200" />
+        <PageShell {...shellProps} onSignUp={onSignUp}>
+            <section className="w-full px-6 py-16 lg:py-20 flex items-start justify-center">
+                <div className="w-full max-w-[420px]">
+                    <AuthCard
+                        eyebrow="Sign in"
+                        title="Welcome back."
+                        description="Continue to your Anizai workspace."
+                        footer={
+                            <p className="text-[13px] text-slate-500">
+                                Don’t have an account?{' '}
+                                <button
+                                    type="button"
+                                    onClick={onSignUp}
+                                    className="text-gray-900 font-medium hover:underline underline-offset-4"
+                                >
+                                    Sign up
+                                </button>
+                            </p>
+                        }
+                    >
+                        <div className="space-y-3">
+                            <GoogleAuthButton onClick={onGoogleAuth}>
+                                Continue with Google
+                            </GoogleAuthButton>
                         </div>
-                        <span className="relative bg-white px-4 text-xs font-medium text-gray-400 uppercase tracking-wider">
-                            or
-                        </span>
-                    </div>
 
-                    {/* Email Auth */}
-                    {!isEmailMode ? (
-                        <Button
-                            onClick={() => setIsEmailMode(true)}
-                            className={cn(
-                                "w-full h-12 text-base font-medium",
-                                "bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500",
-                                "hover:from-anizai-teal-600 hover:via-anizai-blue-600 hover:to-anizai-purple-600",
-                                "text-white border-0 shadow-md hover:shadow-lg transition-all duration-200"
-                            )}
-                        >
-                            Continue with Email
-                        </Button>
-                    ) : (
-                        <form onSubmit={handleEmailSubmit} className="space-y-4">
-                            <Input
-                                type="email"
-                                placeholder="Enter your email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
-                                autoFocus
-                            />
-                            <Input
-                                type="password"
-                                placeholder="Enter your password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="h-12 text-base focus:ring-2 focus:ring-anizai-blue-500"
-                            />
+                        <AuthDivider />
+
+                        {!isEmailMode ? (
                             <Button
-                                type="submit"
-                                disabled={!email.trim() || !password.trim()}
-                                className={cn(
-                                    "w-full h-12 text-base font-medium",
-                                    "bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500",
-                                    "hover:from-anizai-teal-600 hover:via-anizai-blue-600 hover:to-anizai-purple-600",
-                                    "text-white border-0 shadow-md hover:shadow-lg transition-all duration-200",
-                                    "disabled:opacity-50 disabled:cursor-not-allowed"
-                                )}
+                                onClick={() => setIsEmailMode(true)}
+                                className="w-full h-12 text-[14.5px] font-medium bg-gray-900 text-white hover:bg-gray-800 rounded-lg shadow-[0_1px_2px_rgba(15,23,42,0.08)]"
                             >
-                                Continue
+                                Continue with email
                             </Button>
-                        </form>
-                    )}
+                        ) : (
+                            <form onSubmit={handleEmailSubmit} className="space-y-4">
+                                <AuthInput
+                                    id="email"
+                                    label="Email"
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder="you@company.com"
+                                    autoFocus
+                                />
+                                <AuthInput
+                                    id="password"
+                                    label="Password"
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                />
+                                <Button
+                                    type="submit"
+                                    disabled={isDisabled}
+                                    className="w-full h-12 text-[14.5px] font-medium bg-gray-900 text-white hover:bg-gray-800 rounded-lg shadow-[0_1px_2px_rgba(15,23,42,0.08)] disabled:opacity-50"
+                                >
+                                    Continue
+                                </Button>
+                            </form>
+                        )}
 
-                    <p className="text-sm text-gray-500 text-center">
-                        Don't have an account?{' '}
-                        <button
-                            type="button"
-                            onClick={onSignUp}
-                            className="text-anizai-blue-500 hover:underline"
-                        >
-                            Sign up
-                        </button>
-                    </p>
+                        <p className="mt-7 text-[11.5px] text-slate-400 leading-[1.6]">
+                            By continuing, you agree to Anizai’s Terms of Service and Privacy
+                            Policy.
+                        </p>
+                    </AuthCard>
                 </div>
-
-                {/* Terms */}
-                <p className="mt-8 text-xs text-gray-400 text-center leading-relaxed">
-                    By continuing, you agree to Anizai's{' '}
-                    <a href="#" className="text-anizai-blue-500 hover:underline">Terms of Service</a>
-                    {' '}and{' '}
-                    <a href="#" className="text-anizai-blue-500 hover:underline">Privacy Policy</a>
-                </p>
-            </div>
-        </div>
+            </section>
+        </PageShell>
     );
 }

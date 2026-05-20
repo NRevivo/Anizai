@@ -1,180 +1,315 @@
-import { ArrowLeft, BarChart3, Brain, TrendingUp, Zap, Shield, Users, CheckCircle2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { PageShell, PageHeader, type PageShellProps } from '../components/site/PageShell';
 
-interface FeaturesPageProps {
-  onBack?: () => void;
-  onGetStarted?: () => void; // אופציונלי לחיבור ל-login/plan
+interface FeaturesPageProps extends Omit<PageShellProps, 'children'> {
+    onGetStarted?: () => void;
 }
 
-export function FeaturesPage({ onBack, onGetStarted }: FeaturesPageProps) {
-  const features = [
+interface Feature {
+    eyebrow: string;
+    title: string;
+    body: string;
+    span: string;
+    visual: 'verdict' | 'evidence' | 'drivers' | 'reasoning' | 'pipeline' | 'sources';
+}
+
+const FEATURES: Feature[] = [
     {
-      icon: Brain,
-      title: 'AI-Powered Analysis',
-      description: 'Turns real-time signals into forecasts you can understand and trust.',
-      accent: 'purple',
+        eyebrow: 'The call',
+        title: 'Decisive verdicts.',
+        body:
+            'Every forecast resolves to a clear call — Strong Yes, Lean No, Coin Flip — Avoid — alongside the probability, confidence label, and a one-sentence thesis. No "it depends" outputs.',
+        span: 'md:col-span-7',
+        visual: 'verdict',
     },
     {
-      icon: BarChart3,
-      title: 'Real-Time Data',
-      description: 'Keeps context updated using live and recent information streams.',
-      accent: 'blue',
+        eyebrow: 'What’s moving it',
+        title: 'Drivers and headwinds, separated.',
+        body:
+            "Key factors aren't a single weight-sorted list. Drivers are the forces pushing the probability up; headwinds are pushing it down. Each one is weighted and linked to the evidence behind it.",
+        span: 'md:col-span-5',
+        visual: 'drivers',
     },
     {
-      icon: TrendingUp,
-      title: 'Trend Tracking',
-      description: 'Highlights changes in sentiment and momentum as they develop.',
-      accent: 'teal',
+        eyebrow: 'The receipts',
+        title: 'Every claim cited.',
+        body:
+            'Each piece of evidence is independently scored for relevance, credibility tier, and recency before it can influence the forecast. Hover any claim to see the original source.',
+        span: 'md:col-span-5',
+        visual: 'evidence',
     },
     {
-      icon: Zap,
-      title: 'Fast Sessions',
-      description: 'Create a forecast session in seconds with structured outputs.',
-      accent: 'blue',
+        eyebrow: 'The agent’s work',
+        title: 'Reasoning you can audit.',
+        body:
+            "A step-by-step chain of how the agent got from question to call — the parsed intent, the retrieved candidates, the per-item ratings, the final synthesis. No black box.",
+        span: 'md:col-span-7',
+        visual: 'reasoning',
     },
     {
-      icon: Shield,
-      title: 'Secure & Private',
-      description: 'Designed with privacy and safe defaults in mind for user data.',
-      accent: 'purple',
+        eyebrow: 'The pipeline',
+        title: 'A four-step process. Every step writes a structured artifact.',
+        body:
+            'Ask, Retrieve, Rate, Synthesize. The graph is LangGraph; retrieval uses pgvector with text-embedding-3-small; synthesis is GPT-4o. Each stage emits an inspectable record.',
+        span: 'md:col-span-12',
+        visual: 'pipeline',
     },
     {
-      icon: Users,
-      title: 'Collaboration Ready',
-      description: 'Built to support teams and shared workflows over time.',
-      accent: 'teal',
+        eyebrow: 'The vault',
+        title: 'Multi-source evidence index.',
+        body:
+            'News wires, arXiv preprints, market data, public discussion forums, and federal economic data — embedded, deduplicated, and continuously updated.',
+        span: 'md:col-span-12',
+        visual: 'sources',
     },
-  ] as const;
+];
 
-  const accentStyles = (accent: 'blue' | 'teal' | 'purple') => {
-    if (accent === 'teal') return { bg: 'bg-teal-50', border: 'border-teal-100', text: 'text-teal-700', icon: 'text-teal-600' };
-    if (accent === 'purple') return { bg: 'bg-purple-50', border: 'border-purple-100', text: 'text-purple-700', icon: 'text-purple-600' };
-    return { bg: 'bg-blue-50', border: 'border-blue-100', text: 'text-blue-700', icon: 'text-blue-600' };
-  };
+const SOURCES = [
+    'News wires',
+    'arXiv',
+    'Hacker News',
+    'Telegram',
+    'FRED economic data',
+    'Polymarket',
+];
 
-  return (
-    <div className="min-h-screen bg-white">
-      {/* Header (sticky like the other pages) */}
-      <div className="bg-white/80 backdrop-blur border-b border-gray-200 px-6 py-5 sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto flex items-center gap-4">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            <span className="font-medium">Back</span>
-          </button>
-        </div>
-      </div>
+const PIPELINE_STEPS = [
+    { n: '01', title: 'Ask', tag: 'LangGraph' },
+    { n: '02', title: 'Retrieve', tag: 'pgvector' },
+    { n: '03', title: 'Rate', tag: 'Per-item scoring' },
+    { n: '04', title: 'Synthesize', tag: 'GPT-4o' },
+];
 
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute -top-28 -left-28 h-[420px] w-[420px] rounded-full bg-teal-200/30 blur-3xl" />
-          <div className="absolute -bottom-28 -right-28 h-[420px] w-[420px] rounded-full bg-purple-200/25 blur-3xl" />
-          <div className="absolute top-24 right-1/4 h-[260px] w-[260px] rounded-full bg-blue-200/20 blur-3xl" />
-        </div>
+export function FeaturesPage(props: FeaturesPageProps) {
+    const { onGetStarted, ...shellProps } = props;
 
-        <div className="px-6 pt-14 pb-10">
-          <div className="max-w-6xl mx-auto">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/70 px-3 py-1 text-xs text-gray-600">
-              <span className="h-2 w-2 rounded-full bg-blue-600" />
-              Product features
-            </div>
+    return (
+        <PageShell {...shellProps}>
+            <PageHeader
+                eyebrow="Features"
+                title={
+                    <>
+                        Everything the agent produces, in one place.
+                    </>
+                }
+                description="Anizai isn't a black box that returns a number. It's a pipeline that produces a stack of inspectable artifacts: a verdict, the forces driving it, the evidence behind each claim, and the reasoning that connects them."
+            />
 
-            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8">
-              <div>
-                <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-gray-900">
-                  Features that help you forecast with{' '}
-                  <span className="text-blue-600">confidence</span>
-                </h1>
-                <p className="mt-4 text-lg sm:text-xl text-gray-600 max-w-2xl">
-                  Anizai combines real-time signals, evidence retrieval, and explainable outputs — so forecasts are clear, not mysterious.
-                </p>
-              </div>
-            </div>
+            <section className="w-full px-6 pb-20 lg:pb-28">
+                <div className="max-w-5xl mx-auto">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                        {FEATURES.map((feature) => (
+                            <FeatureCard key={feature.title} feature={feature} />
+                        ))}
+                    </div>
 
-            {/* Quick value bullets */}
-            <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {[
-                'Evidence-first outputs',
-                'Confidence & uncertainty',
-                'Designed for real workflows',
-              ].map((t) => (
-                <div key={t} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="w-4.5 h-4.5 text-teal-600 mt-0.5" />
-                    <p className="text-sm font-medium text-gray-900">{t}</p>
-                  </div>
+                    <div className="mt-12 rounded-2xl bg-white p-8 lg:p-10 ring-1 ring-slate-900/[0.05] shadow-[0_4px_24px_rgba(15,23,42,0.05)]">
+                        <h3 className="text-xl font-medium tracking-tight text-gray-900">
+                            See it on a real question.
+                        </h3>
+                        <p className="mt-2 max-w-xl text-[15px] leading-[1.65] text-slate-600">
+                            The fastest way to understand what Anizai produces is to run
+                            a forecast on something you actually care about.
+                        </p>
+                        <div className="mt-6">
+                            <Button
+                                onClick={onGetStarted}
+                                disabled={!onGetStarted}
+                                className="h-11 px-6 text-[14.5px] font-medium bg-gray-900 text-white hover:bg-gray-800 rounded-lg shadow-[0_1px_2px_rgba(15,23,42,0.08)]"
+                            >
+                                Get started
+                            </Button>
+                        </div>
+                    </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+            </section>
+        </PageShell>
+    );
+}
 
-      {/* Features grid */}
-      <div className="px-6 pb-16">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {features.map((feature, index) => {
-              const Icon = feature.icon;
-              const s = accentStyles(feature.accent);
-
-              return (
-                <div
-                  key={index}
-                  className="group rounded-2xl border border-gray-200 bg-white p-7 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
-                >
-                  <div className={`inline-flex items-center gap-2 rounded-xl border ${s.border} ${s.bg} px-3 py-2`}>
-                    <Icon className={`w-5 h-5 ${s.icon}`} />
-                    <span className={`text-xs font-semibold ${s.text}`}>Feature</span>
-                  </div>
-
-                  <h3 className="mt-4 text-lg font-semibold text-gray-900">
-                    {feature.title}
-                  </h3>
-
-                  <p className="mt-2 text-sm text-gray-600 leading-relaxed">
-                    {feature.description}
-                  </p>
-
-                  <div className="mt-5 h-px bg-gray-100" />
-
-                  <p className="mt-4 text-xs text-gray-500">
-                    Built to support evidence-based forecasting.
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Bottom CTA */}
-          <div className="mt-12 rounded-2xl border border-gray-200 bg-gray-50 p-8">
-            <h3 className="text-xl font-semibold text-gray-900">Want to see it in action?</h3>
-            <p className="mt-2 text-gray-600 max-w-2xl">
-              Create your first forecasting session and explore how evidence and confidence scores are generated.
+function FeatureCard({ feature }: { feature: Feature }) {
+    return (
+        <article
+            className={`rounded-2xl bg-white p-7 ring-1 ring-slate-900/[0.05] shadow-[0_4px_24px_rgba(15,23,42,0.05),0_1px_3px_rgba(15,23,42,0.04)] flex flex-col ${feature.span}`}
+        >
+            <p className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-anizai-purple-600 mb-3">
+                {feature.eyebrow}
             </p>
-            <div className="mt-6 flex flex-col sm:flex-row gap-3">
-              <Button
-                variant="primary"
-                className="h-11 px-6"
-                onClick={onGetStarted}
-                disabled={!onGetStarted}
-              >
-                Get started
-              </Button>
-              <Button variant="outline" className="h-11 px-6" onClick={onBack}>
-                Back
-              </Button>
+            <h3 className="text-xl lg:text-[1.375rem] font-medium tracking-tight text-gray-900">
+                {feature.title}
+            </h3>
+            <p className="mt-3 text-[14.5px] leading-[1.7] text-slate-600 max-w-xl">
+                {feature.body}
+            </p>
+            <div className="mt-6 flex-1">
+                <FeatureVisual variant={feature.visual} />
             </div>
-          </div>
+        </article>
+    );
+}
 
-          <p className="mt-8 text-xs text-gray-400">
-            Note: Feature descriptions are aligned with the project scope and demo flow.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+function FeatureVisual({ variant }: { variant: Feature['visual'] }) {
+    if (variant === 'verdict') {
+        return (
+            <div className="rounded-xl bg-slate-50/80 ring-1 ring-slate-900/[0.04] p-5 flex items-center gap-5">
+                <div className="relative w-[78px] h-[78px] shrink-0">
+                    <svg viewBox="0 0 78 78" className="w-full h-full -rotate-90">
+                        <defs>
+                            <linearGradient id="featRing" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stopColor="#c084fc" />
+                                <stop offset="100%" stopColor="#2dd4bf" />
+                            </linearGradient>
+                        </defs>
+                        <circle cx="39" cy="39" r="32" fill="none" stroke="#eef0f4" strokeWidth="7" />
+                        <circle
+                            cx="39"
+                            cy="39"
+                            r="32"
+                            fill="none"
+                            stroke="url(#featRing)"
+                            strokeWidth="7"
+                            strokeLinecap="round"
+                            strokeDasharray={2 * Math.PI * 32}
+                            strokeDashoffset={2 * Math.PI * 32 * (1 - 0.72)}
+                        />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-lg font-light text-gray-900 tabular-nums leading-none">
+                            72<span className="text-sm text-slate-400">%</span>
+                        </span>
+                    </div>
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="inline-flex items-center gap-1.5 rounded-full bg-anizai-teal-50 px-2.5 py-0.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-anizai-teal-500" />
+                        <span className="text-[11px] font-medium text-anizai-teal-800">
+                            Lean Yes
+                        </span>
+                    </div>
+                    <p className="mt-2 text-[13px] leading-snug text-slate-700">
+                        Recession by end of 2026 — High Confidence.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+    if (variant === 'drivers') {
+        const rows = [
+            { label: 'Yield curve inversion', dir: 'up' as const, w: 0.85 },
+            { label: 'Labor market softening', dir: 'up' as const, w: 0.55 },
+            { label: 'Consumer spending resilient', dir: 'down' as const, w: 0.65 },
+        ];
+        return (
+            <div className="space-y-2.5">
+                {rows.map((r) => (
+                    <div key={r.label}>
+                        <div className="flex items-center justify-between text-[12px] mb-1">
+                            <span className="text-slate-700 truncate">{r.label}</span>
+                            <span
+                                className={`text-[10.5px] font-medium uppercase tracking-[0.08em] ${
+                                    r.dir === 'up' ? 'text-anizai-teal-700' : 'text-rose-700'
+                                }`}
+                            >
+                                {r.dir === 'up' ? '↑ Driver' : '↓ Headwind'}
+                            </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                            <div
+                                className={`h-full rounded-full ${
+                                    r.dir === 'up' ? 'bg-anizai-teal-400' : 'bg-rose-400'
+                                }`}
+                                style={{ width: `${r.w * 100}%` }}
+                            />
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    }
+    if (variant === 'evidence') {
+        const items = [
+            { src: 'reuters.com', age: '11h', tier: 'Tier 1', body: 'Fed signals slower cut path' },
+            { src: 'arxiv.org', age: '2d', tier: 'Tier 1', body: 'Yield-curve recession indicator paper' },
+        ];
+        return (
+            <ul className="space-y-2">
+                {items.map((item) => (
+                    <li
+                        key={item.body}
+                        className="rounded-lg bg-slate-50/80 ring-1 ring-slate-900/[0.04] px-3.5 py-2.5 flex items-center gap-3"
+                    >
+                        <span className="h-1.5 w-1.5 rounded-full bg-anizai-purple-400 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                            <p className="text-[12.5px] text-slate-800 truncate">{item.body}</p>
+                            <p className="text-[10.5px] text-slate-500 mt-0.5">
+                                <span className="font-medium uppercase tracking-wide">{item.src}</span>
+                                <span className="mx-1.5 text-slate-300">·</span>
+                                {item.age} ago
+                                <span className="mx-1.5 text-slate-300">·</span>
+                                {item.tier}
+                            </p>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        );
+    }
+    if (variant === 'reasoning') {
+        const steps = [
+            'Parse question intent and time window',
+            'Retrieve candidate evidence from vault',
+            'Score each item: relevance, tier, recency',
+            'Weight drivers vs. headwinds by impact',
+            'Synthesize verdict, probability, confidence',
+        ];
+        return (
+            <ol className="space-y-1.5">
+                {steps.map((step, i) => (
+                    <li key={step} className="flex items-start gap-3 text-[12.5px]">
+                        <span className="mt-0.5 inline-flex items-center justify-center h-5 w-5 rounded-full bg-slate-100 text-[10px] font-medium tabular-nums text-slate-500 shrink-0">
+                            {i + 1}
+                        </span>
+                        <span className="text-slate-700 leading-snug">{step}</span>
+                    </li>
+                ))}
+            </ol>
+        );
+    }
+    if (variant === 'pipeline') {
+        return (
+            <div className="rounded-xl bg-slate-50/80 ring-1 ring-slate-900/[0.04] overflow-hidden">
+                <ol className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-slate-200/70">
+                    {PIPELINE_STEPS.map((step) => (
+                        <li key={step.n} className="p-5">
+                            <p className="text-[10.5px] font-medium tabular-nums text-slate-400 mb-2">
+                                {step.n}
+                            </p>
+                            <p className="text-[15px] font-medium text-gray-900 tracking-tight">
+                                {step.title}
+                            </p>
+                            <p className="mt-2 text-[10.5px] font-medium uppercase tracking-[0.12em] text-anizai-purple-600">
+                                {step.tag}
+                            </p>
+                        </li>
+                    ))}
+                </ol>
+            </div>
+        );
+    }
+    if (variant === 'sources') {
+        return (
+            <div className="flex flex-wrap gap-2.5">
+                {SOURCES.map((src) => (
+                    <span
+                        key={src}
+                        className="inline-flex items-center gap-2 rounded-full bg-slate-50/80 ring-1 ring-slate-900/[0.04] px-3 py-1.5 text-[12px] text-slate-700"
+                    >
+                        <span className="h-1.5 w-1.5 rounded-full bg-anizai-teal-400" />
+                        {src}
+                    </span>
+                ))}
+            </div>
+        );
+    }
+    return null;
 }
