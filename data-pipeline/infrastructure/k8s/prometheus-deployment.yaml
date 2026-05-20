@@ -77,6 +77,12 @@ spec:
               mountPath: /etc/prometheus/prometheus.yml
               subPath: prometheus.yml
               readOnly: true
+            # Phase 9.5 Stage C Item 3: alert rules ConfigMap mount.
+            # Prometheus's rule_files glob (in prometheus.yml) scans
+            # this directory and loads all *.yml files.
+            - name: rules
+              mountPath: /etc/prometheus/rules
+              readOnly: true
             - name: data
               mountPath: /prometheus
           # Memory raised from 512Mi → 2Gi (Phase 9.5 F2). WAL replay of
@@ -94,6 +100,12 @@ spec:
         - name: config
           configMap:
             name: prometheus-config
+        # Phase 9.5 Stage C Item 3: alert rules. Mounted as a directory
+        # so future rule files (e.g. additional groups) can be added
+        # without touching the deployment manifest.
+        - name: rules
+          configMap:
+            name: prometheus-rules
         - name: data
           persistentVolumeClaim:
             claimName: prometheus-data

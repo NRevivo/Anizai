@@ -1,10 +1,18 @@
 # ==========================================================
 # Anizai — Prometheus ConfigMap (Phase C, Sprint C5.6)
 # ==========================================================
-# Scrape configuration for the three in-cluster targets:
+# Scrape configuration for the five in-cluster targets:
 #   flink-jobmanager  :9249  — Flink metrics reporter (D4, Sprint C3)
 #   flink-taskmanager :9249  — Flink metrics reporter (new service C5.6)
-#   agent-worker      :8000  — Agent /metrics endpoint (§8.8.2)
+#   agent-worker      :8000  — Agent /metrics endpoint (§8.8.2; Sprint 18 stub)
+#   kafka-exporter    :9308  — Kafka topic/partition/broker metrics (Phase 9.5 C Item 1a)
+#   postgres-exporter :9187  — Postgres + custom Anizai vault metrics (Phase 9.5 C Item 1b)
+#
+# Phase 9.5 Stage C additions:
+#   - rule_files: load alert rules from the mounted ConfigMap
+#     (prometheus-rules-configmap.yaml)
+#   - alerting.alertmanagers: route firing alerts to the new
+#     alertmanager Service (Item 4)
 #
 # 15s interval matches the Grafana datasource timeInterval setting in
 # infrastructure/grafana/provisioning/datasources/prometheus.yml so
@@ -28,6 +36,19 @@ data:
       scrape_interval: 15s
       evaluation_interval: 15s
 
+    # Phase 9.5 Stage C Item 3: load alert rules from the
+    # prometheus-rules ConfigMap (mounted at /etc/prometheus/rules/).
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    # Phase 9.5 Stage C Item 4: route firing alerts to Alertmanager
+    # for Gmail SMTP delivery.
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager:9093
+
     scrape_configs:
       - job_name: flink-jobmanager
         static_configs:
@@ -44,3 +65,18 @@ data:
           - targets:
               - agent-worker:8000
         metrics_path: /metrics
+
+      # Phase 9.5 Stage C Item 1a — Kafka topic/partition/broker state
+      # for DLQ depth + topic-staleness alerts (K-Kafka-1 through 6).
+      - job_name: kafka-exporter
+        static_configs:
+          - targets:
+              - kafka-exporter:9308
+
+      # Phase 9.5 Stage C Item 1b — Postgres internals + Anizai-specific
+      # custom vault queries for freshness alerts (P-Postgres-1, 2, 3)
+      # and Grafana Pipeline Health dashboard.
+      - job_name: postgres-exporter
+        static_configs:
+          - targets:
+              - postgres-exporter:9187

@@ -1,0 +1,250 @@
+# ==========================================================
+# Anizai — Prometheus alert rules (Phase 9.5 Stage C Item 3)
+# ==========================================================
+# 11 metric-based alert rules covering pipeline-functionality health.
+# Mounted into the Prometheus pod at /etc/prometheus/rules/rules.yml
+# via the prometheus-deployment.yaml subPath update.
+#
+# Notification path: Prometheus → Alertmanager (Item 4) → Gmail SMTP
+# → ron.mintz21@gmail.com with [anizai-pipeline] subject prefix.
+#
+# OpenAI rate-limit alerts are NOT here — they use a different
+# notification path (Cloud Logging-based metric → Cloud Monitoring
+# email). See infrastructure/gcp/06_monitoring_setup.sh (Item 5).
+#
+# Thresholds are conservative for V1 (per Ron's Q2). Revisit after
+# ~2 weeks of production data; tighten or relax as the real signal-
+# to-noise ratio becomes clear. The OpenAI 429 warning at first-
+# occurrence is intentional (Ron 2026-05-20): given the 5/19-5/20
+# incidents, early signal is more valuable than alert-fatigue
+# avoidance for the first few weeks. Re-evaluate threshold to ≥2/h
+# if the warning proves noisy after ~2 weeks.
+#
+# Spec: phase95_cluster_robustness_implementation.md Stage C Item 3.
+# ==========================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: anizai
+  labels:
+    app: prometheus
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: "9.5"
+data:
+  rules.yml: |
+    groups:
+      # ====================================================
+      # Flink — job state + checkpoint health
+      # ====================================================
+      - name: anizai-flink
+        interval: 30s
+        rules:
+          - alert: FlinkSilverJobNotRunning
+            expr: absent(flink_jobmanager_job_uptime{job_name="anizai_silver_polymarket"})
+            for: 5m
+            labels:
+              severity: critical
+              component: flink
+            annotations:
+              summary: "Flink Silver job is not RUNNING"
+              description: |
+                anizai_silver_polymarket has been absent from JobManager metrics
+                for >5min. Check Flink UI at flink-jobmanager:8081. If the job is
+                CANCELED/FAILED, see cluster_operations_guide.md §Common-symptom
+                runbooks → "Flink jobs in RESTARTING loop after a restart".
+
+          - alert: FlinkGoldJobNotRunning
+            expr: absent(flink_jobmanager_job_uptime{job_name="anizai_gold_all_sources"})
+            for: 5m
+            labels:
+              severity: critical
+              component: flink
+            annotations:
+              summary: "Flink Gold job is not RUNNING"
+              description: |
+                anizai_gold_all_sources has been absent from JobManager metrics
+                for >5min. Check Flink UI. Same triage as the silver alert
+                runbook.
+
+          - alert: GoldCheckpointFailureCluster
+            expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints{job_name="anizai_gold_all_sources"}[10m]) >= 3
+            for: 10m
+            labels:
+              severity: warning
+              component: flink
+            annotations:
+              summary: "Gold checkpoint failures clustering"
+              description: |
+                ≥3 Gold checkpoint failures in past 10min — typically indicates
+                backpressure from a downstream choke. Investigate in order:
+                  1. OpenAI RPD usage at https://platform.openai.com/usage
+                     (KG-PHASE-9.5-1 — Tier 1 has a 10k requests/day cap).
+                  2. Postgres connection pool: kubectl exec postgres-0 -- psql -c
+                     "SELECT count(*) FROM pg_stat_activity;"
+                  3. Recent producer surge: check Bronze rate panel in
+                     Anizai Pipeline Health dashboard.
+                  4. Recent infra change: kubectl get events -n anizai
+
+          - alert: GoldCheckpointFailureClusterSustained
+            expr: increase(flink_jobmanager_job_numberOfFailedCheckpoints{job_name="anizai_gold_all_sources"}[10m]) >= 3
+            for: 20m
+            labels:
+              severity: critical
+              component: flink
+            annotations:
+              summary: "Gold checkpoint failures persisting >20min"
+              description: |
+                Sustained checkpoint failures past the 20min escalation
+                threshold. Likely the cluster needs operator intervention —
+                consider cancelling Gold and triaging before resubmitting
+                (see cluster_operations_guide.md §Backlog-drop procedure
+                if Silver→Gold backlog has grown).
+
+      # ====================================================
+      # Kafka — DLQ + topic staleness
+      # ====================================================
+      - name: anizai-kafka
+        interval: 30s
+        rules:
+          - alert: DLQGrowthRateWarning
+            expr: sum(delta(kafka_topic_partition_current_offset{topic="dead-letter-queue"}[1h])) > 100
+            for: 5m
+            labels:
+              severity: warning
+              component: kafka
+            annotations:
+              summary: "DLQ growing >100 messages/hour"
+              description: |
+                DLQ has accumulated >100 new messages in the past hour. Inspect:
+                kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-console-consumer.sh \
+                  --bootstrap-server localhost:9092 --topic dead-letter-queue \
+                  --partition 0 --offset earliest --max-messages 20 --timeout-ms 30000
+                Common categories: momentum_vault_insert (Postgres issue),
+                openai_consensus (OpenAI rate-limit), social_vectors_insert,
+                knowledge_vectors_insert. See cluster_operations_guide.md.
+
+          - alert: DLQGrowthRateCritical
+            expr: sum(delta(kafka_topic_partition_current_offset{topic="dead-letter-queue"}[1h])) > 500
+            for: 5m
+            labels:
+              severity: critical
+              component: kafka
+            annotations:
+              summary: "DLQ growing >500 messages/hour"
+              description: |
+                Sustained heavy DLQ growth. Likely a producer or Gold
+                downstream is broken. Triage same as the warning, but
+                consider pausing Silver/Gold jobs while investigating.
+
+          - alert: DLQStandingDepthHigh
+            expr: sum(kafka_topic_partition_current_offset{topic="dead-letter-queue"} - kafka_topic_partition_oldest_offset{topic="dead-letter-queue"}) > 10000
+            for: 10m
+            labels:
+              severity: critical
+              component: kafka
+            annotations:
+              summary: "DLQ standing depth >10k messages"
+              description: |
+                DLQ has >10k messages held under 30-day retention. Operator
+                decision needed: replay (write a one-shot consumer that pushes
+                back through Silver/Gold) or accept the loss and run
+                kafka-delete-records.sh to truncate.
+
+          - alert: PolymarketBronzeStale
+            expr: sum(delta(kafka_topic_partition_current_offset{topic="ingest.bronze.polymarket"}[30m])) == 0
+            for: 5m
+            labels:
+              severity: warning
+              component: kafka
+              source: polymarket
+            annotations:
+              summary: "Polymarket Bronze topic silent for >30min"
+              description: |
+                Polymarket continuous-stream producer has emitted zero messages
+                in the past 30min. Check polymarket pod state:
+                  kubectl get pod -n anizai -l app=polymarket
+                If CrashLoopBackOff: check logs for KafkaTimeoutError (broker
+                unreachable) or NoBrokersAvailable (Kafka pod down).
+
+          - alert: HighFrequencyBronzeStale
+            expr: sum by (topic) (delta(kafka_topic_partition_current_offset{topic=~"ingest.bronze.(hackernews|openweather)"}[2h])) == 0
+            for: 10m
+            labels:
+              severity: warning
+              component: kafka
+            annotations:
+              summary: "High-frequency producer {{ $labels.topic }} silent for >2h"
+              description: |
+                Producer {{ $labels.topic }} has emitted zero messages in the past 2h.
+                Check Airflow DAG state via UI (kubectl port-forward
+                svc/airflow-webserver 8090:8080). If DAG runs are showing
+                `failed`, see cluster_operations_guide.md §Common-symptom
+                runbooks → "Pipeline silently idle".
+
+          - alert: DailyBronzeStale
+            expr: sum by (topic) (delta(kafka_topic_partition_current_offset{topic=~"ingest.bronze.(arxiv|fred)"}[26h])) == 0
+            for: 5m
+            labels:
+              severity: warning
+              component: kafka
+            annotations:
+              summary: "Daily producer {{ $labels.topic }} hasn't fired in 26h"
+              description: |
+                Producer {{ $labels.topic }} (daily DAG) hasn't fired in 26h
+                (covers 24h schedule + 2h buffer). Check Airflow DAG state.
+                Note: arxiv runs 07:00 UTC, fred runs 06:00 UTC.
+
+      # ====================================================
+      # Postgres — vault freshness + capacity
+      # ====================================================
+      - name: anizai-postgres
+        interval: 30s
+        rules:
+          - alert: MomentumVaultIdle
+            expr: absent(pg_anizai_momentum_vault_rows_1h_rows)
+            for: 15m
+            labels:
+              severity: warning
+              component: postgres
+              table: momentum_vault
+            annotations:
+              summary: "Zero rows added to momentum_vault in past 1h"
+              description: |
+                momentum_vault has had zero inserts in the past 1h across all
+                sources. This typically means either Polymarket producer is
+                down OR Gold processing has stalled (check
+                GoldCheckpointFailureCluster alert state).
+
+          - alert: KnowledgeVaultIdle
+            expr: absent(pg_anizai_knowledge_vault_rows_6h_rows)
+            for: 15m
+            labels:
+              severity: warning
+              component: postgres
+              table: knowledge_vault
+            annotations:
+              summary: "Zero rows added to knowledge_vault in past 6h"
+              description: |
+                knowledge_vault has had zero inserts in the past 6h across all
+                sources. Conservative threshold accommodates arxiv-daily +
+                hackernews quiet hours + newsapi-paused state. Check
+                producer set; if newsapi has been unpaused, investigate that
+                path.
+
+          - alert: PostgresConnectionPoolSaturating
+            expr: (pg_settings_max_connections - pg_stat_database_numbackends{datname="anizai"}) < 5
+            for: 5m
+            labels:
+              severity: critical
+              component: postgres
+            annotations:
+              summary: "Postgres connection pool: <5 connections remaining"
+              description: |
+                anizai db has <5 connections free out of pg_settings_max_connections.
+                Gold-stage inserts + agent-worker queries are at risk of
+                OperationalError. Quick triage:
+                  kubectl exec postgres-0 -- psql -U anizai -d anizai -c \
+                    "SELECT pid, application_name, state, query_start FROM pg_stat_activity ORDER BY query_start;"
+                Look for long-running queries; consider increasing
+                max_connections in postgres-statefulset.yaml (requires pod restart).
