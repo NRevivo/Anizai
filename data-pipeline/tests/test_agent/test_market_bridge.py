@@ -564,3 +564,294 @@ def test_run_empty_false_when_only_fred_populated():
     assert result["linked_sources"] == []
     assert len(result["fred_anomalies"]) == 1
     assert result["google_trends"] == []
+
+
+# ==========================================================
+# Sprint 22 T22.2 — Polymarket fuzzy-match resolver wiring
+# ==========================================================
+
+def _polymarket_resolver_row(
+    *,
+    external_reference_id: str = "0xabc_condition_id",
+    current_value: float = 0.62,
+    match_score: float = 0.91,
+) -> dict:
+    """
+    Resolver-shaped row — same columns as fetch_latest plus the added
+    `match_score` (T22.1). The condition_id-shaped external_reference_id
+    mirrors what production rows look like (see Sprint 22 D1).
+    """
+    return {
+        "metric_id": "pm-resolver-001",
+        "canonical_event_id": "ev-resolver-fixture",
+        "source_name": "polymarket",
+        "external_reference_id": external_reference_id,
+        "current_value": current_value,
+        "unit": "probability",
+        "timestamp_utc": NOW,
+        "change_24h": 0.03,
+        "change_7d": 0.07,
+        "change_30d": 0.12,
+        "is_new_market": False,
+        "metadata_extension": {
+            "question": "Will the Fed cut rates before June 2026?",
+            "liquidity_pool_tvl": 99000.0,
+            "whale_alert": False,
+        },
+        "ingested_at": NOW,
+        "match_score": match_score,
+    }
+
+
+class TestPolymarketFuzzyMatchResolverWiring:
+    """
+    Sprint 22 T22.2: market_bridge.run() must invoke the resolver when
+    `has_market_question_intent=True` AND `raw_question` is provided AND
+    no explicit `polymarket_slug` is given. On hit, the polymarket
+    payload uses the resolver's row + a fresh 720-hour history keyed on
+    the row's external_reference_id.
+    """
+
+    def test_resolver_hit_populates_polymarket_payload(self):
+        """
+        Resolver returns a row → polymarket payload built from the
+        resolver row (current_odds, momentum) + fetch_time_series for
+        the resolver's external_reference_id (price_history,
+        whale_alerts). market_slug = the external_reference_id.
+        """
+        resolver_row = _polymarket_resolver_row(
+            external_reference_id="0xfed_condition_id", current_value=0.62,
+        )
+        history = [_polymarket_history_row(timestamp=NOW, value=0.61)]
+        with (
+            patch.object(
+                market_bridge.market_tools,
+                "find_polymarket_market_by_question",
+                return_value=resolver_row,
+            ) as mock_resolver,
+            patch.object(
+                market_bridge.market_tools,
+                "fetch_time_series",
+                return_value=history,
+            ) as mock_history,
+            patch.object(
+                market_bridge.market_tools, "fetch_latest", return_value=None,
+            ) as mock_fetch_latest,
+            patch.object(
+                market_bridge.market_tools, "fetch_fred_anomalies", return_value=[],
+            ),
+            patch.object(
+                market_bridge.mapping_tools, "lookup_by_canonical", return_value=[],
+            ),
+        ):
+            result = market_bridge.run(
+                raw_question="Will the Fed cut rates before June 2026?",
+                has_market_question_intent=True,
+            )
+
+        pm = result["polymarket"]
+        assert pm is not None
+        assert pm["current_odds"] == 0.62
+        assert pm["momentum"] == {"change_24h": 0.03, "change_7d": 0.07, "change_30d": 0.12}
+        assert pm["market_slug"] == "0xfed_condition_id"
+        assert pm["price_history"] == [{"timestamp": NOW.isoformat(), "value": 0.61}]
+        mock_resolver.assert_called_once_with(
+            "Will the Fed cut rates before June 2026?"
+        )
+        mock_history.assert_called_once_with(
+            source_name="polymarket",
+            external_reference_id="0xfed_condition_id",
+            hours=720,
+        )
+        # The resolver row carries the same columns as fetch_latest, so the
+        # redundant fetch_latest call site must be skipped for efficiency.
+        mock_fetch_latest.assert_not_called()
+
+    def test_resolver_hit_with_empty_history_still_tier_1(self):
+        """
+        Edge case: resolver finds the market but the 720-hour history is
+        empty. Stay Tier 1 — current_odds + market_comparison still render
+        on the frontend even with no trend chart. Do NOT downgrade to
+        polymarket=None.
+        """
+        with (
+            patch.object(
+                market_bridge.market_tools,
+                "find_polymarket_market_by_question",
+                return_value=_polymarket_resolver_row(),
+            ),
+            patch.object(
+                market_bridge.market_tools, "fetch_time_series", return_value=[],
+            ),
+            patch.object(
+                market_bridge.market_tools, "fetch_latest", return_value=None,
+            ),
+            patch.object(
+                market_bridge.market_tools, "fetch_fred_anomalies", return_value=[],
+            ),
+            patch.object(
+                market_bridge.mapping_tools, "lookup_by_canonical", return_value=[],
+            ),
+        ):
+            result = market_bridge.run(
+                raw_question="Will the Fed cut rates before June 2026?",
+                has_market_question_intent=True,
+            )
+
+        pm = result["polymarket"]
+        assert pm is not None
+        assert pm["current_odds"] == 0.62
+        assert pm["price_history"] == []
+        assert pm["whale_alerts"] == []
+
+    def test_resolver_miss_returns_polymarket_none(self):
+        """
+        Resolver returns None (no row passed the 0.85 threshold) →
+        polymarket=None. Tier 2 path preserved exactly as it was pre-T22.2.
+        fetch_time_series must NOT be called.
+        """
+        with (
+            patch.object(
+                market_bridge.market_tools,
+                "find_polymarket_market_by_question",
+                return_value=None,
+            ),
+            patch.object(
+                market_bridge.market_tools, "fetch_time_series",
+            ) as mock_history,
+            patch.object(
+                market_bridge.market_tools, "fetch_fred_anomalies", return_value=[],
+            ),
+            patch.object(
+                market_bridge.mapping_tools, "lookup_by_canonical", return_value=[],
+            ),
+        ):
+            result = market_bridge.run(
+                raw_question="Will something obscure happen by 2030?",
+                has_market_question_intent=True,
+            )
+
+        assert result["polymarket"] is None
+        mock_history.assert_not_called()
+
+    def test_intent_false_does_not_call_resolver(self):
+        """
+        QU classified the question as non-market-intent (open-ended
+        explainer, "Why is X happening?", etc.). The resolver must not
+        be called at all — saves a DB round-trip on Tier 2 questions.
+        """
+        with (
+            patch.object(
+                market_bridge.market_tools,
+                "find_polymarket_market_by_question",
+            ) as mock_resolver,
+            patch.object(
+                market_bridge.market_tools, "fetch_fred_anomalies", return_value=[],
+            ),
+            patch.object(
+                market_bridge.mapping_tools, "lookup_by_canonical", return_value=[],
+            ),
+        ):
+            result = market_bridge.run(
+                raw_question="Why is inflation rising?",
+                has_market_question_intent=False,
+            )
+
+        assert result["polymarket"] is None
+        mock_resolver.assert_not_called()
+
+    def test_empty_raw_question_does_not_call_resolver(self):
+        """
+        Even when intent is True, an empty raw_question must skip the
+        resolver. The resolver's own empty-string guard would also
+        short-circuit, but skipping at the caller is cleaner and matches
+        the gate documented in run()'s docstring.
+        """
+        with (
+            patch.object(
+                market_bridge.market_tools,
+                "find_polymarket_market_by_question",
+            ) as mock_resolver,
+            patch.object(
+                market_bridge.market_tools, "fetch_fred_anomalies", return_value=[],
+            ),
+            patch.object(
+                market_bridge.mapping_tools, "lookup_by_canonical", return_value=[],
+            ),
+        ):
+            result = market_bridge.run(
+                raw_question="",
+                has_market_question_intent=True,
+            )
+
+        assert result["polymarket"] is None
+        mock_resolver.assert_not_called()
+
+    def test_slug_takes_precedence_over_raw_question(self):
+        """
+        Forward-compat: if a future QU auto-pick populates
+        `polymarket_slug`, that slug-keyed lookup wins over the fuzzy
+        match against `raw_question`. Confirms the resolution-order
+        contract in run()'s docstring.
+        """
+        latest = _polymarket_latest()
+        with (
+            patch.object(
+                market_bridge.market_tools,
+                "find_polymarket_market_by_question",
+            ) as mock_resolver,
+            patch.object(
+                market_bridge.market_tools, "fetch_latest", return_value=latest,
+            ),
+            patch.object(
+                market_bridge.market_tools, "fetch_time_series", return_value=[],
+            ),
+            patch.object(
+                market_bridge.market_tools, "fetch_fred_anomalies", return_value=[],
+            ),
+            patch.object(
+                market_bridge.mapping_tools, "lookup_by_canonical", return_value=[],
+            ),
+        ):
+            result = market_bridge.run(
+                polymarket_slug="fed-rate-cut-may-2026",
+                raw_question="Will the Fed cut rates before June 2026?",
+                has_market_question_intent=True,
+            )
+
+        assert result["polymarket"] is not None
+        assert result["polymarket"]["market_slug"] == "fed-rate-cut-may-2026"
+        mock_resolver.assert_not_called()
+
+    def test_resolver_row_with_empty_external_reference_id_returns_none(self):
+        """
+        Defensive: the schema has external_reference_id NOT NULL, but if
+        the resolver ever returns a row with an empty string, treat it
+        as a miss rather than calling fetch_time_series with an empty
+        key (which would return [] anyway, but loudly succeeding hides
+        the data integrity issue).
+        """
+        bad_row = _polymarket_resolver_row(external_reference_id="")
+        with (
+            patch.object(
+                market_bridge.market_tools,
+                "find_polymarket_market_by_question",
+                return_value=bad_row,
+            ),
+            patch.object(
+                market_bridge.market_tools, "fetch_time_series",
+            ) as mock_history,
+            patch.object(
+                market_bridge.market_tools, "fetch_fred_anomalies", return_value=[],
+            ),
+            patch.object(
+                market_bridge.mapping_tools, "lookup_by_canonical", return_value=[],
+            ),
+        ):
+            result = market_bridge.run(
+                raw_question="Will the Fed cut rates before June 2026?",
+                has_market_question_intent=True,
+            )
+
+        assert result["polymarket"] is None
+        mock_history.assert_not_called()

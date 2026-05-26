@@ -104,10 +104,18 @@ def run(state: dict, *, now: Optional[datetime] = None) -> dict:
         future_pulse = pool.submit(pulse_analyst.run, query_embedding, now=now)
         future_market = pool.submit(
             market_bridge.run,
-            polymarket_slug=None,        # KG-PHASE8-12: resolver deferred to Sprint 21+
+            polymarket_slug=None,        # forward-compat: QU auto-pick (Future Enhancement 4)
             canonical_event_id=None,     # ditto — populated by Phase 7
             entities=entities,
             now=now,
+            # Sprint 22 T22.2: pg_trgm fuzzy match against the user's
+            # raw question replaces the deferred vector resolver. Gated
+            # on QU's has_market_question_intent so Tier 2 questions
+            # don't pay for the DB round-trip.
+            raw_question=state.get("raw_question") or "",
+            has_market_question_intent=bool(
+                structured_intent.get("has_market_question_intent")
+            ),
         )
 
         researcher_evidence = _await(future_researcher, agent_name="researcher")

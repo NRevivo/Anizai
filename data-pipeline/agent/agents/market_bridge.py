@@ -84,6 +84,9 @@ from agent.tools import mapping_tools, market_tools
 # ==========================================================
 
 POLYMARKET_TIME_SERIES_HOURS = 720       # spec §8.4.3 step 1b — 30-day history
+                                         # (Sprint 22 T22.4: same window is
+                                         # written to the predictionSeries
+                                         # subcollection — tune in one place)
 FRED_ANOMALY_DAYS = 14                   # spec §8.4.3 step 3
 
 # Threshold for trend_direction derivation (Drift E). Google Trends scores
@@ -121,16 +124,18 @@ def run(
     canonical_event_id: Optional[str] = None,
     entities: Optional[list[str]] = None,
     now: Optional[datetime] = None,
+    raw_question: Optional[str] = None,
+    has_market_question_intent: bool = False,
 ) -> dict:
     """
     Execute the Market Bridge retrieval algorithm.
 
     Args:
-        polymarket_slug:    Auto-picked Polymarket market slug from Query
-                            Understanding (`state["polymarket_market"]`).
-                            None signals a Tier 2 question — `polymarket`
-                            in the result is set to None and steps 1a/1b
-                            are skipped.
+        polymarket_slug:    Forward-compat entry point for a future QU
+                            auto-pick (when KG-PHASE8-12's vector index
+                            lands — see revised plan §Future Enhancement
+                            4). Always None in V1; if non-None, takes
+                            precedence over the fuzzy-match resolver.
         canonical_event_id: Canonical event key for cross-platform linkage
                             (mapping_dict). None or unmatched → empty
                             `linked_sources`.
@@ -143,6 +148,16 @@ def run(
                             on the signature for symmetry with Researcher
                             and Pulse Analyst so the `vault_query` node
                             (T19.8) can dispatch all three uniformly.
+        raw_question:       The user's free-text question. Used by the
+                            Sprint 22 T22.1 fuzzy-match resolver only
+                            when `has_market_question_intent` is True
+                            AND `polymarket_slug` is not provided.
+        has_market_question_intent:
+                            QU's boolean classification — True only when
+                            the question asks about a discrete,
+                            market-resolvable outcome. Gates the resolver
+                            so Tier 2 (open-ended) questions don't pay
+                            for a pg_trgm DB round-trip.
 
     Returns:
         MarketEvidence dict per spec §8.4.3 with the T19.4 drift
@@ -152,15 +167,24 @@ def run(
         (polymarket is None AND linked_sources=[] AND fred_anomalies=[]
         AND google_trends=[]). Any single populated source flips
         `empty=False` so synthesis doesn't misinterpret partial results.
+
+    Polymarket resolution order (Sprint 22 T22.2):
+        1. If `polymarket_slug` is provided, use it (forward-compat).
+        2. Else, if `has_market_question_intent` AND `raw_question`,
+           fuzzy-match via `find_polymarket_market_by_question`.
+        3. Else, `polymarket` → None (Tier 2 behavior).
     """
     # `now` is part of the contract but not consumed in Sprint 19. Marking
     # it explicitly avoids "unused argument" lint noise without dropping
     # the parameter (Sprint 22+ may add recency weighting to FRED anomalies).
     del now
 
-    polymarket_payload = (
-        _build_polymarket(polymarket_slug) if polymarket_slug else None
-    )
+    polymarket_payload: Optional[dict] = None
+    if polymarket_slug:
+        polymarket_payload = _build_polymarket(polymarket_slug)
+    elif has_market_question_intent and raw_question:
+        polymarket_payload = _build_polymarket_from_question(raw_question)
+
     linked_sources = (
         _build_linked_sources(canonical_event_id) if canonical_event_id else []
     )
@@ -192,6 +216,14 @@ def _build_polymarket(slug: str) -> Optional[dict]:
     Spec §8.4.3 step 1: current odds + momentum + 30-day history + whale
     alerts. If `fetch_latest` returns None the market is not in the vault
     yet — return None so the polymarket key drops to Tier-2 shape.
+
+    Naming note (Sprint 22): the parameter is called `slug` and the
+    returned key is `market_slug` for historical reasons, but the actual
+    value flowing through is the Polymarket `asset_id` (WebSocket) or
+    `condition_id` (REST snapshot) — see processing/silver_job.py:163-167.
+    `external_reference_id` is keyed on that identifier in momentum_vault,
+    so the round-trip works regardless of the variable name. Rename
+    deferred — out of Sprint 22 scope.
     """
     latest = market_tools.fetch_latest("polymarket", slug)
     if latest is None:
@@ -203,16 +235,88 @@ def _build_polymarket(slug: str) -> Optional[dict]:
         hours=POLYMARKET_TIME_SERIES_HOURS,
     )
 
+    return _pack_polymarket_payload(
+        latest_row=latest,
+        external_ref=slug,
+        history_rows=history_rows,
+    )
+
+
+def _build_polymarket_from_question(question: str) -> Optional[dict]:
+    """
+    Sprint 22 T22.2: resolve the user's raw question to a Polymarket
+    market via pg_trgm fuzzy-match, then assemble the same MarketEvidence
+    shape as `_build_polymarket(slug)`.
+
+    The resolver returns a momentum_vault row whose `external_reference_id`
+    is the Polymarket condition_id (REST) or asset_id (WebSocket) — that
+    value is the key the time-series query uses to fetch the 720-hour
+    history for the same market.
+
+    Edge cases:
+        - Resolver returns None (no row above threshold) → Tier 2.
+        - Resolver returns a row with empty `external_reference_id` → None
+          (defensive — vault data integrity issue if hit; the column is
+          NOT NULL in the schema).
+        - `fetch_time_series` returns [] → still Tier 1 with an empty
+          `price_history`. `current_odds` from the resolver row is the
+          headline number; the trend chart is supplementary. The frontend
+          renders the chart's empty state and keeps the market_comparison
+          BI card.
+        - `fetch_time_series` raises → propagates to vault_query's
+          `_await` handler (Sprint 26 T26.6 will wrap this call site with
+          `utils.retry.retry_on_transient`). Same behavior as today's
+          `_build_polymarket(slug)` path.
+
+    Skipping a redundant `fetch_latest`:
+        The resolver row already carries `current_value`, `change_24h`,
+        `change_7d`, `change_30d` — identical to what `fetch_latest`
+        would return for the same `external_reference_id`. Reusing it
+        saves one round-trip per Tier 1 forecast.
+    """
+    latest = market_tools.find_polymarket_market_by_question(question)
+    if latest is None:
+        return None
+
+    external_ref = latest.get("external_reference_id") or ""
+    if not external_ref:
+        return None
+
+    history_rows = market_tools.fetch_time_series(
+        source_name="polymarket",
+        external_reference_id=external_ref,
+        hours=POLYMARKET_TIME_SERIES_HOURS,
+    )
+
+    return _pack_polymarket_payload(
+        latest_row=latest,
+        external_ref=external_ref,
+        history_rows=history_rows,
+    )
+
+
+def _pack_polymarket_payload(
+    *,
+    latest_row: dict,
+    external_ref: str,
+    history_rows: list[dict],
+) -> dict:
+    """
+    Shape the spec §8.4.3 step-1 polymarket dict from one latest row +
+    the 720-hour history rows. Shared by both `_build_polymarket` (slug
+    entry point) and `_build_polymarket_from_question` (fuzzy-match
+    resolver entry point) per DRY (CLAUDE.md §3.2).
+    """
     return {
-        "current_odds": float(latest.get("current_value") or 0.0),
+        "current_odds": float(latest_row.get("current_value") or 0.0),
         "momentum": {
-            "change_24h": float(latest.get("change_24h") or 0.0),
-            "change_7d":  float(latest.get("change_7d") or 0.0),
-            "change_30d": float(latest.get("change_30d") or 0.0),
+            "change_24h": float(latest_row.get("change_24h") or 0.0),
+            "change_7d":  float(latest_row.get("change_7d") or 0.0),
+            "change_30d": float(latest_row.get("change_30d") or 0.0),
         },
         "price_history": [_price_history_point(r) for r in history_rows],
         "whale_alerts": _extract_whale_alerts(history_rows),
-        "market_slug": slug,
+        "market_slug": external_ref,
     }
 
 

@@ -581,3 +581,182 @@ def test_reasoning_chain_passed_through_as_non_empty_list():
         assert entry["step"] >= 1
         assert isinstance(entry["title"], str) and entry["title"]
         assert isinstance(entry["description"], str) and entry["description"]
+
+
+# ==========================================================
+# Sprint 22 T22.3 — marketProbability + marketComparison wiring
+# ==========================================================
+
+def _polymarket_payload(
+    *,
+    current_odds: float | None = 0.62,
+    market_slug: str = "0xfed_condition_id",
+    omit_current_odds: bool = False,
+) -> dict:
+    """
+    Mirror the payload Market Bridge's `_pack_polymarket_payload`
+    produces (T22.2). `omit_current_odds=True` lets the defensive-edge
+    test simulate a missing key (which shouldn't happen in practice
+    since `_pack_polymarket_payload` always sets it, but the guard
+    exists).
+    """
+    payload = {
+        "momentum": {"change_24h": 0.03, "change_7d": 0.07, "change_30d": 0.12},
+        "price_history": [],
+        "whale_alerts": [],
+        "market_slug": market_slug,
+    }
+    if not omit_current_odds:
+        payload["current_odds"] = current_odds
+    return payload
+
+
+class TestMarketComparisonWiring:
+    """
+    Sprint 22 T22.3: synthesize must thread
+    `state.market_evidence.polymarket.current_odds` →
+    SessionResult.marketProbability AND build a deterministic two-entry
+    marketComparison list ([Anizai, Polymarket]) from finalProbability
+    + current_odds. Tier 2 (no polymarket payload) preserves the
+    hardcoded None / [] / NO_MARKET_CAPTION behavior.
+    """
+
+    def test_tier_1_happy_path_wires_probability_and_comparison(self):
+        """
+        polymarket_payload with current_odds=0.62 + finalProbability=0.73
+        → marketProbability=0.62; marketComparison is exactly the two
+        entries in order [Anizai, Polymarket].
+        """
+        state = _state(
+            market_evidence={"polymarket": _polymarket_payload(current_odds=0.62)},
+        )
+        out = synthesize.run(
+            state,
+            client=_client_returning(_make_response(
+                output=_make_synthesis_output(final_probability=0.73),
+            )),
+        )
+        result = out["synthesis_result"]
+        assert result["marketProbability"] == 0.62
+        assert result["marketComparison"] == [
+            {"label": "Anizai", "value": 0.73},
+            {"label": "Polymarket", "value": 0.62},
+        ]
+        assert result["tier"] == "tier_1"
+
+    def test_tier_2_preserves_none_and_empty_with_caption(self):
+        """
+        No polymarket payload in state → marketProbability=None,
+        marketComparison=[], marketComparisonInsight overridden to the
+        canonical no-market caption (regression on existing override).
+        """
+        state = _state(market_evidence={})
+        out = synthesize.run(
+            state,
+            client=_client_returning(_make_response(
+                output=_make_synthesis_output(
+                    market_comparison_insight="LLM-written market text",
+                ),
+            )),
+        )
+        result = out["synthesis_result"]
+        assert result["marketProbability"] is None
+        assert result["marketComparison"] == []
+        assert result["marketComparisonInsight"] == synthesize.NO_MARKET_CAPTION
+        assert result["tier"] == "tier_2"
+
+    def test_tier_1_with_current_odds_zero_preserved_as_zero(self):
+        """
+        Edge case: vault returns current_odds=0.0 (e.g., a closed or
+        zero-bid market). Don't second-guess — write 0.0 through as
+        marketProbability and include 0.0 as the Polymarket value in
+        marketComparison. The FE decides whether 0.0 is renderable.
+        """
+        state = _state(
+            market_evidence={"polymarket": _polymarket_payload(current_odds=0.0)},
+        )
+        out = synthesize.run(
+            state,
+            client=_client_returning(_make_response(
+                output=_make_synthesis_output(final_probability=0.5),
+            )),
+        )
+        result = out["synthesis_result"]
+        assert result["marketProbability"] == 0.0
+        assert result["marketComparison"] == [
+            {"label": "Anizai", "value": 0.5},
+            {"label": "Polymarket", "value": 0.0},
+        ]
+        assert result["tier"] == "tier_1"
+
+    def test_polymarket_payload_missing_current_odds_falls_back_to_tier_2_like(self):
+        """
+        Defensive: polymarket payload present but missing the
+        `current_odds` key (contract violation — `_pack_polymarket_payload`
+        always sets it). Fall back to marketProbability=None,
+        marketComparison=[], and override marketComparisonInsight with
+        NO_MARKET_CAPTION rather than silently writing partial data.
+        """
+        state = _state(
+            market_evidence={"polymarket": _polymarket_payload(omit_current_odds=True)},
+        )
+        out = synthesize.run(
+            state,
+            client=_client_returning(_make_response(
+                output=_make_synthesis_output(
+                    market_comparison_insight="LLM thinks there's a market",
+                ),
+            )),
+        )
+        result = out["synthesis_result"]
+        assert result["marketProbability"] is None
+        assert result["marketComparison"] == []
+        assert result["marketComparisonInsight"] == synthesize.NO_MARKET_CAPTION
+        # Tier is still tier_1 — payload exists, just missing one field.
+        # The defensive None handles the *output*, not the tier inference.
+        assert result["tier"] == "tier_1"
+
+    def test_market_comparison_order_is_stable(self):
+        """
+        Order matters for downstream consumers — Anizai at index 0,
+        Polymarket at index 1. Guards against accidental flips when
+        refactoring the dict construction.
+        """
+        state = _state(
+            market_evidence={"polymarket": _polymarket_payload(current_odds=0.4)},
+        )
+        out = synthesize.run(
+            state,
+            client=_client_returning(_make_response(
+                output=_make_synthesis_output(final_probability=0.8),
+            )),
+        )
+        comparison = out["synthesis_result"]["marketComparison"]
+        assert len(comparison) == 2
+        assert comparison[0]["label"] == "Anizai"
+        assert comparison[0]["value"] == 0.8
+        assert comparison[1]["label"] == "Polymarket"
+        assert comparison[1]["value"] == 0.4
+
+    def test_value_precision_preserved_without_rounding(self):
+        """
+        Float values round-trip through the wiring without unintended
+        formatting. The FE may render with its own precision, but the
+        agent shouldn't pre-round.
+        """
+        unusual_odds = 0.7281234567
+        unusual_final = 0.6395864128
+        state = _state(
+            market_evidence={"polymarket": _polymarket_payload(current_odds=unusual_odds)},
+        )
+        out = synthesize.run(
+            state,
+            client=_client_returning(_make_response(
+                output=_make_synthesis_output(final_probability=unusual_final),
+            )),
+        )
+        result = out["synthesis_result"]
+        # Pin exact float equality — `float(x)` on a Python float is identity.
+        assert result["marketProbability"] == unusual_odds
+        assert result["marketComparison"][0]["value"] == unusual_final
+        assert result["marketComparison"][1]["value"] == unusual_odds

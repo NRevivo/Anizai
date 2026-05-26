@@ -94,3 +94,30 @@ def fetch_fred_anomalies(days: int) -> list[dict]:
         anomalies were detected in the window.
     """
     return momentum_vault.fetch_fred_anomalies(days=days)
+
+
+def find_polymarket_market_by_question(
+    question_text: str,
+    threshold: float = momentum_vault.POLYMARKET_FUZZY_MATCH_DEFAULT_THRESHOLD,
+) -> Optional[dict]:
+    """
+    Resolve a user's raw question to the most-recent matching Polymarket
+    market via pg_trgm similarity (Sprint 22 T22.1 / KG-PHASE8-12).
+
+    Thin pass-through to `persistence.momentum_vault` per CLAUDE.md §3.3
+    — the Market Bridge agent must reach persistence only through this
+    module, never via a direct import. Threshold default mirrors the
+    persistence-layer constant so a future tune lives in one place.
+
+    Args:
+        question_text: User's `raw_question`. Empty/whitespace → None.
+        threshold:     pg_trgm similarity threshold, default 0.85.
+
+    Returns:
+        Most-recent matching momentum_vault row as a dict (with added
+        `match_score`), or None.
+    """
+    return momentum_vault.find_polymarket_market_by_question(
+        question_text=question_text,
+        threshold=threshold,
+    )

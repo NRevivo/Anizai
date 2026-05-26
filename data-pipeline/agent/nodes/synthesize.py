@@ -189,16 +189,17 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
 
     evidence_trail: list[dict] = list(state.get("evidence_trail") or [])
     structured_intent: dict = state.get("structured_intent") or {}
-    polymarket_market: Optional[dict] = state.get("polymarket_market")
-    # KG-PHASE8-12: polymarket_market is always None until the polymarket
-    # vector resolver lands (Phase 7+). Kept for forward compatibility.
 
     # Sprint 21 T21.7: infer tier from market_evidence.polymarket — the
     # authoritative signal for whether vault_query matched a Polymarket
     # market. Tier 1 = polymarket is not None; Tier 2 = polymarket is None.
     # This replaces the hardcoded TIER_DEFAULT="tier_1" from Sprint 20.
+    # Sprint 22 T22.3: same payload feeds both the LLM prompt's "Market
+    # context" block and _build_session_result's marketProbability +
+    # marketComparison wiring — one source of truth.
     market_evidence: dict = state.get("market_evidence") or {}
-    tier: str = "tier_1" if market_evidence.get("polymarket") else "tier_2"
+    polymarket_payload: Optional[dict] = market_evidence.get("polymarket")
+    tier: str = "tier_1" if polymarket_payload else "tier_2"
 
     client = client or _get_default_client()
 
@@ -206,7 +207,12 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
         client=client,
         question=raw_question,
         structured_intent=structured_intent,
-        polymarket_market=polymarket_market,
+        # Sprint 22 T22.3 D2: feed the Market Bridge-resolved polymarket
+        # payload into the LLM's "Market context" block so the model
+        # writes a coherent market_comparison_insight when odds are
+        # available. The legacy state["polymarket_market"] slot is dead
+        # (always None pre-Sprint-22, no producer wires it post-Sprint-22).
+        polymarket_market=polymarket_payload,
         evidence=evidence_trail,
     )
     output = _extract_output(response)
@@ -218,7 +224,7 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
     synthesis_result = _build_session_result(
         synthesis_output=output,
         evidence_trail=evidence_trail,
-        polymarket_market=polymarket_market,
+        polymarket_payload=polymarket_payload,
         tier=tier,
     )
 
@@ -390,7 +396,7 @@ def _build_session_result(
     *,
     synthesis_output: dict,
     evidence_trail: list[dict],
-    polymarket_market: Optional[dict],
+    polymarket_payload: Optional[dict],
     tier: str,
 ) -> dict:
     """
@@ -402,9 +408,17 @@ def _build_session_result(
       - confidenceLabel/consensusStrength/evidenceVolumeLabel: derived
         deterministically via labels.py — never echoed from the LLM,
         keeps display labels consistent across forecasts
-      - marketProbability/marketComparison: None / [] when polymarket
-        is absent (KG-PHASE8-12). Sprint 21+ flips this once the
-        resolver lands.
+      - marketProbability: `polymarket_payload.current_odds` when present
+        (Sprint 22 T22.3 closes the KG-PHASE8-12 wiring portion); None for
+        Tier 2. Frontend's MarketComparison card reads this directly to
+        render its bar chart — without it the card stays in empty state.
+      - marketComparison: deterministic `[{label, value}]` two-entry list
+        (Anizai then Polymarket) when the payload carries odds; `[]`
+        otherwise. Per partner-frontend verification 2026-05-23, the
+        current FE component computes its delta in-component from
+        `finalProbability` + `marketProbability` directly and doesn't
+        consume `marketComparison`, but the field is written to satisfy
+        the §8.7.2 schema contract for future consumers.
       - marketComparisonInsight: synthesis prompt is asked to write
         this, but if polymarket is absent we override with the canonical
         no-market caption to ensure the frontend renders the empty state.
@@ -414,6 +428,12 @@ def _build_session_result(
       - generatedAt: SERVER_TIMESTAMP. createdAt/updatedAt are added by
         firestore_client.write_session_result (KG-PHASE8-6 mitigation).
       - tier: passed in from caller (inferred from market_evidence T21.7).
+
+    `polymarket_payload` shape:
+        The polymarket dict assembled by Market Bridge — keys
+        `current_odds`, `momentum`, `price_history`, `whale_alerts`,
+        `market_slug`. Caller sources it from `state.market_evidence`
+        ("polymarket"). None for Tier 2 (no canonical market resolved).
     """
     used_count = sum(1 for item in evidence_trail if item.get("used_in_answer"))
 
@@ -426,11 +446,34 @@ def _build_session_result(
     market_comparison_insight = (
         synthesis_output.get("market_comparison_insight") or ""
     )
-    if polymarket_market is None:
+    if polymarket_payload is None:
         market_comparison_insight = NO_MARKET_CAPTION
 
+    final_probability = float(synthesis_output["final_probability"])
+
+    # Sprint 22 T22.3: thread market_evidence.polymarket.current_odds into
+    # SessionResult.marketProbability + build the deterministic comparison
+    # list. The `current_odds is None` arm distinguishes "no market" (None)
+    # from "market exists but odds are 0.0" (preserved as 0.0).
+    market_probability: Optional[float] = None
+    market_comparison: list[dict] = []
+    if polymarket_payload is not None:
+        odds = polymarket_payload.get("current_odds")
+        if odds is not None:
+            market_probability = float(odds)
+            market_comparison = [
+                {"label": "Anizai", "value": final_probability},
+                {"label": "Polymarket", "value": float(odds)},
+            ]
+        else:
+            # Defensive: polymarket dict present but missing current_odds.
+            # _pack_polymarket_payload always sets the key, so this is a
+            # contract violation if hit — fall through to Tier 2-like
+            # rendering (None + []) and override the insight caption too.
+            market_comparison_insight = NO_MARKET_CAPTION
+
     return {
-        "finalProbability": float(synthesis_output["final_probability"]),
+        "finalProbability": final_probability,
         "confidence": confidence,
         "confidenceLabel": labels.confidence_label_from_score(confidence),
         "consensusStrength": labels.consensus_strength_from_score(consensus_score),
@@ -443,9 +486,8 @@ def _build_session_result(
         "sentimentAnalysisInsight": synthesis_output["sentiment_analysis_insight"],
         "evidenceFeedSummary": synthesis_output["evidence_feed_summary"],
 
-        # KG-PHASE8-12: no canonical market until Sprint 21+ T21.6.
-        "marketProbability": None,
-        "marketComparison": [],
+        "marketProbability": market_probability,
+        "marketComparison": market_comparison,
 
         "keyFactors": list(synthesis_output.get("key_factors") or []),
         "whatIDidntFind": list(synthesis_output.get("what_i_didnt_find") or []),

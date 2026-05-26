@@ -89,9 +89,9 @@ You receive:
 - Structured intent (entities, domain, intent extracted upstream)
 - A pool of rated evidence items (each with relevance_score, \
 credibility_tier, recency_weight, source_type, title, snippet)
-- Optional market context (Polymarket odds, FRED indicators); for \
-Sprint 20 the canonical Polymarket market is unavailable, so treat \
-market_context as absent unless explicitly populated.
+- Optional market context (Polymarket odds, FRED indicators). When \
+populated, it carries `polymarket_slug` and `current_odds`. When \
+absent, treat as no canonical market available.
 
 You must produce one calibrated forecast. The output schema is \
 enforced by the API; focus on the reasoning.
@@ -164,8 +164,19 @@ agent decided", "based on prompt analysis", "I as an AI". Direct, \
 present tense, active voice. Specific to this question and this \
 evidence — no generic templates.
 
-When market_context is absent (Sprint 20 default), \
-`market_comparison_insight` should say so plainly: "No canonical \
+`market_comparison_insight` is the narrative under the MarketComparison \
+BI card on the frontend. Two cases:
+
+- When market_context is populated (`current_odds` available): describe \
+the relationship between your `final_probability` and the market's \
+`current_odds`. Specific: name the magnitude and direction of the \
+divergence, and offer a one-sentence reason rooted in the evidence. \
+Examples: "Anizai's 0.72 forecast tracks closely with the market's \
+0.68 — both reflect strong evidence of an imminent Fed cut." or \
+"Anizai estimates 0.55 against the market's 0.30 — the model weighs \
+the dovish FOMC minutes more heavily than current market participants."
+
+- When market_context is absent: say so plainly: "No canonical \
 prediction market available for this question — analysis based on \
 underlying signals."
 
@@ -340,8 +351,12 @@ def build_user_message(
         question:           the user's `raw_question`.
         structured_intent:  query_understanding output (intent, domain,
                             entities). Empty dict if missing.
-        polymarket_market:  None per Sprint 20 D3 (KG-PHASE8-12). When
-                            populated in Sprint 21+, render slug + odds.
+        polymarket_market:  Market Bridge-resolved polymarket payload
+                            (T22.2). When present, carries `market_slug`
+                            and `current_odds` — rendered into the
+                            prompt's "Market context" block so the LLM
+                            writes a comparison-grounded insight. None
+                            for Tier 2 questions (no canonical market).
         evidence:           list of EvidenceItem dicts (post-rating).
                             Empty list is allowed — synthesis prompt
                             handles the cold-start "no evidence" case.
@@ -365,7 +380,10 @@ def build_user_message(
         parts.append(f"  polymarket_slug: {polymarket_market.get('market_slug', '')}")
         parts.append(f"  current_odds: {polymarket_market.get('current_odds', '')}")
     else:
-        parts.append("  (no canonical market available — Sprint 20 limitation)")
+        parts.append(
+            "  (no canonical market available — produce a "
+            "market_comparison_insight reflecting this)"
+        )
     parts.append("")
 
     parts.append(f"Evidence ({len(evidence)} items):")
