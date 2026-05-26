@@ -72,6 +72,12 @@ class ForecastState(TypedDict, total=False):
     sufficiency_checks: list[dict]
     reactive_search_results: Optional[list[dict]]
     reactive_search_budget_remaining_ms: int
+    # Sprint 23 — counter for AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION. Read
+    # defensively via `int(state.get("reactive_triggers_emitted") or 0)` —
+    # same idiom as vault_query_attempts / llm_calls_count, justified by
+    # the module's `total=False` semantics. Written by
+    # `agent/nodes/trigger_reactive_ingestion.py` (T23.5).
+    reactive_triggers_emitted: int
 
     # --- Synthesis Output ---
     synthesis_result: Optional[dict]

@@ -106,6 +106,18 @@ AGENT_REACTIVE_DEFAULT_WINDOW_DAYS = int(
     os.getenv("AGENT_REACTIVE_DEFAULT_WINDOW_DAYS", "7")
 )
 
+# Reactive trigger (Sprint 23) — distinct from the AGENT_REACTIVE_* block
+# above, which was sized for the deferred external-search microservice
+# (Future Enhancement 1 in agentic_hub_implementation_phase8_revised.md).
+# This counter limits how many `ingestion_triggers` Kafka messages the agent
+# may emit per session in the producer-trigger V1 path (revised plan §Sprint
+# 23). Naming mirrors AGENT_REACTIVE_MAX_PER_SESSION so a future swap to the
+# external microservice becomes a config-only change. See KG-PHASE8-23 in
+# task_plan.md for the dead-config cleanup of the older constant.
+AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION = int(
+    os.getenv("AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION", "1")
+)
+
 # ==========================================================
 # 7. Staleness / Polymarket Cache
 # ==========================================================
