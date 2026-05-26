@@ -36,7 +36,7 @@ Spec references:
 
 import logging
 import os
-from typing import Optional
+from typing import Optional, Union
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -51,6 +51,48 @@ logger = logging.getLogger(__name__)
 # without importing firebase_admin directly (CLAUDE.md §3.2 — Firestore
 # access is centralized through this module).
 SERVER_TIMESTAMP = firestore.SERVER_TIMESTAMP
+
+
+# ==========================================================
+# UNSET sentinel for tri-state kwargs (Sprint 22 T22.7)
+# ==========================================================
+# Some update helpers need to distinguish three states for a single
+# optional kwarg:
+#   - kwarg omitted entirely        → don't write this field
+#   - kwarg = None                  → write Firestore null (explicit)
+#   - kwarg = some value            → write that value
+#
+# A plain `Optional[str] = None` default conflates the first two cases:
+# you cannot tell "caller didn't pass anything" from "caller wants
+# explicit null".
+#
+# The UNSET sentinel makes the three states distinct. Callers either
+# omit the kwarg (default UNSET → no write), or pass an explicit value
+# (string or None). The helper checks `value is not UNSET` to decide
+# whether to include the field in the update payload.
+#
+# Pattern introduced for `update_session_status(canonical_key=...)` in
+# Sprint 22 T22.7 — pre-emptive infrastructure for Future Enhancement 3
+# (cross-user cache). Reusable for any future kwarg that needs the same
+# write-explicit-null semantics.
+class _UnsetType:
+    """Distinct singleton type so `value is UNSET` checks are unambiguous."""
+
+    _instance: "Optional[_UnsetType]" = None
+
+    def __new__(cls) -> "_UnsetType":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+    def __bool__(self) -> bool:
+        return False
+
+
+UNSET: _UnsetType = _UnsetType()
 
 # firestore.client() caches per-app internally; this module-level cache
 # is just an explicit guard against repeated lookups.
@@ -224,6 +266,7 @@ def update_session_status(
     error_message: Optional[str] = None,
     clarification_candidates: Optional[list[dict]] = None,
     tier: Optional[str] = None,
+    canonical_key: "Union[str, None, _UnsetType]" = UNSET,
 ) -> None:
     """
     Update sessions/{session_id} for a status transition.
@@ -236,23 +279,53 @@ def update_session_status(
     Always stamps updatedAt and lastActivityAt with server time so the
     frontend's onSnapshot listener re-renders.
 
-    Optional fields write only when explicitly provided — passing None
-    does NOT clear an existing value (uses dict-conditional, not update
-    with None). This lets each transition write only what's relevant
-    without nuking prior state.
+    Kwarg write semantics — TWO conventions in this signature, read
+    carefully:
+
+    Convention A (kwargs with `Optional[X] = None` default):
+        `error_code`, `error_message`, `clarification_candidates`, `tier`.
+        These use dict-conditional `if x is not None`. Passing `None`
+        means "don't update this field" — preserves any existing
+        Firestore value rather than clearing it. Each status transition
+        writes only what's relevant.
+
+    Convention B (kwargs with `UNSET` default — Sprint 22 T22.7):
+        `canonical_key`. Uses the UNSET sentinel because Tier 2 success
+        paths need to write **explicit Firestore null** (clearing any
+        prior candidate UUID Express set during a clarification cycle),
+        which Convention A cannot express. Three states:
+            - omit kwarg (`UNSET` default) → don't update the field
+            - pass `None`                  → write Firestore null
+            - pass `"some-id"`             → write that string
+
+    The asymmetry exists because most fields are "write or no-op";
+    canonicalKey is "write-string OR write-explicit-null OR no-op". Any
+    future kwarg needing the same write-explicit-null semantics can
+    reuse the UNSET sentinel pattern from this module.
 
     Args:
         session_id: the doc id under sessions/.
         status:     one of the 6 SessionStatus values (caller validates).
-        error_code: written to errorCode on 'failed'.
-        error_message: written to errorMessage on 'failed'.
+        error_code: written to errorCode on 'failed'. Convention A.
+        error_message: written to errorMessage on 'failed'. Convention A.
         clarification_candidates: written to clarificationCandidates on
                                   'awaiting_clarification' (Sprint 21).
                                   Field name camelCase to match the
-                                  server-side schema.
+                                  server-side schema. Convention A.
         tier: written to tier on 'done' (Sprint 21 T21.8). Matches the
               session doc schema (frontend-integration skill): 'tier_1' |
-              'tier_2' | null.
+              'tier_2' | null. Convention A.
+        canonical_key: written to canonicalKey on 'done' (Sprint 22 T22.7).
+                       Convention B. The resolved Polymarket market
+                       identifier on Tier 1; explicit `None` on Tier 2
+                       (clears any prior candidate UUID Express set
+                       during the clarification cycle so the future
+                       cache lookup — Future Enhancement 3 —
+                       correctly classifies the session as cacheless).
+                       OMIT the kwarg on non-success transitions
+                       (failed, awaiting_clarification) so Express's
+                       prior write survives if the session is later
+                       resumed.
     """
     db = get_db()
     session_ref = db.collection("sessions").document(session_id)
@@ -270,6 +343,13 @@ def update_session_status(
         update_data["clarificationCandidates"] = clarification_candidates
     if tier is not None:
         update_data["tier"] = tier
+    # Convention B: only write canonicalKey when the caller explicitly
+    # provided a value (string OR None). UNSET preserves any prior write
+    # so failed/awaiting_clarification transitions don't clobber the
+    # candidate UUID Express may have already written during the
+    # clarification cycle.
+    if canonical_key is not UNSET:
+        update_data["canonicalKey"] = canonical_key
 
     session_ref.update(update_data)
     logger.info(

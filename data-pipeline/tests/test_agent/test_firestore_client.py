@@ -269,6 +269,64 @@ def test_update_session_status_writes_clarification_candidates_when_provided():
 
 
 # ==========================================================
+# Sprint 22 T22.7 — canonicalKey kwarg + UNSET sentinel semantics
+# ==========================================================
+
+def test_update_session_status_writes_canonical_key_string_when_provided():
+    """
+    Passing `canonical_key="0xabc"` must include `canonicalKey: "0xabc"`
+    in the Firestore update payload. Convention B happy path.
+    """
+    mock_db, mock_session_ref = _make_db_mock()
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        firestore_client.update_session_status(
+            "s1", "done",
+            canonical_key="0xabc_market",
+        )
+
+    sent = mock_session_ref.update.call_args[0][0]
+    assert sent["status"] == "done"
+    assert sent["canonicalKey"] == "0xabc_market"
+
+
+def test_update_session_status_writes_canonical_key_null_when_explicit_none():
+    """
+    Passing `canonical_key=None` explicitly must include
+    `canonicalKey: None` in the update payload (clears any prior write).
+    Convention B's distinguishing feature vs Convention A.
+    """
+    mock_db, mock_session_ref = _make_db_mock()
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        firestore_client.update_session_status(
+            "s1", "done",
+            canonical_key=None,
+        )
+
+    sent = mock_session_ref.update.call_args[0][0]
+    assert "canonicalKey" in sent
+    assert sent["canonicalKey"] is None
+
+
+def test_update_session_status_omits_canonical_key_when_kwarg_unset():
+    """
+    When the caller doesn't pass `canonical_key` at all, the UNSET
+    sentinel keeps `canonicalKey` out of the update payload. This is
+    what preserves Express's prior write on `failed` /
+    `awaiting_clarification` transitions.
+    """
+    mock_db, mock_session_ref = _make_db_mock()
+    with patch.object(firestore_client, "get_db", return_value=mock_db):
+        firestore_client.update_session_status(
+            "s1", "failed",
+            error_code="hub_error",
+            error_message="boom",
+        )
+
+    sent = mock_session_ref.update.call_args[0][0]
+    assert "canonicalKey" not in sent
+
+
+# ==========================================================
 # Subcollection writes — Sprint 20 T20.5 helpers
 # ==========================================================
 

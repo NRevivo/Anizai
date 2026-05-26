@@ -206,6 +206,13 @@ def _pack_hackernews(row: dict, *, now: datetime) -> dict:
     `community_sentiment` is returned as the raw float in [-1.0, 1.0]
     per the T19.3 spec correction (see module docstring + spec §8.4.2
     Correction note).
+
+    `published_at` is propagated to the output dict in Sprint 22 D5 —
+    needed by T22.6's `_shape_sentiment_time_series` to bucket Public-line
+    sentiment by time. Mirrors the T22.1/D1 propagation pattern. The
+    raw value (ISO string or datetime, depending on the row source) is
+    passed through unchanged — the bucketing helper coerces both shapes
+    to tz-aware UTC datetimes.
     """
     content_vitals = row.get("content_vitals") or {}
     platform_logic = row.get("platform_logic") or {}
@@ -217,14 +224,25 @@ def _pack_hackernews(row: dict, *, now: datetime) -> dict:
     community_sentiment = float(platform_logic.get("community_sentiment") or 0.0)
 
     similarity = float(row.get("similarity") or 0.0)
+    published_at = row.get("published_at")
     recency = compute_recency_weight(
-        published_at=row.get("published_at"),
+        published_at=published_at,
         half_life_days=RECENCY_HALF_LIFE_DAYS,
         now=now,
     )
     points_norm = min(points / VOLUME_NORMALIZATION_CAP, 1.0)
     base = WEIGHT_SIM * similarity + WEIGHT_VOLUME * points_norm + WEIGHT_RECENCY * recency
     evidence_weight = base * PLATFORM_WEIGHT_HACKERNEWS
+
+    # Sprint 22 D5: surface the same `published_at` already used for the
+    # recency calculation. Bucketing reads both ISO strings (newsapi etc.)
+    # and tz-aware datetimes — leave the raw form alone here and let
+    # `_coerce_to_utc_datetime` in agent/utils/sentiment_bucketing.py
+    # normalise the type at the bucketing boundary.
+    published_at_out = (
+        published_at.isoformat() if isinstance(published_at, datetime)
+        else (published_at or "")
+    )
 
     return {
         "signal_id": row.get("signal_id") or "",
@@ -233,6 +251,7 @@ def _pack_hackernews(row: dict, *, now: datetime) -> dict:
         "points": points,
         "top_technical_insights": insights,
         "community_sentiment": community_sentiment,
+        "published_at": published_at_out,
         "similarity": similarity,
         "evidence_weight": evidence_weight,
     }
