@@ -42,13 +42,17 @@ Internal raw_payload contract (unchanged — Silver/Gold consume these verbatim)
     author, source.id, source.name, category, fetch_mode, impact_boost,
     impact_boost_reason — all field names identical to the pre-7A contract.
 
-Two operating modes (Section 2.3 / B.4):
+Three operating modes (Section 2.3 / B.4 / 2.4):
   - pulse    (default) — one page of getArticles per category per run.
                          Called every 15-30 min by an Airflow DAG.
   - backfill            — tiered historical load via date range params:
                            Tier 1: full density, 0-6 months, all authority domains
                            Tier 2: tier-1 domains only, 6-24 months
                            Tier 3: tier-1 domains + keyword search, 2-5 years
+  - reactive            — on-demand keyword-driven fetch (Sprint 23 / Section 2.4).
+                         One API call per keyword; articles deduped by URL across
+                         calls. Driven by Kafka triggers from the Agentic Hub
+                         when the vault is insufficient for a forecast.
 
 Why pre-filter at the producer (not only in Flink):
     Section 2.2 mandates "Only high-signal data enters Bronze Kafka topics."
@@ -794,6 +798,160 @@ class NewsAPIProducer:
         logger.info(
             "[newsapi] Backfill complete — emitted=%d  wl_filtered=%d",
             self._emitted, self._filtered_whitelist,
+        )
+        return self._emitted
+
+    # ----------------------------------------------------------
+    # Reactive Mode — on-demand keyword-driven fetch (Sprint 23)
+    # ----------------------------------------------------------
+
+    def run_reactive(
+        self,
+        keywords: list[str],
+        time_window_days: int = 7,
+    ) -> int:
+        """
+        Fetch articles for a list of keywords on demand and emit to Bronze.
+
+        Invoked by the Agentic Hub via the `ingestion_triggers` Kafka topic
+        (Section 2.4) when the vault is insufficient for a forecast and the
+        agent needs targeted articles fast. Trigger-and-forget semantics
+        (Sprint 23 / agentic_hub_implementation_phase8_revised.md §Sprint 23):
+        the producer emits articles to Bronze and the normal
+        Bronze→Silver→Gold pipeline propagates them to the vault for the
+        agent's NEXT session.
+
+        Why one API call per keyword (not a single OR-batched call):
+            newsapi.ai's REST API supports OR-batched keyword search via
+            multi-value `keyword=` params + an explicit `keywordOper=or`
+            override (default is AND). The official event-registry-python
+            library uses this mechanism via `QueryItems.OR()`. We deliberately
+            do NOT take that path here — instead, run_reactive() makes one
+            API call per keyword and dedupes articles by URL across the
+            results. Rationale: the single-keyword `_fetch_articles(keyword=…)`
+            code path has been live since Phase 7A (backfill Tier 3) and is
+            well-tested; introducing `keywordOper=or` would add an untested
+            request shape. With the agent's per-session trigger limit of 1
+            and the per-node keyword cap of ≤8 (Sprint 23 D4), worst case is
+            ≤8 HTTP calls per trigger — well within any plausible rate limit.
+            Trigger-and-forget runs in a daemon thread on the consumer side
+            (orchestration/ingestion_trigger_consumer.dispatch), so latency
+            does not gate the forecast NFR.
+
+            Rejected: joining keywords with " OR " boolean syntax inside a
+            single `keyword=` value. newsapi.ai's documented mechanism for
+            OR semantics is multi-param + `keywordOper=or`, not inline
+            boolean strings; the single-string OR behavior is undocumented
+            and likely interpreted as a literal phrase. One call per
+            keyword is the verified-safe pattern. See revised plan
+            §"Design Rationale Log → Sprint 23 decisions → D1" for the
+            full record.
+
+        Why dedupe by URL inside this method:
+            The same article may match multiple keywords. Without dedup we
+            would emit it once per matching keyword, inflating Bronze volume
+            and forcing Silver's SHA-256 dedup to do extra work. Deduping at
+            the producer is cheap (a Python set of URLs) and is the API-shape
+            boundary's natural job.
+
+        Why categoryUri is omitted (empty string):
+            Reactive is keyword-driven. Pre-filtering by category would
+            defeat the agent's targeting. The authority `sourceUri=` whitelist
+            stays applied (publisher quality still matters).
+
+        Why a per-keyword HTTP/network error doesn't stop the loop:
+            If one keyword in the agent's list happens to hit a transient
+            newsapi.ai failure, we still want the other keywords' articles
+            to land. The failed keyword is logged and skipped; the remaining
+            keywords proceed normally. The agent's reactive_triggers_log
+            captures the trigger envelope; correlation between log and Bronze
+            is by trigger_time + article URL.
+
+        Args:
+            keywords:         List of keyword strings from the agent. Cannot
+                              be empty — caller must supply at least one.
+                              Order is preserved but not semantically meaningful.
+            time_window_days: How far back to search, in days. Default 7;
+                              passed to `_fetch_articles` as `dateStart =
+                              today - time_window_days`. Mirrors the agent's
+                              `AGENT_REACTIVE_DEFAULT_WINDOW_DAYS=7` config.
+
+        Returns:
+            Total number of Bronze messages emitted (post-dedup, post-whitelist).
+        """
+        if not keywords:
+            logger.error(
+                "[newsapi] reactive — keywords cannot be empty. "
+                "Pass at least one keyword string."
+            )
+            return 0
+
+        self._emitted = self._filtered_whitelist = 0
+        date_start = (date.today() - timedelta(days=time_window_days)).isoformat()
+        seen_urls: set[str] = set()
+
+        logger.info(
+            "[newsapi] Reactive run starting — %d keyword(s), %d-day window from %s",
+            len(keywords), time_window_days, date_start,
+        )
+
+        for idx, keyword in enumerate(keywords):
+            try:
+                articles, _, duration_ms = self._fetch_articles(
+                    category="",
+                    page=1,
+                    date_start=date_start,
+                    keywords=keyword,
+                )
+            except requests.HTTPError as exc:
+                logger.error(
+                    "[newsapi] reactive HTTP error for keyword=%r: %s — skipping",
+                    keyword, exc,
+                )
+                continue
+            except requests.RequestException as exc:
+                logger.error(
+                    "[newsapi] reactive network error for keyword=%r: %s — skipping",
+                    keyword, exc,
+                )
+                continue
+            except (KeyError, ValueError) as exc:
+                logger.error(
+                    "[newsapi] reactive parse error for keyword=%r: %s — skipping",
+                    keyword, exc,
+                )
+                continue
+
+            # Cross-keyword dedup: skip articles already seen for an earlier keyword.
+            # The whitelist filter still runs inside _process_and_emit() below.
+            fetched = len(articles)
+            new_articles: list[dict] = []
+            for article in articles:
+                url = (article.get("url") or "").strip()
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    new_articles.append(article)
+            dedup_dropped = fetched - len(new_articles)
+
+            emitted = self._process_and_emit(
+                new_articles,
+                category="",
+                fetch_mode="reactive",
+                duration_ms=duration_ms,
+            )
+            logger.info(
+                "[newsapi] reactive keyword=%r fetched=%d  dedup_dropped=%d  emitted=%d",
+                keyword, fetched, dedup_dropped, emitted,
+            )
+
+            # Throttle between keyword API calls (matches pulse / backfill cadence).
+            if idx < len(keywords) - 1:
+                time.sleep(REQUEST_DELAY_SEC)
+
+        self._producer.flush()
+        logger.info(
+            "[newsapi] Reactive run complete — emitted=%d  wl_filtered=%d  unique_urls=%d",
+            self._emitted, self._filtered_whitelist, len(seen_urls),
         )
         return self._emitted
 

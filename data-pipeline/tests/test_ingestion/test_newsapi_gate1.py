@@ -124,7 +124,14 @@ EXPECTED_CATEGORY_URIS: set[str] = {
 }
 
 # Valid fetch_mode values for the NewsAPI producer.
-VALID_FETCH_MODES = {"pulse", "backfill_full", "backfill_tier_one", "backfill_anomaly"}
+# "reactive" added in Sprint 23 (T23.1) for the on-demand keyword-driven fetch.
+VALID_FETCH_MODES = {
+    "pulse",
+    "backfill_full",
+    "backfill_tier_one",
+    "backfill_anomaly",
+    "reactive",
+}
 
 
 # ==========================================================
@@ -731,3 +738,326 @@ class TestNDJSONRoundTrip:
         serialised = ndjson_serializer(newsapi_envelope)
         lines      = serialised.decode("utf-8").splitlines()
         assert len(lines) == 1, f"Expected 1 NDJSON line, got {len(lines)}"
+
+
+# ==========================================================
+# Gate 1 — Reactive Mode Tests (Sprint 23 T23.1, Section 2.4)
+# ==========================================================
+# Validates NewsAPIProducer.run_reactive(keywords, time_window_days):
+#   * empty-keyword early-return
+#   * one API call per keyword (no batched OR query)
+#   * cross-keyword URL dedup
+#   * fetch_mode="reactive" propagated into raw_payload
+#   * dateStart computed from time_window_days
+#   * `keyword=` query param wired to the keyword value
+#   * HTTP / parse / network failures on one keyword do not abort the loop
+#   * Kafka producer flushed at end
+#   * authority whitelist still applied
+#   * returned count matches self._emitted
+#
+# All tests bypass __init__ via NewsAPIProducer.__new__() and mock
+# requests.get + time.sleep + the Kafka producer attribute. No external
+# network or broker connection.
+# ==========================================================
+
+
+@pytest.fixture
+def producer_with_mock_kafka():
+    """
+    Producer instance with a MagicMock Kafka producer attached.
+
+    Skips __init__ (so no NEWSAI_API_KEY needed) and pre-populates the
+    internal counters that run_reactive() resets at the top of each call.
+    """
+    producer = NewsAPIProducer.__new__(NewsAPIProducer)
+    producer._producer = MagicMock()
+    producer._emitted = 0
+    producer._filtered_whitelist = 0
+    return producer
+
+
+def _make_article(url: str, *, domain: str = "reuters.com") -> dict:
+    """
+    Build a minimal newsapi.ai-shaped article that passes _passes_whitelist
+    and _build_raw_payload. `domain` defaults to reuters.com (whitelisted).
+    """
+    return {
+        "url":         url,
+        "title":       f"Test article — {url}",
+        "description": "Reactive-mode test article body.",
+        "body":        "Full body text for reactive-mode test.",
+        "image":       "",
+        "dateTime":    "2026-05-23T10:00:00Z",
+        "source":      {"uri": domain, "title": "Reuters"},
+        "authors":     [],
+    }
+
+
+def _fetch_articles_returning(articles_per_call: list[list[dict]]):
+    """
+    Build a side_effect callable for `_fetch_articles` mocking.
+
+    Returns a generator that yields (articles, totalResults, duration_ms) for
+    each successive call, matching the real signature.
+    """
+    iterator = iter(articles_per_call)
+
+    def _side_effect(*args, **kwargs):
+        next_batch = next(iterator)
+        return next_batch, len(next_batch), 50  # 50ms fake duration
+
+    return _side_effect
+
+
+class TestRunReactive:
+    """Gate 1 — NewsAPIProducer.run_reactive (Sprint 23 T23.1)."""
+
+    # --- Early-return / no-API-call cases ---
+
+    def test_empty_keywords_returns_zero_no_api_call(
+        self, producer_with_mock_kafka
+    ):
+        # [R1]
+        with patch.object(
+            producer_with_mock_kafka, "_fetch_articles"
+        ) as mock_fetch:
+            result = producer_with_mock_kafka.run_reactive(keywords=[])
+        assert result == 0
+        mock_fetch.assert_not_called()
+        producer_with_mock_kafka._producer.flush.assert_not_called()
+
+    # --- Single-keyword happy path ---
+
+    def test_single_keyword_emits_articles(
+        self, producer_with_mock_kafka
+    ):
+        # [R2]
+        articles = [_make_article("https://reuters.com/a1")]
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([articles]),
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            count = producer_with_mock_kafka.run_reactive(keywords=["iran"])
+        assert count == 1
+        assert producer_with_mock_kafka._producer.send.call_count == 1
+
+    # --- Multi-keyword: one API call per keyword ---
+
+    def test_multiple_keywords_one_call_per_keyword(
+        self, producer_with_mock_kafka
+    ):
+        # [R3] Critical D1 invariant: ONE API call per keyword, not a batched OR.
+        articles = [_make_article("https://reuters.com/a1")]
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([articles, [], []]),
+        ) as mock_fetch, patch("ingestion.newsapi_producer.time.sleep"):
+            producer_with_mock_kafka.run_reactive(
+                keywords=["iran", "opec", "crude oil"]
+            )
+        assert mock_fetch.call_count == 3
+
+    # --- Cross-keyword URL dedup ---
+
+    def test_dedupe_articles_by_url_across_keywords(
+        self, producer_with_mock_kafka
+    ):
+        # [R4] Article URL "X" appears in keyword #1's results AND keyword #2's
+        # results. Must be emitted exactly once.
+        shared = _make_article("https://reuters.com/shared")
+        unique_to_2 = _make_article("https://apnews.com/k2-only")
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([
+                [shared],
+                [shared, unique_to_2],
+            ]),
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            count = producer_with_mock_kafka.run_reactive(
+                keywords=["iran", "opec"]
+            )
+        # Exactly two distinct URLs → exactly two Bronze emits
+        assert count == 2
+        assert producer_with_mock_kafka._producer.send.call_count == 2
+
+    # --- fetch_mode="reactive" propagation ---
+
+    def test_emitted_payload_has_fetch_mode_reactive(
+        self, producer_with_mock_kafka
+    ):
+        # [R5]
+        articles = [_make_article("https://reuters.com/a1")]
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([articles]),
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            producer_with_mock_kafka.run_reactive(keywords=["iran"])
+
+        sent_msg = producer_with_mock_kafka._producer.send.call_args.kwargs["value"]
+        raw = sent_msg["payload"]["raw_payload"]
+        assert raw["fetch_mode"] == "reactive"
+
+    # --- dateStart computed correctly ---
+
+    def test_date_start_uses_default_7_day_window(
+        self, producer_with_mock_kafka
+    ):
+        # [R6] Default time_window_days=7 → dateStart == today − 7 days.
+        from datetime import date as _date, timedelta as _td
+
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([[]]),
+        ) as mock_fetch, patch("ingestion.newsapi_producer.time.sleep"):
+            producer_with_mock_kafka.run_reactive(keywords=["iran"])
+
+        _, kwargs = mock_fetch.call_args
+        expected = (_date.today() - _td(days=7)).isoformat()
+        assert kwargs["date_start"] == expected
+
+    def test_date_start_respects_custom_window(
+        self, producer_with_mock_kafka
+    ):
+        # [R7] time_window_days=3 → dateStart == today − 3 days.
+        from datetime import date as _date, timedelta as _td
+
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([[]]),
+        ) as mock_fetch, patch("ingestion.newsapi_producer.time.sleep"):
+            producer_with_mock_kafka.run_reactive(
+                keywords=["iran"], time_window_days=3
+            )
+
+        _, kwargs = mock_fetch.call_args
+        expected = (_date.today() - _td(days=3)).isoformat()
+        assert kwargs["date_start"] == expected
+
+    # --- keyword= wired to keyword value ---
+
+    def test_uses_keyword_param_with_keyword_value(
+        self, producer_with_mock_kafka
+    ):
+        # [R8] Each per-keyword call passes the keyword via the `keywords=`
+        # kwarg (the existing _fetch_articles signature accepts a single
+        # string; the producer relies on this for backfill Tier 3 as well).
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([[], []]),
+        ) as mock_fetch, patch("ingestion.newsapi_producer.time.sleep"):
+            producer_with_mock_kafka.run_reactive(keywords=["iran", "opec"])
+
+        assert mock_fetch.call_args_list[0].kwargs["keywords"] == "iran"
+        assert mock_fetch.call_args_list[1].kwargs["keywords"] == "opec"
+
+    # --- HTTP / parse / network errors per keyword are non-fatal ---
+
+    def test_http_error_skips_keyword_continues_loop(
+        self, producer_with_mock_kafka
+    ):
+        # [R9] First keyword raises HTTPError; second keyword succeeds and
+        # its article must still be emitted.
+        import requests as _requests
+
+        good = [_make_article("https://reuters.com/good")]
+
+        def _side_effect(*args, **kwargs):
+            kw = kwargs.get("keywords", "")
+            if kw == "broken":
+                resp = MagicMock()
+                resp.status_code = 500
+                raise _requests.HTTPError("simulated 500", response=resp)
+            return good, 1, 50
+
+        with patch.object(
+            producer_with_mock_kafka, "_fetch_articles", side_effect=_side_effect
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            count = producer_with_mock_kafka.run_reactive(
+                keywords=["broken", "fine"]
+            )
+        assert count == 1
+        assert producer_with_mock_kafka._producer.send.call_count == 1
+
+    def test_parse_error_skips_keyword_continues_loop(
+        self, producer_with_mock_kafka
+    ):
+        # [R10] A ValueError or KeyError inside _fetch_articles (parse-time)
+        # is logged and the loop proceeds — same tolerance as run_pulse.
+        good = [_make_article("https://reuters.com/good")]
+
+        def _side_effect(*args, **kwargs):
+            if kwargs.get("keywords", "") == "broken":
+                raise ValueError("simulated parse error")
+            return good, 1, 50
+
+        with patch.object(
+            producer_with_mock_kafka, "_fetch_articles", side_effect=_side_effect
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            count = producer_with_mock_kafka.run_reactive(
+                keywords=["broken", "fine"]
+            )
+        assert count == 1
+
+    # --- producer.flush() called on completion ---
+
+    def test_producer_flush_called_at_end(
+        self, producer_with_mock_kafka
+    ):
+        # [R11]
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([[]]),
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            producer_with_mock_kafka.run_reactive(keywords=["iran"])
+        producer_with_mock_kafka._producer.flush.assert_called_once()
+
+    # --- Authority whitelist still applied ---
+
+    def test_whitelist_still_applied_in_reactive(
+        self, producer_with_mock_kafka
+    ):
+        # [R12] An article from a non-whitelisted domain must not be emitted
+        # even in reactive mode. Whitelist is enforced by _passes_whitelist
+        # inside _process_and_emit (Phase 7A pattern, preserved verbatim).
+        whitelisted = _make_article(
+            "https://reuters.com/ok", domain="reuters.com"
+        )
+        not_whitelisted = _make_article(
+            "https://random-blog.example/x", domain="random-blog.example"
+        )
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning(
+                [[whitelisted, not_whitelisted]]
+            ),
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            count = producer_with_mock_kafka.run_reactive(keywords=["iran"])
+        assert count == 1
+        assert producer_with_mock_kafka._filtered_whitelist == 1
+
+    # --- Returned count tracks self._emitted ---
+
+    def test_returns_count_matches_emitted_attribute(
+        self, producer_with_mock_kafka
+    ):
+        # [R13]
+        articles = [
+            _make_article("https://reuters.com/a1"),
+            _make_article("https://apnews.com/a2", domain="apnews.com"),
+        ]
+        with patch.object(
+            producer_with_mock_kafka,
+            "_fetch_articles",
+            side_effect=_fetch_articles_returning([articles]),
+        ), patch("ingestion.newsapi_producer.time.sleep"):
+            count = producer_with_mock_kafka.run_reactive(keywords=["iran"])
+        assert count == producer_with_mock_kafka._emitted == 2
