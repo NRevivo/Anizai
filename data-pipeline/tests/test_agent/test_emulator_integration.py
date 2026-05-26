@@ -34,9 +34,11 @@ Setup:
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from firebase_admin import firestore as fb_firestore
 
@@ -337,6 +339,345 @@ def test_round_trip_writes_session_result(emulator_db, emulator_test_id):
     assert session["status"] == "done"
     assert isinstance(session["updatedAt"], datetime)
     assert isinstance(session["lastActivityAt"], datetime)
+    # Sprint 22 T22.7: Tier 2 success path writes explicit Firestore null
+    # to canonicalKey (clears any candidate UUID Express may have set
+    # during a clarification cycle). The field must be PRESENT in the
+    # doc with value None — not absent — so the cross-user cache lookup
+    # (Future Enhancement 3) can correctly classify the session as
+    # cacheless on read.
+    assert "canonicalKey" in session, (
+        "Sprint 22 T22.7: canonicalKey field must be written on every "
+        "success transition, including Tier 2 (explicit null per "
+        "Convention B / UNSET sentinel)."
+    )
+    assert session["canonicalKey"] is None
+
+
+# ==========================================================
+# Sprint 22 T22.10 — Tier 1 round-trip (all 5 BI cards)
+# ==========================================================
+
+def test_round_trip_tier_1_writes_full_bi_cards(emulator_db, emulator_test_id):
+    """
+    Sprint 22 T22.10 — Tier 1 end-to-end against the real Firestore
+    emulator. Verifies that:
+
+    1. SessionResult shape carries marketProbability, marketComparison
+       (T22.3), tier=tier_1.
+    2. predictionSeries subcollection populates with the T22.4 adapter's
+       wire shape — `ts` round-trips as a Firestore Timestamp (NOT a
+       string; see D3 — the critical bug T22.4 averts).
+    3. sentimentTimeSeries subcollection populates with the T22.6
+       adapter's wire shape — `ts` Firestore Timestamp, `date` ISO
+       string, both sentiments normalized to [0, 1].
+    4. canonicalKey on the parent session doc equals the resolved
+       market_slug (T22.7) — first end-to-end verification that the
+       Convention B UNSET-sentinel write actually lands.
+
+    Same mock strategy as the Tier 2 round-trip above (mock at the
+    three retrieval-agent boundaries + every OpenAI client). The
+    difference is the agents return POPULATED payloads exercising the
+    Sprint 22 wiring end-to-end.
+
+    Evidence dates use relative offsets from now (NOT hardcoded May
+    2026) so the bucketing helper's window catches them at the time
+    the test runs.
+    """
+    db = emulator_db
+    session_id = f"{emulator_test_id}_tier_1"
+    question = "Will the Fed cut rates before June 2026?"
+    _seed_pending_query(db, session_id, question)
+
+    qu_client, emb_client, rate_client, synth_client = _build_llm_mocks()
+
+    # Rate-evidence OpenAI mock — must produce a `ratings` list keyed by
+    # evidence_id. Since the IDs are generated inside rate_evidence
+    # itself, use a side_effect that parses the prompt and constructs
+    # a matching response (same trick as Gate 2 subgraph tests).
+    import re
+
+    def _build_rate_response(**kwargs):
+        user_msg = kwargs["messages"][1]["content"]
+        ids = re.findall(
+            r"evidence[_-]?id\s*[:=]\s*\"?([A-Za-z0-9_\-]{6,64})\"?",
+            user_msg, re.IGNORECASE,
+        )
+        seen = set()
+        unique_ids = [i for i in ids if not (i in seen or seen.add(i))]
+        payload = {
+            "ratings": [
+                {"evidence_id": eid, "relevance_score": 0.8,
+                 "justification": "relevant"}
+                for eid in unique_ids
+            ],
+        }
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
+            usage=SimpleNamespace(total_tokens=200),
+        )
+    rate_client.chat.completions.create.side_effect = _build_rate_response
+
+    # Recent dates relative to now (test runs at unknown wall-clock).
+    now = datetime.now(timezone.utc)
+    two_days_ago = (now - timedelta(days=2)).replace(microsecond=0)
+    three_days_ago = (now - timedelta(days=3)).replace(microsecond=0)
+    five_days_ago = (now - timedelta(days=5)).replace(microsecond=0)
+
+    # Polymarket market_slug — the value that should reach canonicalKey.
+    market_slug = "0xfed_condition_id"
+
+    with (
+        patch("agent.nodes.claim_session.settings.AGENT_WORKER_ID", "worker-tier1"),
+        patch(
+            "agent.nodes.query_understand._get_default_client",
+            return_value=qu_client,
+        ),
+        patch(
+            "agent.nodes.build_embedding._get_default_client",
+            return_value=emb_client,
+        ),
+        patch(
+            "agent.nodes.rate_evidence._get_default_client",
+            return_value=rate_client,
+        ),
+        patch(
+            "agent.nodes.synthesize._get_default_client",
+            return_value=synth_client,
+        ),
+        patch("agent.agents.researcher.run") as mock_researcher,
+        patch("agent.agents.pulse_analyst.run") as mock_pulse,
+        patch("agent.agents.market_bridge.run") as mock_market,
+    ):
+        # Researcher: 2 articles with sentiment_score + published_at
+        # (Expert-line bucketing input).
+        mock_researcher.return_value = {
+            "articles": [
+                {
+                    "signal_id": "news-a",
+                    "source_platform": "newsapi",
+                    "publisher": "reuters.com",
+                    "title": "Fed signals dovish",
+                    "published_at": three_days_ago.isoformat(),
+                    "executive_summary": "Fed dovish.",
+                    "key_findings": [],
+                    "full_text_snippet": "Snippet A.",
+                    "impact_level": 4,
+                    "reliability_score": 0.8,
+                    "sentiment_score": 0.4,         # → normalized 0.7
+                    "similarity": 0.7,
+                    "evidence_weight": 0.75,
+                    "canonical_event_id": "",
+                },
+                {
+                    "signal_id": "news-b",
+                    "source_platform": "newsapi",
+                    "publisher": "ft.com",
+                    "title": "Inflation cooling",
+                    "published_at": five_days_ago.isoformat(),
+                    "executive_summary": "Inflation cooling.",
+                    "key_findings": [],
+                    "full_text_snippet": "Snippet B.",
+                    "impact_level": 3,
+                    "reliability_score": 0.7,
+                    "sentiment_score": 0.6,         # → normalized 0.8
+                    "similarity": 0.6,
+                    "evidence_weight": 0.65,
+                    "canonical_event_id": "",
+                },
+            ],
+            "source_diversity": {"newsapi_count": 2, "arxiv_count": 0, "telegram_count": 0},
+            "recency_range": None,
+            "empty": False,
+        }
+        # Pulse: 1 HackerNews discussion (Public-line bucketing input).
+        # D5 patch: published_at must be present on community_discussion items.
+        mock_pulse.return_value = {
+            "market_consensus": [],
+            "community_discussion": [
+                {
+                    "signal_id": "hn-a",
+                    "platform": "hackernews",
+                    "title": "HN discussion",
+                    "points": 50,
+                    "top_technical_insights": [],
+                    "community_sentiment": -0.4,    # → normalized 0.3
+                    "published_at": two_days_ago.isoformat(),
+                    "similarity": 0.6,
+                    "evidence_weight": 0.4,
+                },
+            ],
+            "overall_sentiment": 0.0,
+            "empty": False,
+        }
+        # Market Bridge: populated Polymarket payload with price_history
+        # (T22.4 predictionSeries input) and market_slug (T22.7 canonicalKey
+        # input).
+        mock_market.return_value = {
+            "polymarket": {
+                "current_odds": 0.62,
+                "momentum": {"change_24h": 0.03, "change_7d": 0.07, "change_30d": 0.12},
+                "price_history": [
+                    {"timestamp": five_days_ago.isoformat(),  "value": 0.55},
+                    {"timestamp": three_days_ago.isoformat(), "value": 0.60},
+                    {"timestamp": two_days_ago.isoformat(),   "value": 0.62},
+                ],
+                "whale_alerts": [],
+                "market_slug": market_slug,
+            },
+            "linked_sources": [],
+            "fred_anomalies": [],
+            "google_trends": [],
+            "empty": False,
+        }
+
+        process_query(session_id)
+
+    # --- sessionResults/{id} ---
+    result_doc = db.collection("sessionResults").document(session_id).get()
+    assert result_doc.exists
+    result = result_doc.to_dict()
+
+    # MarketComparison BI card (T22.3) — populated.
+    assert result["marketProbability"] == pytest.approx(0.62), (
+        "T22.3: marketProbability should equal Polymarket's current_odds"
+    )
+    assert result["marketComparison"] == [
+        {"label": "Anizai", "value": pytest.approx(result["finalProbability"])},
+        {"label": "Polymarket", "value": pytest.approx(0.62)},
+    ]
+    # NO_MARKET_CAPTION must NOT fire on Tier 1.
+    assert result["marketComparisonInsight"] != synthesize_module.NO_MARKET_CAPTION
+    # Tier inference from market_evidence.polymarket (Sprint 21 T21.7).
+    assert result["tier"] == "tier_1"
+
+    # PredictionOverview BI card — shape sanity.
+    assert isinstance(result["finalProbability"], float)
+    assert 0.0 <= result["finalProbability"] <= 1.0
+    assert result["confidenceLabel"] in {"Low", "Moderate", "High"}
+
+    # --- sessions/{id} (T22.7 canonicalKey + tier) ---
+    session = db.collection("sessions").document(session_id).get().to_dict()
+    assert session["status"] == "done"
+    assert session["tier"] == "tier_1", (
+        "Sprint 21 T21.8: tier on session doc"
+    )
+    assert "canonicalKey" in session
+    assert session["canonicalKey"] == market_slug, (
+        "T22.7: canonicalKey on session doc must equal the resolved "
+        "Polymarket market_slug for Future Enhancement 3 (cache lookup)"
+    )
+
+    # --- predictionSeries subcollection (T22.4) ---
+    prediction_docs = list(
+        db.collection("sessions").document(session_id)
+          .collection("predictionSeries").stream()
+    )
+    assert len(prediction_docs) == 3, (
+        "T22.4: one doc per price_history entry"
+    )
+    for doc_snap in prediction_docs:
+        doc = doc_snap.to_dict()
+        # Critical D3 check — `ts` round-trips as Firestore Timestamp
+        # (Python datetime via firestore-admin SDK), NOT ISO string.
+        # If T22.4 ever regresses to writing a string, this fails because
+        # data.ts isn't a datetime instance.
+        assert isinstance(doc["ts"], datetime), (
+            f"T22.4 D3: ts must be a Firestore Timestamp that the server's "
+            f"toISOString(data.ts)?.toDate?.() can call .toDate() on. "
+            f"Got {type(doc['ts']).__name__}: {doc['ts']!r}"
+        )
+        assert doc["ts"].tzinfo is not None
+        assert isinstance(doc["probability"], float)
+        assert doc["confidence"] == 1.0
+        assert doc["reasonType"] == "market"
+        assert doc["evidenceIds"] == []
+
+    # predictionSeries docs ordered by ts ascending (server query
+    # uses .orderBy('ts', 'asc')).
+    timestamps = [d.to_dict()["ts"] for d in prediction_docs]
+    # Firestore .stream() doesn't guarantee order; we sort to mirror what
+    # the server's query produces and verify the values are at the expected
+    # timestamps.
+    timestamps_sorted = sorted(timestamps)
+    assert timestamps_sorted[0].date() == five_days_ago.date()
+    assert timestamps_sorted[-1].date() == two_days_ago.date()
+
+    # --- sentimentTimeSeries subcollection (T22.6) ---
+    sentiment_docs = list(
+        db.collection("sessions").document(session_id)
+          .collection("sentimentTimeSeries").stream()
+    )
+    assert len(sentiment_docs) >= 1, (
+        "T22.6: at least one bucket has data (Expert OR Public)"
+    )
+
+    # Track whether expertUpper/expertLower are PRESENT-with-null or ABSENT.
+    # Reported in the test output for D6 follow-up consideration.
+    expert_upper_states: list[str] = []
+    expert_lower_states: list[str] = []
+
+    for doc_snap in sentiment_docs:
+        doc = doc_snap.to_dict()
+        # D3-pattern check — same Firestore Timestamp gotcha.
+        assert isinstance(doc["ts"], datetime), (
+            f"T22.6: ts must round-trip as Firestore Timestamp. "
+            f"Got {type(doc['ts']).__name__}: {doc['ts']!r}"
+        )
+        assert doc["ts"].tzinfo is not None
+        # date is ISO YYYY-MM-DD.
+        assert isinstance(doc["date"], str)
+        assert len(doc["date"]) == 10
+        assert doc["date"][4] == "-" and doc["date"][7] == "-"
+        # T22.6 a1 + normalization: either side may be null; populated
+        # values are in the FE's [0, 1] scale.
+        for side in ("expertSentiment", "publicSentiment"):
+            if doc.get(side) is not None:
+                assert 0.0 <= doc[side] <= 1.0, (
+                    f"T22.6 scale normalization: {side}={doc[side]} should "
+                    f"be in [0, 1] (in-state [-1, 1] mapped via (x+1)/2)"
+                )
+
+        # OBSERVATION (per Ron's T22.10 reporting request): record whether
+        # expertUpper / expertLower are present in the doc or absent.
+        expert_upper_states.append(
+            "present-null" if doc.get("expertUpper") is None
+                              and "expertUpper" in doc
+            else ("present-value" if "expertUpper" in doc else "absent")
+        )
+        expert_lower_states.append(
+            "present-null" if doc.get("expertLower") is None
+                              and "expertLower" in doc
+            else ("present-value" if "expertLower" in doc else "absent")
+        )
+
+    # All buckets emit the same shape — collapse to a single state token.
+    assert len(set(expert_upper_states)) == 1, (
+        f"expertUpper state should be uniform across docs: {expert_upper_states}"
+    )
+    assert len(set(expert_lower_states)) == 1
+    upper_state = expert_upper_states[0]
+    lower_state = expert_lower_states[0]
+    # Pin the observation as an assertion so future regressions show up:
+    # T22.6's adapter writes the fields with None. If they're absent
+    # instead, T22.6 was changed and D6 should be revisited.
+    assert upper_state == "present-null", (
+        f"T22.10 observation pin: expertUpper expected 'present-null' "
+        f"but got '{upper_state}'. If absent, T22.6 stopped writing "
+        f"the field — D6 should be revisited (potential cleanup)."
+    )
+    assert lower_state == "present-null"
+    # Echo to stdout so the report-back captures the actual observation.
+    print(
+        f"\n[T22.10 observation] sentimentTimeSeries docs: "
+        f"expertUpper={upper_state}, expertLower={lower_state}"
+    )
+
+    # --- evidence subcollection (sanity, not a primary T22 check) ---
+    evidence_docs = list(
+        db.collection("sessions").document(session_id)
+          .collection("evidence").stream()
+    )
+    assert len(evidence_docs) >= 1
 
 
 # ==========================================================
