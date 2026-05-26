@@ -310,6 +310,96 @@ class TestTransformCorrectness:
 
 
 # ==========================================================
+# Gate 2.3.5 — Sprint 22 T22.1 D1: question propagation
+# ==========================================================
+
+class TestQuestionPropagationSprint22:
+    """
+    Sprint 22 T22.1 (D1 prerequisite): map_price_update_to_silver must
+    propagate the `question` field from raw payload to metadata_extension.
+
+    Why this matters:
+        Without propagation, momentum_vault rows have no question text
+        attached, and persistence.momentum_vault.find_polymarket_market_by_question
+        (the resolver added in T22.1) has nothing to fuzzy-match against.
+        Verified against live dev DB on 2026-05-23 — pre-patch rows had
+        no `question` key in metadata_extension (six keys total). Patch
+        makes it seven, REST-snapshot rows carry the question.
+
+    Why two distinct fixtures (REST + WebSocket):
+        REST snapshots include `question` in their raw payload
+        (polymarket_producer.py:208); WebSocket `last_trade` events do
+        NOT — they only carry asset_id + price + size. The patch must
+        not crash on the WebSocket path and must store "" there so the
+        resolver's `metadata_extension ? 'question'` JSONB key-exists
+        filter correctly distinguishes "no question text" from "missing
+        key".
+    """
+
+    def test_rest_snapshot_question_propagates_to_metadata_extension(self):
+        """
+        REST-snapshot raw payload with `question` must surface that
+        text at metadata_extension.question in the Silver record.
+        """
+        rest_snapshot_raw = {
+            "payload_type":    "price_update",
+            "ingestion_mode":  "rest_snapshot",
+            "market_id":       "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
+            "condition_id":    "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
+            "question":        "Will the Federal Reserve cut rates before June 2026?",
+            "tokens":          [],
+            "volume_24h_usd":  285_400.0,
+            "liquidity_usd":   128_900.0,
+            "whale_alert":     False,
+            "fetched_at":      "2026-05-23T10:00:00+00:00",
+        }
+        envelope = build_bronze_message("polymarket", WS_ENDPOINT, rest_snapshot_raw)
+        topic, record = process_polymarket_message(envelope)
+        assert topic == SILVER_STRUCTURED_METRICS
+        assert record["metadata_extension"]["question"] == (
+            "Will the Federal Reserve cut rates before June 2026?"
+        )
+
+    def test_websocket_event_question_defaults_to_empty_string(self, price_update_envelope):
+        """
+        WebSocket `last_trade` raw payloads don't carry `question` — the
+        Silver record must still contain the key (empty string) so the
+        downstream record shape is uniform across REST and WebSocket
+        paths. The resolver's JSONB key-exists filter treats "" as
+        present-but-empty (which similarity() returns 0.0 for and gets
+        excluded by the threshold).
+        """
+        _, record = process_polymarket_message(price_update_envelope)
+        assert "question" in record["metadata_extension"]
+        assert record["metadata_extension"]["question"] == ""
+
+    def test_question_propagation_does_not_break_validator(self):
+        """
+        The patch must not break Silver schema validation — the new
+        `question` key is permitted in metadata_extension by the existing
+        validator (no schema change required).
+        """
+        rest_snapshot_raw = {
+            "payload_type":    "price_update",
+            "ingestion_mode":  "rest_snapshot",
+            "market_id":       "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
+            "condition_id":    "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
+            "question":        "Will BTC reach $150K by year-end 2026?",
+            "tokens":          [],
+            "volume_24h_usd":  50_000.0,
+            "liquidity_usd":   25_000.0,
+            "whale_alert":     False,
+            "fetched_at":      "2026-05-23T10:00:00+00:00",
+        }
+        envelope = build_bronze_message("polymarket", WS_ENDPOINT, rest_snapshot_raw)
+        _, record = process_polymarket_message(envelope)
+        result = validate_silver_structured_metric(record)
+        assert result.is_valid, (
+            f"Silver validation must pass with the new question field: {result.errors}"
+        )
+
+
+# ==========================================================
 # Gate 2.4 — DLQ Record Structure
 # ==========================================================
 

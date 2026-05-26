@@ -18,6 +18,7 @@ Public interface:
     insert(gold_metric)                             → metric_id (str)
     fetch_latest(source_name, external_ref)         → dict | None
     fetch_time_series(source_name, ext_ref, hours)  → list[dict]
+    find_polymarket_market_by_question(q, thr=0.85) → dict | None
 
 References:
     - Section 5.3:  Momentum Vault — TimescaleDB hypertable
@@ -337,6 +338,126 @@ def fetch_fred_anomalies(days: int = 7) -> list[dict]:
     with get_cursor() as cur:
         cur.execute(sql, (days,))
         return [dict(row) for row in cur.fetchall()]
+
+
+# ==========================================================
+# Polymarket Question Resolver (Sprint 22 T22.1)
+# ==========================================================
+
+POLYMARKET_FUZZY_MATCH_DEFAULT_THRESHOLD = 0.85
+
+
+def find_polymarket_market_by_question(
+    question_text: str,
+    threshold: float = POLYMARKET_FUZZY_MATCH_DEFAULT_THRESHOLD,
+) -> Optional[dict]:
+    """
+    Resolve a user's free-text question to the most-recent matching
+    Polymarket market row via pg_trgm trigram similarity.
+
+    Closes the resolver portion of KG-PHASE8-12: before Sprint 22 the
+    agent had no path from `raw_question` → polymarket market, so every
+    Tier 1 forecast ran as effective Tier 2 (empty MarketComparison BI
+    card on the frontend). This function gives the Market Bridge agent
+    that path.
+
+    Why pg_trgm (not vector similarity) for V1:
+        Revised Phase 8 plan §Future Enhancement 4 — V1 question patterns
+        are users asking verbatim or near-verbatim from Polymarket; the
+        90% case is reachable with trigram similarity at 20% of the
+        complexity. Vector index + clarification on multi-match is a
+        clean upgrade later.
+
+    Why 0.85 default threshold:
+        The threshold is **paraphrase-defense**, not punctuation-defense.
+        pg_trgm normalizes aggressively before computing similarity —
+        lowercase + strip non-alphanumeric + unordered trigram set — so
+        case, punctuation, whitespace, and word order all yield
+        similarity = 1.0 automatically. Empirical measurement on the
+        dev DB (Sprint 22 T22.1):
+          - Trivial variations (case/punctuation/word order): ~1.00
+          - Moderate paraphrase (synonyms, slight rewording): ~0.50–0.55
+          - Heavy paraphrase (full restructure): <0.30
+        0.85 sits well above the moderate-paraphrase band and well below
+        the trivial-variation ceiling — accepts user phrasings of the
+        same question, rejects paraphrases that may shift semantics.
+        Caller-overridable for future tuning per the revised plan
+        §Sprint 22 Confirmed design decisions.
+
+    Why ORDER BY match_score DESC, timestamp_utc DESC:
+        The same Polymarket market produces many momentum_vault rows
+        (one per price observation). All rows from the same market
+        carry the same `question` text in metadata_extension (added by
+        Sprint 22 T22.1 silver_job patch), so match_score is tied across
+        them; timestamp_utc DESC then picks the most-recent observation
+        — what the Market Bridge agent wants when reading `current_odds`.
+
+    Why filter on `metadata_extension ? 'question'`:
+        Not every momentum_vault row carries the question key — FRED,
+        googletrends, openweather rows don't, and pre-Sprint-22
+        Polymarket rows (before the silver_job patch landed) also don't.
+        The JSONB key-exists operator drops those without computing
+        similarity against NULL/missing values.
+
+    Why empty/whitespace guard at the top:
+        `similarity('', '...')` returns 0.0 which would never cross the
+        0.85 threshold anyway, but the guard avoids the round-trip and
+        makes the intent explicit at the call site.
+
+    Note on indexing:
+        No GIN/GiST trigram index on `metadata_extension->>'question'`
+        today. At current Polymarket vault volume (hundreds to low
+        thousands of rows) the sequential scan is acceptable. Adding the
+        index belongs with Future Enhancement 4 (vector index work).
+
+    Args:
+        question_text: User's raw question. Empty/whitespace → returns
+                       None without touching the DB.
+        threshold:     Minimum similarity (0.0-1.0). Default 0.85.
+                       Rows scoring below this are excluded.
+
+    Returns:
+        Most-recent matching row as a dict (same shape as fetch_latest)
+        with one added field `match_score: float` in [threshold, 1.0].
+        None when no row passes the threshold.
+
+    Spec references:
+        - data-pipeline/docs/agentic_hub_implementation_phase8_revised.md
+          §Sprint 22 T22.1 + §Future Enhancement 4
+        - data-pipeline/docs/agentic_hub_spec.md §8.4.3 (revised)
+        - task_plan.md Known Gaps KG-PHASE8-12
+    """
+    if not question_text or not question_text.strip():
+        return None
+
+    sql = """
+        SELECT
+            metric_id::text,
+            canonical_event_id,
+            source_name,
+            external_reference_id,
+            current_value,
+            unit,
+            status,
+            timestamp_utc,
+            change_24h,
+            change_7d,
+            change_30d,
+            is_new_market,
+            metadata_extension,
+            ingested_at,
+            similarity(metadata_extension->>'question', %s) AS match_score
+        FROM momentum_vault
+        WHERE source_name = 'polymarket'
+          AND metadata_extension ? 'question'
+          AND similarity(metadata_extension->>'question', %s) >= %s
+        ORDER BY match_score DESC, timestamp_utc DESC
+        LIMIT 1;
+    """
+    with get_cursor() as cur:
+        cur.execute(sql, (question_text, question_text, threshold))
+        row = cur.fetchone()
+    return dict(row) if row else None
 
 
 # ==========================================================

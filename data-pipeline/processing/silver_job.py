@@ -182,7 +182,14 @@ def map_price_update_to_silver(raw: dict, envelope: dict) -> dict:
             "change_30d":    0.0,
             "is_new_market": False,
         },
-        # Polymarket metadata_extension fields (Section C.2 table)
+        # Polymarket metadata_extension fields (Section C.2 table).
+        # `question` is propagated only when present in raw (REST-snapshot path
+        # — `_fetch_market_prices()` in polymarket_producer.py:208). WebSocket
+        # `last_trade` events carry no question text in their raw payload, so
+        # this resolves to "" for those rows. Added in Sprint 22 T22.1 D1 as a
+        # prerequisite for the agent-side fuzzy-match resolver in
+        # persistence/momentum_vault.find_polymarket_market_by_question:
+        # without this propagation the resolver has nothing to match against.
         "metadata_extension": {
             "liquidity_pool_tvl": float(raw.get("liquidity_usd", 0.0)),
             "bid_ask_spread":     0.0,
@@ -190,6 +197,7 @@ def map_price_update_to_silver(raw: dict, envelope: dict) -> dict:
             "is_divergent":       False,
             "whale_alert":        bool(raw.get("whale_alert", False)),
             "resolution_rules":   "",
+            "question":           raw.get("question", ""),
         },
     }
 
