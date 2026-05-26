@@ -21,6 +21,9 @@ validate_trigger() — schema validation [1–14]:
     [12] openweather hotspot_names=[] (empty list) returns error
     [13] opensky target_callsigns=[] (empty list) returns error
     [14] keywords is a string (not a list) returns error
+    [N1] newsapi valid payload — no errors (Sprint 23)
+    [N2] newsapi missing 'keywords' returns error (Sprint 23)
+    [N3] newsapi keywords=[] (empty list) returns error (Sprint 23)
 
 dispatch() — producer routing [15–20]:
     [15] googletrends trigger calls GoogleTrendsProducer.run_reactive(keywords, geo)
@@ -29,6 +32,8 @@ dispatch() — producer routing [15–20]:
     [18] optional fields forwarded — googletrends geo + timeframe
     [19] optional fields forwarded — openweather window_minutes + poll_interval_sec
     [20] optional fields forwarded — opensky window_minutes + poll_interval_sec
+    [N4] newsapi trigger calls NewsAPIProducer.run_reactive(keywords) (Sprint 23)
+    [N5] newsapi optional time_window_days forwarded (Sprint 23)
 
 run() — consumer loop routing [21–25]:
     [21] valid googletrends trigger → dispatch called, offset committed, DLQ not called
@@ -158,6 +163,27 @@ class TestValidateTrigger:
         errors = validate_trigger({"source": "googletrends", "keywords": "oil price"})
         assert any("list" in e for e in errors)
 
+    # ------------------------------------------------------
+    # Sprint 23 — newsapi as a 4th reactive source
+    # ------------------------------------------------------
+
+    def test_newsapi_valid(self):
+        # [N1]
+        errors = validate_trigger(
+            {"source": "newsapi", "keywords": ["iran nuclear", "OPEC"]}
+        )
+        assert errors == []
+
+    def test_newsapi_missing_keywords(self):
+        # [N2] newsapi requires the same 'keywords' field as googletrends.
+        errors = validate_trigger({"source": "newsapi"})
+        assert any("keywords" in e for e in errors)
+
+    def test_newsapi_empty_keywords_list(self):
+        # [N3]
+        errors = validate_trigger({"source": "newsapi", "keywords": []})
+        assert any("keywords" in e for e in errors)
+
 
 # ==========================================================
 # dispatch() — producer routing [15–20]
@@ -272,6 +298,48 @@ class TestDispatch:
 
         mock_producer.run_reactive.assert_called_once_with(
             target_callsigns=["RFF123"], window_minutes=15, poll_interval_sec=30
+        )
+
+    # ------------------------------------------------------
+    # Sprint 23 — newsapi as a 4th reactive source
+    # ------------------------------------------------------
+
+    @patch("orchestration.ingestion_trigger_consumer._build_producer")
+    def test_newsapi_calls_run_reactive_with_keywords(self, mock_build):
+        # [N4] Baseline: keywords field forwarded; time_window_days omitted
+        # so NewsAPIProducer.run_reactive uses its default of 7.
+        mock_producer = MagicMock()
+        mock_producer.run_reactive.return_value = 6
+        mock_build.return_value = mock_producer
+
+        trigger = {"source": "newsapi", "keywords": ["iran nuclear", "OPEC"]}
+        thread = dispatch(trigger)
+        self._run_and_join(thread)
+
+        mock_build.assert_called_once_with("newsapi")
+        mock_producer.run_reactive.assert_called_once_with(
+            keywords=["iran nuclear", "OPEC"]
+        )
+
+    @patch("orchestration.ingestion_trigger_consumer._build_producer")
+    def test_newsapi_optional_time_window_days_forwarded(self, mock_build):
+        # [N5] Optional time_window_days, when present, is forwarded as a
+        # keyword arg to run_reactive — same convention as googletrends/geo
+        # and openweather/window_minutes.
+        mock_producer = MagicMock()
+        mock_producer.run_reactive.return_value = 9
+        mock_build.return_value = mock_producer
+
+        trigger = {
+            "source": "newsapi",
+            "keywords": ["iran"],
+            "time_window_days": 3,
+        }
+        thread = dispatch(trigger)
+        self._run_and_join(thread)
+
+        mock_producer.run_reactive.assert_called_once_with(
+            keywords=["iran"], time_window_days=3
         )
 
 

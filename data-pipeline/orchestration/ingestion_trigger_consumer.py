@@ -5,10 +5,11 @@ Consumes messages from the `ingestion_triggers` Kafka topic (written by the RAG
 agent when a knowledge gap is detected during inference) and dispatches each
 trigger to the appropriate producer's run_reactive() method.
 
-Three sources support reactive mode (Section 2.4):
+Four sources support reactive mode (Section 2.4):
     googletrends — Interest Over Time for specific keywords (Section B.5)
     openweather  — Bounded hotspot polling window (Section B.6)
     opensky      — Bounded callsign tracking window (Section B.7)
+    newsapi      — On-demand keyword-driven article fetch (Sprint 23, §B.4)
 
 Trigger payload schemas:
 
@@ -27,6 +28,15 @@ Trigger payload schemas:
         {"source": "opensky", "target_callsigns": ["SWR100", "AFR447"]}
         Required: source, target_callsigns (non-empty list)
         Optional: window_minutes, poll_interval_sec
+
+    NewsAPI (Sprint 23):
+        {"source": "newsapi", "keywords": ["iran nuclear", "OPEC"],
+         "time_window_days": 7}
+        Required: source, keywords (non-empty list)
+        Optional: time_window_days (default 7)
+        Emitted by the Agentic Hub when the vault is insufficient for a
+        forecast; dispatcher invokes NewsAPIProducer.run_reactive() which
+        makes one getArticles call per keyword and dedupes by URL.
 
 Invalid payloads (unknown source, missing required fields, empty lists):
     → routed to dead-letter-queue with errors (Section 3.5).
@@ -73,10 +83,12 @@ setup_logging()
 # ==========================================================
 
 # Sources that support reactive mode (Section 2.4).
+# newsapi added in Sprint 23 — see agentic_hub_implementation_phase8_revised.md §Sprint 23.
 VALID_SOURCES: frozenset[str] = frozenset({
     "googletrends",
     "openweather",
     "opensky",
+    "newsapi",
 })
 
 # Per-source required payload fields (beyond "source").
@@ -85,6 +97,7 @@ _REQUIRED_LIST_FIELDS: dict[str, str] = {
     "googletrends": "keywords",
     "openweather":  "hotspot_names",
     "opensky":      "target_callsigns",
+    "newsapi":      "keywords",
 }
 
 
@@ -210,6 +223,9 @@ def _build_producer(source: str) -> Any:
     if source == "opensky":
         from ingestion.opensky_producer import OpenSkyProducer
         return OpenSkyProducer()
+    if source == "newsapi":
+        from ingestion.newsapi_producer import NewsAPIProducer
+        return NewsAPIProducer()
     raise ValueError(f"[trigger_consumer] No producer registered for source '{source}'")
 
 
@@ -267,6 +283,12 @@ def dispatch(trigger: dict) -> threading.Thread:
                     kwargs["window_minutes"] = trigger["window_minutes"]
                 if "poll_interval_sec" in trigger:
                     kwargs["poll_interval_sec"] = trigger["poll_interval_sec"]
+                emitted = producer.run_reactive(**kwargs)
+
+            elif source == "newsapi":
+                kwargs = {"keywords": trigger["keywords"]}
+                if "time_window_days" in trigger:
+                    kwargs["time_window_days"] = trigger["time_window_days"]
                 emitted = producer.run_reactive(**kwargs)
 
             else:
