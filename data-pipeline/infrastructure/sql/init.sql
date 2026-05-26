@@ -449,6 +449,51 @@ CREATE INDEX IF NOT EXISTS idx_md_platform
 
 
 -- ==========================================================
+-- 7. REACTIVE TRIGGERS LOG — Agent Reactive Ingestion Audit (Sprint 23)
+-- ==========================================================
+-- Records every reactive-ingestion trigger the Agentic Hub emits to the
+-- `ingestion_triggers` Kafka topic when the vault is insufficient for a
+-- forecast (Phase 8, Sprint 23). One row per emit attempt; trigger-and-forget
+-- semantics — there is intentionally no polling-state column.
+--
+-- Purpose (per agentic_hub_implementation_phase8_revised.md §Sprint 23):
+--   1. Debugging during initial-test phase — confirm a trigger fired and
+--      with what payload when a session looks under-evidenced.
+--   2. Cost attribution — basis for "how many reactive triggers did we
+--      emit this week" measurements that feed KG-PHASE-9.5-9 cost analysis.
+--
+-- Schema decisions:
+--   * `keywords JSONB` — list of strings; JSONB matches momentum_vault
+--     metadata_extension idiom and lets us query specific keyword sets
+--     post-hoc without a separate keyword join table.
+--   * `kafka_offset BIGINT NULLABLE` — populated when KafkaProducer.send()
+--     returns a record metadata with an offset; NULL on emit failure or
+--     when the producer doesn't expose offset (mocked producers in Gate 1).
+--   * `status` CHECK constraint enforces the two-value enum at write time
+--     so we never accumulate freeform status strings.
+--   * Index on (session_id, trigger_time DESC) supports the primary lookup
+--     pattern — "all triggers for this session, newest first".
+--
+-- Decoupled from `momentum_vault` and the vault schema entirely — this is
+-- an operational/audit table, not a data-asset table.
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS reactive_triggers_log (
+    trigger_id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id              TEXT            NOT NULL,
+    trigger_time            TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    keywords                JSONB           NOT NULL,            -- list[str], e.g. ["iran", "opec"]
+    source                  TEXT            NOT NULL,            -- 'newsapi' (V1); 'telegram'/'arxiv'/'polymarket' later
+    kafka_offset            BIGINT,                              -- NULL when emit failed or offset unavailable
+    status                  TEXT            NOT NULL
+                            CHECK (status IN ('emitted', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_rtl_session_time
+    ON reactive_triggers_log (session_id, trigger_time DESC);
+
+
+-- ==========================================================
 -- VERIFICATION
 -- ==========================================================
 -- Log installed extensions and created tables for startup confirmation.
