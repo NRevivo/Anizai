@@ -54,6 +54,35 @@ def db_available():
         )
 
 
+@pytest.fixture(scope="session", autouse=False)
+def kafka_available():
+    """
+    Confirm the Kafka broker is reachable (Sprint 23 T23.9).
+
+    Mark any test class or module that requires a live Kafka broker with:
+        @pytest.mark.usefixtures("kafka_available")
+
+    Skips (not fails) the session if Kafka is unreachable, mirroring the
+    db_available pattern so unit-level Gate 1/2 tests stay independent
+    of broker presence.
+
+    A short request_timeout_ms is used here so the skip is fast — the
+    full producer default is 30s and would block CI runs without Kafka
+    for the whole interval.
+    """
+    from utils.kafka_utils import make_producer
+    try:
+        # Short timeout so we don't hang the session if Kafka is down.
+        producer = make_producer(request_timeout_ms=3_000)
+        producer.close(timeout=2.0)
+    except Exception as exc:
+        pytest.skip(
+            f"Kafka not reachable — skipping Kafka integration tests. "
+            f"Start the stack with: docker compose -f infrastructure/docker-compose.yml up -d kafka\n"
+            f"Error: {exc}"
+        )
+
+
 # ==========================================================
 # Session-scoped: unique prefix for all test records in
 # this pytest run. Prevents collisions when tests are run
@@ -163,6 +192,24 @@ def cleanup_mapping_dict(test_run_id):
             )
     except Exception as exc:
         print(f"\n[conftest] Warning: mapping_dict cleanup failed: {exc}")
+
+
+@pytest.fixture(autouse=False)
+def cleanup_reactive_triggers_log(test_run_id):
+    """
+    Delete test rows from reactive_triggers_log after each test function
+    (Sprint 23). Matches by session_id prefix since this table has no
+    canonical_event_id column — its grain is the agent session.
+    """
+    yield
+    try:
+        with get_cursor() as cur:
+            cur.execute(
+                "DELETE FROM reactive_triggers_log WHERE session_id LIKE %s;",
+                (f"test_{test_run_id}%",),
+            )
+    except Exception as exc:
+        print(f"\n[conftest] Warning: reactive_triggers_log cleanup failed: {exc}")
 
 
 # ==========================================================
