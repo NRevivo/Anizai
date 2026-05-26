@@ -184,6 +184,66 @@ def build_bronze_message(
 
 
 # ==========================================================
+# Bootstrap-Servers Resolver — Windows IPv4 Guard (KG-PHASE8-25)
+# ==========================================================
+# localhost on Windows resolves dual-stack (::1 first, then 127.0.0.1).
+# kafka-python-ng's bootstrap-to-coordinator transition triggers a
+# selector unregister race when the IPv6 bootstrap socket closes
+# mid-poll — `ValueError: Invalid file descriptor: -1` raised inside
+# `_selector.unregister(key.fileobj)` because the fileobj is the
+# already-closed IPv6 socket (fd=-1).
+#
+# Resolving `localhost` → `127.0.0.1` at the factory boundary forces
+# kafka-python-ng onto a single-stack IPv4 path and avoids the race
+# entirely. Linux containers use the docker-internal name `kafka:29092`,
+# so this guard has zero effect on production / cloud deploys.
+#
+# Surfaced by T23.9 Gate 3 (Sprint 23), 2026-05-26. Race likely
+# present since Gate 3 first ran but masked by earlier failure modes
+# (cold-start metadata timeout, then __consumer_offsets hang) that
+# prevented the consumer from reaching the bootstrap-to-coordinator
+# transition. See KG-PHASE8-25 in task_plan.md.
+#
+# Defensive consistency: applied to both make_consumer (where the race
+# was observed) and make_producer (where the producer's connection
+# lifecycle currently does not expose the race, but kafka-python-ng
+# internals could shift in a future upgrade).
+
+def _resolve_bootstrap_servers(value: str) -> str:
+    """
+    Resolve a `localhost`-based single-host bootstrap_servers value to
+    its IPv4 equivalent, leaving every other input unchanged.
+
+    Mapping:
+        "localhost"           → "127.0.0.1:9092"  (default port appended)
+        "localhost:9092"      → "127.0.0.1:9092"
+        "localhost:29092"     → "127.0.0.1:29092"  (preserves explicit port)
+        anything else         → unchanged
+            (includes "kafka:29092", IP literals, and any CSV multi-host
+            string like "localhost:9092,kafka:29092" which is passed
+            through verbatim — caller is responsible for those shapes)
+
+    Why a helper, not an inline `if`: the single-port literal `9092`
+    would rot the first time someone runs local-dev on a custom port.
+    Parsing the port keeps the guard correct under reconfiguration.
+    """
+    if value == "localhost":
+        return "127.0.0.1:9092"
+    # Only rewrite when the input is a single `localhost:<port>` host;
+    # CSV multi-host strings (which contain ',') and any input that
+    # doesn't begin with the literal "localhost:" prefix pass through.
+    if (
+        value.startswith("localhost:")
+        and "," not in value
+        and value.count(":") == 1
+    ):
+        port = value.split(":", 1)[1]
+        if port.isdigit():
+            return f"127.0.0.1:{port}"
+    return value
+
+
+# ==========================================================
 # Producer Factory (Section 3.2)
 # ==========================================================
 
@@ -218,7 +278,7 @@ def make_producer(
         KafkaError: If the broker is unreachable at call time.
     """
     return KafkaProducer(
-        bootstrap_servers=bootstrap_servers,
+        bootstrap_servers=_resolve_bootstrap_servers(bootstrap_servers),
         value_serializer=ndjson_serializer,
         key_serializer=lambda k: k.encode("utf-8") if isinstance(k, str) else k,
         acks=acks,
@@ -263,7 +323,7 @@ def make_consumer(
     """
     consumer = KafkaConsumer(
         *topics,
-        bootstrap_servers=bootstrap_servers,
+        bootstrap_servers=_resolve_bootstrap_servers(bootstrap_servers),
         group_id=group_id,
         value_deserializer=ndjson_deserializer,
         key_deserializer=lambda k: k.decode("utf-8") if k else None,
