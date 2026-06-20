@@ -165,7 +165,23 @@ OPENAI_MODEL_SUGGESTED_ACTIONS = os.getenv(
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
 # ==========================================================
-# 11. Logging (T19.14 — closes KG-PHASE8-7)
+# 11. Agent Version (Sprint 23.5 T23.5.12 — canonical home)
+# ==========================================================
+# Single source of version truth (Track 3 / absorbs the relocation half of
+# the old T26.5). Previously hardcoded in agent/nodes/synthesize.py:93, which
+# split version identity from config. synthesize.py and health.py now import
+# it from here. Sprint 26 adds the git short-hash on top
+# (AGENT_GIT_COMMIT_SHORT_SHA) without re-splitting the source.
+#
+# History: 0.1.0-sprint18-stub → 0.2.0-sprint19-retrieval-stub-synthesis →
+#          0.3.0 (real synthesis + Firestore) →
+#          0.4.0-sprint21-clarification-tier2 → 0.5.0-sprint23.5.
+# Env-overridable so a hotfix build can stamp its own version without a code
+# change; defaults to the sprint value.
+AGENT_VERSION = os.getenv("AGENT_VERSION", "0.5.0-sprint23.5")
+
+# ==========================================================
+# 12. Logging (T19.14 — closes KG-PHASE8-7)
 # ==========================================================
 # Worker-entry log level. Without `logging.basicConfig()` at startup, the
 # root logger has no handlers and INFO-level lines from every agent

@@ -122,9 +122,9 @@ class TestSprint23Gate2Subgraph:
             unit level. This test exercises the real merge path.
 
         Assertions:
-            (a) Kafka sent exactly once with keywords derived from the
-                upstream-injected fields (entities first, then
-                missing_dimensions, per D4).
+            (a) Kafka sent exactly once with entities-only keywords derived
+                from the upstream-injected fields (R1 — missing_dimensions
+                from the upstream sufficiency_check are NOT folded in).
             (b) Counter ends at 1 (a single trigger attempt).
             (c) Upstream-set fields (`structured_intent`,
                 `sufficiency_checks`) are preserved in the final state —
@@ -152,15 +152,15 @@ class TestSprint23Gate2Subgraph:
              patch.object(node, "reactive_triggers_log"):
             final_state = graph.invoke(initial_state)
 
-        # (a) Kafka sent with the right keywords
+        # (a) Kafka sent with entities-only keywords (R1) — the upstream
+        # sufficiency_check's missing_dimensions are recorded in state (see
+        # assertion (c)) but must NOT shape the keyword set.
         producer.send.assert_called_once()
         payload = producer.send.call_args.kwargs["value"]
-        assert payload["keywords"] == [
-            "Iran", "OPEC", "recent reaction", "economic impact",
-        ], (
-            "Keywords must reflect the entities + missing_dimensions that "
-            "LangGraph's merge produced from the upstream node — not from "
-            "a manually-built dict."
+        assert payload["keywords"] == ["Iran", "OPEC"], (
+            "V1 reactive keywords are entities-only (R1) — even though the "
+            "upstream node merged missing_dimensions into state, they must "
+            "not enter the keyword set."
         )
 
         # (b) Counter ends at 1

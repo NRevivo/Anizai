@@ -72,6 +72,7 @@ from typing import Any, Optional
 from agent import labels
 from agent.config import settings
 from agent.errors import AgentProcessingError
+from agent.utils import llm_cost
 from agent.firestore_client import SERVER_TIMESTAMP
 from agent.prompts.synthesis_lead import (
     RESPONSE_SCHEMA,
@@ -83,14 +84,14 @@ logger = logging.getLogger(__name__)
 
 
 # ==========================================================
-# AGENT_VERSION — bumped per sprint (D10)
+# AGENT_VERSION — canonical home is settings (Sprint 23.5 T23.5.12)
 # ==========================================================
-# Module-level so the value appears in every result and can be grepped
-# from logs / Firestore for which agent build produced a result.
-# Sprint 18: 0.1.0-sprint18-stub
-# Sprint 19: 0.2.0-sprint19-retrieval-stub-synthesis
-# Sprint 20: 0.3.0 — real synthesis + Firestore writes
-AGENT_VERSION = "0.4.0-sprint21-clarification-tier2"
+# Relocated to agent/config/settings.py (Track 3). Re-exported here under
+# the original module-level name so existing importers
+# (`from agent.nodes.synthesize import AGENT_VERSION`, e.g. health.py before
+# its own relocation) keep working and the value still appears in every
+# SessionResult. One source of truth now lives in settings.
+AGENT_VERSION = settings.AGENT_VERSION
 
 
 # ==========================================================
@@ -216,7 +217,9 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
         evidence=evidence_trail,
     )
     output = _extract_output(response)
-    tokens_used = _extract_token_usage(response)
+    tokens_used, cost_usd = llm_cost.record_usage(
+        settings.OPENAI_MODEL_SYNTHESIS, response, site="synthesize",
+    )
 
     _apply_evidence_overlay(evidence_trail, output.get("evidence_overlay") or [])
     _rank_key_evidence(evidence_trail)
@@ -246,6 +249,7 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
         "confidence_score": synthesis_result["confidence"],
         "llm_calls_count": int(state.get("llm_calls_count") or 0) + 1,
         "total_tokens_used": int(state.get("total_tokens_used") or 0) + tokens_used,
+        "total_cost_usd": float(state.get("total_cost_usd") or 0.0) + cost_usd,
     }
 
 
@@ -321,14 +325,6 @@ def _extract_output(response: Any) -> dict:
             f"{type(parsed).__name__}"
         )
     return parsed
-
-
-def _extract_token_usage(response: Any) -> int:
-    """Pull total_tokens off the response, defaulting to 0 if absent."""
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return 0
-    return int(getattr(usage, "total_tokens", 0) or 0)
 
 
 # ==========================================================

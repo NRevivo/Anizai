@@ -48,6 +48,7 @@ from typing import Any, Optional
 
 from agent.config import settings
 from agent.errors import AgentProcessingError
+from agent.utils import llm_cost
 from agent.prompts.query_understanding import (
     MAX_CANDIDATES,
     RESPONSE_SCHEMA,
@@ -156,7 +157,10 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
 
     response = _call_openai(client=client, question=raw_question)
     candidates = _extract_candidates(response)
-    tokens_used = _extract_token_usage(response)
+    tokens_used, cost_usd = llm_cost.record_usage(
+        settings.OPENAI_MODEL_QUERY_UNDERSTANDING, response,
+        site="query_understand",
+    )
 
     rank_1 = candidates[0]
 
@@ -171,6 +175,7 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
     metadata_patch = {
         "llm_calls_count": int(state.get("llm_calls_count") or 0) + 1,
         "total_tokens_used": int(state.get("total_tokens_used") or 0) + tokens_used,
+        "total_cost_usd": float(state.get("total_cost_usd") or 0.0) + cost_usd,
     }
 
     if auto_picked:
@@ -266,20 +271,6 @@ def _extract_candidates(response: Any) -> list[dict]:
     if not candidates:
         raise AgentProcessingError("query_understand: no candidates returned")
     return candidates[:MAX_CANDIDATES]
-
-
-def _extract_token_usage(response: Any) -> int:
-    """
-    Pull total_tokens off the response, defaulting to 0 if usage is absent.
-
-    Cost tracking is best-effort here — the goal is to surface a non-zero
-    counter for observability, not to be the source of truth. Sprint 25
-    will add proper budget enforcement.
-    """
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return 0
-    return int(getattr(usage, "total_tokens", 0) or 0)
 
 
 # ==========================================================

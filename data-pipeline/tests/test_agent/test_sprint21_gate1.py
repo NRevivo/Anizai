@@ -734,8 +734,9 @@ def test_synthesize_tier2_sets_spec_exact_caption():
     )
 
 
-def test_synthesize_agent_version_bumped_to_sprint_21():
-    assert synthesize.AGENT_VERSION == "0.4.0-sprint21-clarification-tier2"
+def test_synthesize_agent_version_bumped_to_sprint_23_5():
+    # Sprint 23.5 T23.5.12 relocated AGENT_VERSION to settings and bumped it.
+    assert synthesize.AGENT_VERSION == "0.5.0-sprint23.5"
 
 
 # ==========================================================

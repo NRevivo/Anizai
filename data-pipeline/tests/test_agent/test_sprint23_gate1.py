@@ -286,9 +286,15 @@ class TestTriggerReactiveIngestionNode:
         payload = producer.send.call_args.kwargs["value"]
         assert payload["keywords"] == ["Iran", "OPEC"]
 
-    # --- B6: missing_dimensions merged after entities ---
+    # --- B6: missing_dimensions are NOT merged — keywords entities-only (R1) ---
 
-    def test_payload_keywords_merged_with_missing_dimensions(self):
+    def test_payload_keywords_exclude_missing_dimensions(self):
+        """[B6] R1 (Advisor↔Ron decision record §1): V1 reactive keywords are
+        entities-only. `sufficiency_checks[-1].missing_dimensions` is recorded
+        as telemetry but is deliberately NOT folded into the keyword set —
+        the gap reactive ingestion closes is recency (the trigger's 7-day
+        window), not topic. This pins that missing_dimensions can't leak back
+        into keywords via a future refactor."""
         from agent.nodes import trigger_reactive_ingestion as node
 
         state: dict = {
@@ -305,9 +311,11 @@ class TestTriggerReactiveIngestionNode:
             node.trigger_reactive_ingestion(state)
 
         payload = producer.send.call_args.kwargs["value"]
-        assert payload["keywords"] == [
-            "Iran", "OPEC", "recent reaction", "economic impact",
-        ]
+        assert payload["keywords"] == ["Iran", "OPEC"]
+        for leaked in ("recent reaction", "economic impact"):
+            assert leaked not in payload["keywords"], (
+                f"missing_dimension {leaked!r} must not enter keywords (R1)"
+            )
 
     # --- B7: raw_question excluded from keyword construction (D4) ---
 
@@ -483,7 +491,7 @@ class TestSprint23ConsolidatedGate1:
 
     def test_empty_or_whitespace_entities_skips_emit(self):
         """[C2] When `_build_keywords` produces an empty list (entities
-        are all empty/whitespace strings AND no missing_dimensions),
+        are all empty/whitespace strings; keywords are entities-only per R1),
         the node skips Kafka emit and does NOT increment the counter.
 
         This is the "no usable signal" branch — distinct from the

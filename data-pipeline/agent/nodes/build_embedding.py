@@ -40,6 +40,7 @@ from typing import Any, Optional
 
 from agent.config import settings
 from agent.errors import AgentProcessingError
+from agent.utils import llm_cost
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +110,17 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
 
     response = _call_openai(client=client, question=raw_question)
     embedding = _extract_embedding(response)
-    tokens_used = _extract_token_usage(response)
+    # Embedding calls have prompt tokens only; compute_cost gets completion=0
+    # via record_usage → extract_usage (embedding responses carry no
+    # completion_tokens), so the cost is input-priced (T23.5.10, R8).
+    tokens_used, cost_usd = llm_cost.record_usage(
+        settings.OPENAI_EMBEDDING_MODEL, response, site="build_embedding",
+    )
 
     return {
         "query_embedding": embedding,
         "total_tokens_used": int(state.get("total_tokens_used") or 0) + tokens_used,
+        "total_cost_usd": float(state.get("total_cost_usd") or 0.0) + cost_usd,
     }
 
 
@@ -168,16 +175,3 @@ def _extract_embedding(response: Any) -> list[float]:
         )
 
     return embedding
-
-
-def _extract_token_usage(response: Any) -> int:
-    """
-    Pull total_tokens off the response, defaulting to 0 if usage is absent.
-
-    Cost tracking is best-effort here — Sprint 25 will add proper budget
-    enforcement.
-    """
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return 0
-    return int(getattr(usage, "total_tokens", 0) or 0)

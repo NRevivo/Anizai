@@ -81,6 +81,7 @@ from urllib.parse import urlparse
 
 from agent.config import settings
 from agent.errors import AgentProcessingError
+from agent.utils import llm_cost
 from agent.prompts.evidence_rating import (
     BATCH_SIZE,
     RESPONSE_SCHEMA,
@@ -229,25 +230,27 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
             "evidence_trail": [],
             "llm_calls_count": int(state.get("llm_calls_count") or 0),
             "total_tokens_used": int(state.get("total_tokens_used") or 0),
+            "total_cost_usd": float(state.get("total_cost_usd") or 0.0),
         }
 
     client = client or _get_default_client()
 
-    rated_items, calls_made, tokens_used = _rate_in_batches(
+    rated_items, calls_made, tokens_used, cost_usd = _rate_in_batches(
         client=client,
         question=raw_question,
         items=items,
     )
 
     logger.info(
-        "rate_evidence: rated %d items across %d batches (tokens=%d)",
-        len(rated_items), calls_made, tokens_used,
+        "rate_evidence: rated %d items across %d batches (tokens=%d cost_usd=%.6f)",
+        len(rated_items), calls_made, tokens_used, cost_usd,
     )
 
     return {
         "evidence_trail": rated_items,
         "llm_calls_count": int(state.get("llm_calls_count") or 0) + calls_made,
         "total_tokens_used": int(state.get("total_tokens_used") or 0) + tokens_used,
+        "total_cost_usd": float(state.get("total_cost_usd") or 0.0) + cost_usd,
     }
 
 
@@ -497,11 +500,12 @@ def _rate_in_batches(
     client: Any,
     question: str,
     items: list[dict],
-) -> tuple[list[dict], int, int]:
+) -> tuple[list[dict], int, int, float]:
     """
     Rate every item, BATCH_SIZE at a time. Returns the items with
     `relevance_score` + `justification` filled in, plus the count of
-    successful API calls made and the total tokens consumed.
+    successful API calls made, the total tokens consumed, and the total USD
+    cost (summed across batches via llm_cost — T23.5.10).
 
     Items in a failed batch get `relevance_score=0.0` and
     `justification="rating_unavailable"` so synthesis can choose to
@@ -511,13 +515,19 @@ def _rate_in_batches(
     """
     calls_made = 0
     tokens_used = 0
+    cost_usd = 0.0
 
     for batch_start in range(0, len(items), BATCH_SIZE):
         batch = items[batch_start: batch_start + BATCH_SIZE]
         try:
             response = _call_openai(client=client, question=question, batch=batch)
             ratings = _extract_ratings(response)
-            tokens_used += _extract_token_usage(response)
+            batch_tokens, batch_cost = llm_cost.record_usage(
+                settings.OPENAI_MODEL_EVIDENCE_RATING, response,
+                site="rate_evidence",
+            )
+            tokens_used += batch_tokens
+            cost_usd += batch_cost
             calls_made += 1
             _apply_ratings(batch, ratings)
         except AgentProcessingError as exc:
@@ -530,7 +540,7 @@ def _rate_in_batches(
             )
             _mark_unavailable(batch)
 
-    return items, calls_made, tokens_used
+    return items, calls_made, tokens_used, cost_usd
 
 
 def _call_openai(*, client: Any, question: str, batch: list[dict]) -> Any:
@@ -590,14 +600,6 @@ def _extract_ratings(response: Any) -> list[dict]:
             f"rate_evidence: 'ratings' is not a list — got {type(ratings).__name__}"
         )
     return ratings
-
-
-def _extract_token_usage(response: Any) -> int:
-    """Pull total_tokens off the response, defaulting to 0 if absent."""
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return 0
-    return int(getattr(usage, "total_tokens", 0) or 0)
 
 
 def _apply_ratings(batch: list[dict], ratings: list[dict]) -> None:

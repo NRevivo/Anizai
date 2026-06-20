@@ -1,5 +1,6 @@
 """
-agent/nodes/trigger_reactive_ingestion.py — Sprint 23 producer-trigger node.
+agent/nodes/trigger_reactive_ingestion.py — producer-trigger node
+(Sprint 23 build; Sprint 23.5 interface fix + keyword reconcile).
 
 When the agent's vault is insufficient for a forecast, this node emits a
 single Kafka trigger to the `ingestion_triggers` topic targeting the
@@ -8,30 +9,51 @@ does NOT wait for the producer to fetch articles or for Bronze→Silver→Gold
 propagation. Fetched articles land in the vault asynchronously and are
 available to the next session.
 
-This node is **built in isolation in Sprint 23** — it is NOT wired into
-`agent/graph.py` here. The graph wiring happens in Sprint 26 (T26.7) after
-both Sprint 22 (foundation fixes) and Sprint 23 (this work) are complete.
-See agentic_hub_implementation_phase8_revised.md §"Implementation Order
-& Parallelization" for the dependency map.
+Entry point — `run(state)` (Sprint 23.5, T23.5.3, KG-B-16 fix):
+    The node's entry point is `run(state)`, conforming to the LangGraph
+    node-callable convention used by every other node (claim_session.run,
+    query_understand.run, …). It is wired into `agent/graph.py` in Sprint
+    23.5 (T23.5.5) on the insufficient branch of `_route_after_sufficiency`,
+    then continues to `rate_evidence` (trigger-and-forget). The original
+    Sprint 23 name `trigger_reactive_ingestion()` is kept as a thin
+    backward-compatible alias so existing callers/tests don't break.
 
-Key design decisions (recorded in the revised plan's Design Rationale Log):
+Key design decisions:
 
     D1 — One API call per keyword + URL dedup (in the producer, T23.1).
-    D4 — Keyword construction: structured_intent.entities first, then
-         sufficiency_checks[-1].missing_dimensions, raw_question excluded;
-         case-insensitive dedup preserving first-occurrence case; capped
-         at 8 keywords total.
+    R1 (Sprint 23.5, Advisor↔Ron decision record §1) — Keyword construction
+         is **entities-only**: `structured_intent.entities`, case-insensitive
+         dedup preserving first-occurrence case, capped at 8. `raw_question`
+         is excluded (never word-split). `sufficiency_checks[-1].
+         missing_dimensions` is recorded by sufficiency_check as telemetry
+         but is deliberately NOT merged into the keyword set in V1 — see
+         "Why entities-only + recency" below.
     D5 — Counter increments on every emit attempt (success OR Kafka
          failure). Rate limit semantic is "≤ N attempts per session," not
          "≤ N successful emits."
 
+Why entities-only + recency (R1 rationale, the "why" recorded here and in
+plan §2):
+    The gap reactive ingestion actually closes is **recency**, not topic.
+    The trigger always carries the existing 7-day recency window
+    (AGENT_REACTIVE_DEFAULT_WINDOW_DAYS → run_reactive(time_window_days=7)),
+    so it fetches fresh, last-7-days articles about the question's entities
+    that the vault simply does not have yet. Folding `missing_dimensions`
+    (uncovered-entity names) into the keyword set is a no-op anyway — they
+    are a subset of `entities`, which are prepended first, so they dedup
+    away. And Silver's SHA-256 dedup makes any overlap with articles the
+    vault already holds cheap and harmless. So entities-only + the 7-day
+    window is correct and sufficient for V1; topic-shaping keywords from
+    missing_dimensions is a future `vault_query_2` / LLM-refine path, not
+    this sprint.
+
 Rate-limit gate (at node entry):
 
     If state["reactive_triggers_emitted"] >= AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION
-    the node returns {} (no state mutation) without emitting. Sprint 26's
-    graph routing function is the primary gate; this in-node check is
-    belt-and-suspenders so the node behaves safely if a future caller
-    forgets the gate.
+    the node returns the counter unchanged without emitting. The graph
+    routing function `_route_after_sufficiency` is the primary gate; this
+    in-node check is belt-and-suspenders so the node behaves safely if a
+    future caller forgets the gate.
 
 Producer lifecycle (module-level lazy singleton — D7):
 
@@ -167,22 +189,26 @@ def _reset_producer_for_tests() -> None:
 
 
 # ==========================================================
-# Keyword Construction (D4)
+# Keyword Construction (R1 — entities-only)
 # ==========================================================
 
 def _build_keywords(state: dict) -> list[str]:
     """
-    Merge `structured_intent.entities` + `sufficiency_checks[-1].missing_dimensions`
-    into a deduped, capped keyword list.
+    Build the reactive keyword list from `structured_intent.entities` ONLY.
 
-    Algorithm (D4):
+    Algorithm (R1 — Advisor↔Ron decision record §1):
         1. Take entities from `state.structured_intent.entities` in order.
-        2. Append `missing_dimensions` from the latest sufficiency check.
-        3. Dedup case-insensitively (preserving original case of first
+        2. Dedup case-insensitively (preserving original case of first
            occurrence). "Iran" and "iran" collapse to one slot.
-        4. Cap at _KEYWORDS_CAP (8). Excess silently dropped — entities-
-           first means the lower-rank missing_dimensions are the ones cut.
-        5. raw_question is intentionally NOT split into keywords.
+        3. Cap at _KEYWORDS_CAP (8). Excess silently dropped (entities in
+           order, later ones cut).
+        4. raw_question is intentionally NOT split into keywords.
+        5. `sufficiency_checks[-1].missing_dimensions` is intentionally NOT
+           merged — V1 keywords are entities-only, bounded by the trigger's
+           7-day recency window. The gap being closed is recency, not topic
+           (see "Why entities-only + recency" in the module docstring).
+           missing_dimensions remains recorded in the sufficiency_check
+           entry as telemetry / the seam for a future vault_query_2 path.
 
     Args:
         state: ForecastState dict. Required fields read defensively via
@@ -190,20 +216,15 @@ def _build_keywords(state: dict) -> list[str]:
 
     Returns:
         Deduped, ordered, capped list of keyword strings. May be empty if
-        no usable signal exists in state (caller should treat empty as
+        no usable entity signal exists in state (caller treats empty as
         "skip emit").
     """
     intent = state.get("structured_intent") or {}
     entities: list[str] = intent.get("entities") or []
 
-    sufficiency = state.get("sufficiency_checks") or []
-    missing_dimensions: list[str] = (
-        sufficiency[-1].get("missing_dimensions") if sufficiency else []
-    ) or []
-
     seen_lower: set[str] = set()
     keywords: list[str] = []
-    for term in list(entities) + list(missing_dimensions):
+    for term in list(entities):
         if not isinstance(term, str):
             continue
         cleaned = term.strip()
@@ -224,10 +245,15 @@ def _build_keywords(state: dict) -> list[str]:
 # Node Entry Point
 # ==========================================================
 
-def trigger_reactive_ingestion(state: dict) -> dict:
+def run(state: dict) -> dict:
     """
     Emit one ingestion_triggers message to the NewsAPI producer, log the
     attempt, and return the state delta containing the incremented counter.
+
+    This is the LangGraph node entry point (T23.5.3 / KG-B-16 — renamed from
+    `trigger_reactive_ingestion`, which remains as a backward-compat alias
+    at module scope). Wired into the graph on the insufficient branch of
+    `_route_after_sufficiency` (T23.5.5).
 
     Rate-limit gate (D5 semantic — "≤ N attempts per session"):
         Checked at node entry. If `state["reactive_triggers_emitted"]` is
@@ -286,8 +312,7 @@ def trigger_reactive_ingestion(state: dict) -> dict:
         # counter" above).
         logger.warning(
             "[trigger_reactive_ingestion] No keywords could be built from "
-            "structured_intent.entities + sufficiency_checks[-1]."
-            "missing_dimensions; skipping emit. session_id=%s",
+            "structured_intent.entities; skipping emit. session_id=%s",
             state.get("session_id"),
         )
         return {"reactive_triggers_emitted": emitted_so_far}
@@ -401,3 +426,13 @@ def _log_attempt(
             "failed (non-fatal) — session_id=%s status=%s err=%s",
             session_id, status, exc,
         )
+
+
+# ==========================================================
+# Backward-compat alias (T23.5.3 / KG-B-16)
+# ==========================================================
+# The entry point was renamed `trigger_reactive_ingestion` → `run` to match
+# the LangGraph node-callable convention (every other node exposes `.run`).
+# Keep the old name bound to the same function so any existing importer /
+# test referencing `trigger_reactive_ingestion(state)` keeps working.
+trigger_reactive_ingestion = run

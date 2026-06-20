@@ -93,4 +93,9 @@ class ForecastState(TypedDict, total=False):
     # --- Metadata ---
     llm_calls_count: int
     total_tokens_used: int
+    # Sprint 23.5 Track 2 (T23.5.10) — running USD cost of the session,
+    # accumulated by every LLM call site through `agent/utils/llm_cost.py`.
+    # Read defensively via `float(state.get("total_cost_usd") or 0.0)`, the
+    # float sibling of the total_tokens_used idiom (total=False semantics).
+    total_cost_usd: float
     errors: list[str]

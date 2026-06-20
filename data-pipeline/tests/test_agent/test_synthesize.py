@@ -150,8 +150,17 @@ def _evidence_item(
 # ==========================================================
 # AGENT_VERSION pin
 # ==========================================================
-def test_agent_version_bumped_to_sprint_21():
-    assert synthesize.AGENT_VERSION == "0.4.0-sprint21-clarification-tier2"
+def test_agent_version_bumped_to_sprint_23_5():
+    # Sprint 23.5 T23.5.12: AGENT_VERSION relocated to settings (canonical
+    # home) and bumped. synthesize re-exports it under the original name.
+    assert synthesize.AGENT_VERSION == "0.5.0-sprint23.5"
+
+
+def test_agent_version_sourced_from_settings():
+    """The version is the settings value — synthesize no longer owns it."""
+    from agent.config import settings
+
+    assert synthesize.AGENT_VERSION == settings.AGENT_VERSION
 
 
 def test_agentversion_appears_in_session_result():

@@ -45,7 +45,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
 from agent.config import settings
-from agent.nodes.synthesize import AGENT_VERSION
+# Sprint 23.5 T23.5.12: AGENT_VERSION's canonical home is settings (Track 3).
+# Import from there rather than reaching into synthesize.py — health no
+# longer transitively imports the synthesis node (and its OpenAI deps) just
+# to read the version string.
+from agent.config.settings import AGENT_VERSION
 
 logger = logging.getLogger(__name__)
 
