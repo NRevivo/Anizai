@@ -19,6 +19,7 @@ References:
 """
 
 import uuid
+from pathlib import Path
 
 import pytest
 import psycopg2
@@ -51,6 +52,45 @@ def db_available():
             f"PostgreSQL not reachable — skipping persistence tests. "
             f"Start the stack with: docker compose -f infrastructure/docker-compose.yml up -d postgres\n"
             f"Error: {exc}"
+        )
+
+
+# Path to the Sprint 19 smoke-check vault seed, relative to this conftest.
+_VAULT_SEED_SQL = Path(__file__).parent / "fixtures" / "sprint19_vault_seed.sql"
+
+
+@pytest.fixture(scope="session", autouse=False)
+def vault_seed_loaded(db_available):
+    """
+    Ensure the Sprint 19 smoke seed (tests/fixtures/sprint19_vault_seed.sql)
+    is present before running seed-dependent smoke tests.
+
+    Why this exists (Sprint 23.5 Track 4, Disposition D):
+        `db_available` proves only that Postgres is *reachable*. A
+        reachable-but-unseeded DB makes the vault-wrapper smoke tests fail
+        with empty result sets — a red that has nothing to do with the code
+        under test. This fixture makes those tests self-contained and
+        deterministic: it loads the seed idempotently (the fixture uses
+        ON CONFLICT DO NOTHING for the static rows and DELETE-before-INSERT
+        for the two NOW()-relative momentum rows), so the suite is green from
+        a freshly `docker compose up`-ed Postgres with no manual psql step,
+        and the NOW()-relative rows are refreshed into the query windows on
+        every run.
+
+    Mark seed-dependent tests with:
+        @pytest.mark.usefixtures("vault_seed_loaded")
+
+    If the seed cannot be loaded, the requesting tests are *skipped* (not
+    failed) — the suite stays deterministic without live, seeded infra.
+    """
+    try:
+        sql = _VAULT_SEED_SQL.read_text()
+        with get_cursor() as cur:
+            cur.execute(sql)
+    except Exception as exc:
+        pytest.skip(
+            f"Could not load vault seed {_VAULT_SEED_SQL.name} — skipping "
+            f"seed-dependent smoke tests.\nError: {exc}"
         )
 
 

@@ -63,9 +63,20 @@ def mocked_runner():
 
     Sprint 20: write_session_result is no longer in the runner's
     import surface — those writes happen inside the graph (Node 7).
+
+    Sprint 21 added `_build_initial_state`, which calls
+    `get_query_doc(query_doc_id)` for resume-on-clarify detection BEFORE
+    `graph.invoke`. That call is real Firestore (firestore.client() →
+    ADC) and would crash these unit tests on a machine with no Google
+    credentials (Sprint 23.5 Disposition A). Patch it here so the runner
+    tests are fully self-contained — no Firestore, no emulator. The
+    default return value is `None`, which routes `_build_initial_state`
+    down the first-time-query branch (`{"session_id": query_doc_id}`) —
+    exactly the initial state every test below asserts.
     """
     with (
         patch("agent.process_query.graph") as mock_graph,
+        patch("agent.process_query.get_query_doc", return_value=None) as mock_get_query_doc,
         patch("agent.process_query.update_session_status") as mock_session,
         patch("agent.process_query.update_query_status") as mock_query,
     ):
@@ -73,6 +84,11 @@ def mocked_runner():
         manager.attach_mock(mock_graph, "graph")
         manager.attach_mock(mock_session, "update_session_status")
         manager.attach_mock(mock_query, "update_query_status")
+        # get_query_doc is intentionally NOT attached to the manager — it
+        # runs in _build_initial_state, before the runner's tracked
+        # lifecycle calls, so keeping it off manager.method_calls preserves
+        # the exact ordered call sequence the happy-path test pins.
+        _ = mock_get_query_doc
         yield manager, mock_graph, mock_session, mock_query
 
 

@@ -40,7 +40,12 @@ from agent.tools import (
 )
 
 
-pytestmark = [pytest.mark.smoke, pytest.mark.usefixtures("db_available")]
+# `vault_seed_loaded` (which itself depends on `db_available`) makes these
+# smoke tests self-contained: it idempotently loads sprint19_vault_seed.sql so
+# a reachable-but-unseeded Postgres no longer produces empty-result-set reds
+# (Sprint 23.5 Track 4, Disposition D). DB unreachable → skip via db_available;
+# seed unloadable → skip via vault_seed_loaded.
+pytestmark = [pytest.mark.smoke, pytest.mark.usefixtures("vault_seed_loaded")]
 
 
 # ==========================================================

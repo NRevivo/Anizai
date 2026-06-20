@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from functools import partial
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -345,7 +346,21 @@ def _run_subgraph(
     state.update(vault_query_node.run(state, now=NOW))
     state.update(rate_evidence_node.run(state, client=rate_client))
     state.update(synthesize_node.run(state, client=synth_client))
-    write_to_firestore_node.run(state)
+    # write_to_firestore.run() anchors its SentimentTimeSeries bucketing to
+    # real UTC now (production-correct — there is no clock injection in prod).
+    # Every other node in this subgraph is anchored to the fixed reference
+    # instant NOW, and the evidence fixtures carry NOW-relative dates. Inject
+    # NOW into the sentiment shaper here so the test stays deterministic:
+    # without it the hard-coded May-2026 fixture dates age out of the 14-day
+    # bucketing window once the suite is run >14 days later, and
+    # SentimentTimeSeries silently comes back empty. (Sprint 23.5 Disposition D
+    # — the true root cause of this red was time-drift, not missing seed data.)
+    with patch.object(
+        write_to_firestore_node,
+        "_shape_sentiment_time_series",
+        partial(write_to_firestore_node._shape_sentiment_time_series, now=NOW),
+    ):
+        write_to_firestore_node.run(state)
     return state
 
 

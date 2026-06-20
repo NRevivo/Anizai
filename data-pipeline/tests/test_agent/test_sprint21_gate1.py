@@ -759,7 +759,11 @@ def test_write_to_firestore_passes_tier_to_session_status_update(mock_fc):
     }
     write_to_firestore.run(state)
 
-    mock_fc.update_session_status.assert_called_once_with("s1", "done", tier="tier_2")
+    # Sprint 22 T22.7: write_to_firestore now also passes canonical_key on the
+    # success transition (None here — no Polymarket payload in this state).
+    mock_fc.update_session_status.assert_called_once_with(
+        "s1", "done", tier="tier_2", canonical_key=None
+    )
 
 
 @patch("agent.nodes.write_to_firestore.firestore_client")
@@ -775,4 +779,7 @@ def test_write_to_firestore_passes_none_tier_when_tier_absent(mock_fc):
     }
     write_to_firestore.run(state)
 
-    mock_fc.update_session_status.assert_called_once_with("s1", "done", tier=None)
+    # Sprint 22 T22.7: canonical_key is also passed (None — no Polymarket payload).
+    mock_fc.update_session_status.assert_called_once_with(
+        "s1", "done", tier=None, canonical_key=None
+    )

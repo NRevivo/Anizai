@@ -58,7 +58,6 @@ def test_minimum_valid_construction_uses_defaults():
 
 
 def test_full_construction_round_trips_via_model_dump():
-    now = datetime.now(tz=timezone.utc)
     payload = {
         **_minimum_valid_kwargs(),
         "snippet": "First 200 chars.",
@@ -77,9 +76,11 @@ def test_full_construction_round_trips_via_model_dump():
                 "used_in_answer", "impact_on_forecast", "impact_magnitude",
                 "is_key_evidence", "rank", "justification"):
         assert dumped[key] == payload[key]
-    # Datetime fields preserved as datetime in default mode
-    assert dumped["published_at"] == now
-    assert dumped["fetched_at"] == now
+    # Datetime fields preserved as datetime in default mode. Compare against
+    # the payload's own values — not a freshly-sampled datetime.now(), which
+    # differs by microseconds from the one _minimum_valid_kwargs() created.
+    assert dumped["published_at"] == payload["published_at"]
+    assert dumped["fetched_at"] == payload["fetched_at"]
 
 
 # ==========================================================
