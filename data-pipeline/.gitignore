@@ -14,6 +14,8 @@ __pycache__/
 # Logs
 .logs/
 firestore-debug.log
+firebase-debug.log
+
 worker.log
 
 # Telegram Session Files
@@ -25,22 +27,20 @@ worker.log
 .vscode/
 
 # docs files
-/docs/archive
-/docs/agentic_hub_implementation.md
-/docs/agentic_hub_spec.md
-/docs/anizai_handoff_consolidated.md
-/docs/phase10_calibration_system.md
-/docs/deployment_and_sprints.md
-/docs/data_contracts_and_sources.md
-/docs/pipeline_core.md
-/docs/project_overview.md
-/docs/storage_and_agent.md
-/docs/phase95_investigation_log.md
-/docs/phase95_cluster_robustness_implementation.md
+
+/docs/A_pipeline
+/docs/B_hub
+/docs/C_cloud
+/docs/D_calibration
+/docs/old_docs
+
+/project_master.md
 
 /task_plan.md
 /task_plan_archive.md
-/task_plan_implementation.md
 /task_plan_implementation_archive.md
 /pytest.ini
+
+# Test artifacts (generated e2e output)
+/tests/e2e/output/
 
