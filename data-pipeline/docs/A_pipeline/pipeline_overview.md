@@ -123,4 +123,4 @@ failing Silver schema validation routes to `dead-letter-queue` — never silentl
 - `pipeline_storage.md` — the multi-vault PostgreSQL layer: pgvector HNSW tables, TimescaleDB hypertable, schemas, constraints.
 - `pipeline_sprints.md` — sprint status summary, the open Phase 7B.5 work, deferred items, and Known Gaps (KG-A-*).
 - `pipeline_archive.md` — append-only record of every closed pipeline sprint (Sprints 1–17, Phase 7A/7B/7C).
-- `docs/archive/phase7_intelligent_filtering.md` — the granular Phase 7 implementation plan (design decisions M1–C6, gate criteria).
+- `docs/old_docs/phase7_intelligent_filtering.md` — the granular Phase 7 implementation plan (design decisions M1–C6, gate criteria).
