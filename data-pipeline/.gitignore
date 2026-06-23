@@ -28,7 +28,7 @@ worker.log
 
 # docs files
 
-/docs/A_pipeline
+# /docs/A_pipeline
 /docs/B_hub
 /docs/C_cloud
 /docs/D_calibration
