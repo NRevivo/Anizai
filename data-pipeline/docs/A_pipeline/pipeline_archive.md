@@ -11,6 +11,12 @@
 this file: Phase 0–7 are pipeline; Phase 8 is the Agentic Hub (Domain B); Phase 9 is cloud
 (Domain C); Phase 10 is calibration (Domain D).
 
+**Related archives.** New-style closed Domain-A sprint **plan files** (retired from
+`plans/` when a sprint closes) land in `archive_plans/` — empty today, since the one
+open plan (Phase 7B.5) is still in `plans/`. For deep, old flat-format closed-sprint
+detail, the forensic breadcrumb is `../../task_plan_archive.md` (at the data-pipeline
+root) — consult only for rare history of old-style work.
+
 ---
 
 ## Archive Index

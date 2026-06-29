@@ -8,8 +8,8 @@
 - §1 — Purpose & Scope — what the pipeline is and what it is not
 - §2 — Architecture — end-to-end data flow, producers → Kafka → Flink → PostgreSQL
 - §3 — Components — every moving part, its role, its module, and status
-- §4 — Phase & Sprint Status — which phases are closed and what remains open
-- §5 — References — the other Domain A files and where to look for what
+- §4 — Phase & Sprint Status — pointer to the live status in `pipeline_sprints.md`
+- §5 — Navigation Map — where to jump for the plan, the rationale, system detail, gaps, and closed work
 
 ---
 
@@ -97,30 +97,29 @@ failing Silver schema validation routes to `dead-letter-queue` — never silentl
 
 ## §4 — Phase & Sprint Status
 
-| Phase | Sprints | Status | Plan doc |
-|---|---|---|---|
-| Phase 0 — Foundation (config, Kafka utils, validators, DB, init.sql) | — | Closed | `task_plan_archive.md` |
-| Phase 1–4 — 9 source vertical slices | Sprints 1–10 | Closed | `task_plan_archive.md` |
-| Pre-Phase 5 Checkpoint — bugfix/gap closure + Reddit removal | Sprint 11 | Closed | `task_plan_archive.md` |
-| Phase 5 — Dockerfile.flink + cross-cutting enrichment | Sprints 12–13 | Closed | `task_plan_archive.md` |
-| Phase 6A — Airflow ingestion orchestration | Sprint 14 | Closed | `task_plan_archive.md` |
-| Production readiness (OAuth2, orchestration test; scraper later retired) | Sprint 15 | Closed | `task_plan_archive.md` |
-| Phase 6B — Prometheus/Grafana monitoring | Sprint 16 | Closed | `task_plan_archive.md` |
-| Full end-to-end live validation | Sprint 17 | Closed | `task_plan_archive.md` |
-| Phase 7 — Provider migration + intelligent filtering + scraper retirement | 7A / 7B / 7C | Closed 2026-05-09 | `docs/archive/phase7_intelligent_filtering.md` |
-| Phase 7B.5 — Filter-threshold calibration on production data | — | **Open / queued** | `docs/archive/phase7_intelligent_filtering.md` |
-
-> Phase naming note: cloud deployment of this pipeline is **Phase 9** (Domain C) and the
-> Agentic Hub is **Phase 8** (Domain B); neither is pipeline scope. See `pipeline_sprints.md`
-> for the full closed/open breakdown and Known Gaps.
+Full phase/sprint status, the open Phase 7B.5 work, and Known Gaps (KG-A-*) →
+`pipeline_sprints.md`. (Cloud deployment of this pipeline is **Phase 9** / Domain C
+and the Agentic Hub is **Phase 8** / Domain B — neither is pipeline scope.)
 
 ---
 
-## §5 — References
+## §5 — Navigation Map
 
-- `pipeline_sources.md` — the 9 producers, per-source ingestion parameters, and Bronze schemas.
-- `pipeline_processing.md` — Kafka topic hierarchy, the Flink Silver/Gold jobs, the two-stage filter, retention.
-- `pipeline_storage.md` — the multi-vault PostgreSQL layer: pgvector HNSW tables, TimescaleDB hypertable, schemas, constraints.
-- `pipeline_sprints.md` — sprint status summary, the open Phase 7B.5 work, deferred items, and Known Gaps (KG-A-*).
-- `pipeline_archive.md` — append-only record of every closed pipeline sprint (Sprints 1–17, Phase 7A/7B/7C).
-- `docs/old_docs/phase7_intelligent_filtering.md` — the granular Phase 7 implementation plan (design decisions M1–C6, gate criteria).
+Use this to jump straight to the right file/section without reading whole files.
+
+- **Active plan / what to implement now** → `pipeline_sprints.md` §1 Status Summary
+  (the **Plan file** column) → the file under `plans/`. The one open plan is
+  `plans/phase7b5_filter_calibration.md` (Phase 7B.5 filter-threshold calibration).
+- **Rationale / why the current work** → `pipeline_sprints.md` §Phase Context / Rationale.
+- **How the system actually works:**
+  - Per-source ingestion parameters & Bronze schemas (the 9 producers) →
+    `pipeline_sources.md`.
+  - Kafka topic hierarchy, the Flink Silver/Gold jobs, the two-stage keyword sniper +
+    semantic rescue, retention → `pipeline_processing.md`.
+  - The PostgreSQL vault layer (pgvector HNSW tables, TimescaleDB hypertable),
+    schemas, constraints → `pipeline_storage.md`.
+- **Known Gaps (KG-A-*)** → `pipeline_sprints.md` §Known Gaps.
+- **Closed work** → `pipeline_archive.md` (Sprints 1–17, Phase 7A/7B/7C), and
+  `archive_plans/` for new-style closed plan files.
+- **Original Phase-7 design rationale (closed, historical)** →
+  `docs/old_docs/phase7_intelligent_filtering.md` — not required to execute current work.

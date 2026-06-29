@@ -5,8 +5,9 @@
 > TL;DR: Live status of the pipeline — what's closed, the one open sprint (Phase 7B.5 calibration), deferred items, and the Domain A Known Gaps (KG-A-*). Open this to see what pipeline work remains.
 
 ## Navigation
-- §1 — Status Summary — every pipeline phase, status, close date, outcome
-- §2 — Open Work — Phase 7B.5 filter calibration
+- §1 — Status Summary — every pipeline phase, status, close date, outcome, plan file
+- Phase Context / Rationale — why Phase 7B.5 exists (theoretical → empirical)
+- §2 — Open Work — Phase 7B.5 filter calibration (reference → `plans/`)
 - §3 — Deferred Items — parked work and the condition to revisit
 - §4 — Known Gaps — KG-A-* table
 
@@ -14,20 +15,37 @@
 
 ## §1 — Status Summary
 
-| Sprint / Phase | Status | Closed | Key outcome |
-|---|---|---|---|
-| Phase 0 — Foundation | Closed | 2026-03 | Config, Kafka utils, validators, DB, `init.sql`, docker-compose |
-| Sprints 1–10 — 9 source vertical slices | Closed | 2026-03 → 04 | All 9 producers + Silver/Gold branches + persistence, triple-gate tested |
-| Sprint 11 — Pre-Phase 5 checkpoint | Closed | 2026-04-09 | 5 bugfixes; Reddit fully removed; prompts extracted to `prompts/` |
-| Sprint 12 — Dockerfile.flink | Closed | 2026-04-10 | Custom PyFlink 1.19.1 image; EXACTLY_ONCE unblocked |
-| Sprint 13 — Cross-cutting enrichment | Closed | 2026-04-10 | Translation, consensus helpers, mapping_dict, reactive trigger consumer |
-| Sprint 14 — Airflow orchestration | Closed | 2026-04-11 | 7 scheduled DAGs; OpenSky OAuth2 migration |
-| Sprint 15 — Production readiness | Closed | 2026-04-11 | OpenSky OAuth2 live-validated; orchestration test (scraper later retired in Phase 7C) |
-| Sprint 16 — Monitoring | Closed | 2026-04-11 | Prometheus + Grafana; structured JSON logging; trace_id propagation |
-| Sprint 17 — Full E2E live validation | Closed | 2026-04-11 | All 9 sources live Bronze→Gold→vaults; PyFlink side-output rewrite |
-| Phase 7A — Provider migration | Closed | 2026-05-09 | NewsAPI → newsapi.ai (Event Registry); full article body to vault |
-| Phase 7B — Filter + semantic rescue | Closed | 2026-05-09 | Two-stage gate; threshold 0.09→0.15; semantic rescue live |
-| Phase 7C — Scraper retirement | Closed | 2026-05-09 | Scraper deleted; `scrape_attempted` dropped; `newspaper4k` removed |
+| Sprint / Phase | Status | Closed | Key outcome | Plan file |
+|---|---|---|---|---|
+| Phase 0 — Foundation | Closed | 2026-03 | Config, Kafka utils, validators, DB, `init.sql`, docker-compose | — |
+| Sprints 1–10 — 9 source vertical slices | Closed | 2026-03 → 04 | All 9 producers + Silver/Gold branches + persistence, triple-gate tested | — |
+| Sprint 11 — Pre-Phase 5 checkpoint | Closed | 2026-04-09 | 5 bugfixes; Reddit fully removed; prompts extracted to `prompts/` | — |
+| Sprint 12 — Dockerfile.flink | Closed | 2026-04-10 | Custom PyFlink 1.19.1 image; EXACTLY_ONCE unblocked | — |
+| Sprint 13 — Cross-cutting enrichment | Closed | 2026-04-10 | Translation, consensus helpers, mapping_dict, reactive trigger consumer | — |
+| Sprint 14 — Airflow orchestration | Closed | 2026-04-11 | 7 scheduled DAGs; OpenSky OAuth2 migration | — |
+| Sprint 15 — Production readiness | Closed | 2026-04-11 | OpenSky OAuth2 live-validated; orchestration test (scraper later retired in Phase 7C) | — |
+| Sprint 16 — Monitoring | Closed | 2026-04-11 | Prometheus + Grafana; structured JSON logging; trace_id propagation | — |
+| Sprint 17 — Full E2E live validation | Closed | 2026-04-11 | All 9 sources live Bronze→Gold→vaults; PyFlink side-output rewrite | — |
+| Phase 7A — Provider migration | Closed | 2026-05-09 | NewsAPI → newsapi.ai (Event Registry); full article body to vault | — |
+| Phase 7B — Filter + semantic rescue | Closed | 2026-05-09 | Two-stage gate; threshold 0.09→0.15; semantic rescue live | — |
+| Phase 7C — Scraper retirement | Closed | 2026-05-09 | Scraper deleted; `scrape_attempted` dropped; `newspaper4k` removed | — |
+| Phase 7B.5 — Filter-threshold calibration | Open (queued) | — | Empirically validate the 7B thresholds + A1 removals on production vault data | `plans/phase7b5_filter_calibration.md` |
+
+> Closed rows have no `plans/` file — their detail lives in `pipeline_archive.md`
+> (and, for old flat-format work, `../../task_plan_archive.md`).
+
+---
+
+## Phase Context / Rationale
+
+Phase 7B (closed 2026-05-09) set the two-stage filter's thresholds **theoretically**
+— before any production data existed. The 10 A1 keyword removals, the
+`DEFAULT_THRESHOLD = 0.15` sniper floor, and the `GOLD_SEMANTIC_RESCUE_THRESHOLD = 0.35`
+rescue cutoff were chosen from design reasoning against pre-production (snippet-era)
+estimates. Phase 7B.5 exists to **validate those values empirically** against real
+post-7A `knowledge_vault` rows, because the full-body article shape shifts the score
+distributions and calibrating against pre-7A rows would produce stale thresholds. The
+≥200-row entry gate is satisfied (616+ rows available), so the sprint is unblocked.
 
 ---
 
@@ -35,21 +53,15 @@
 
 ### Phase 7B.5 — Filter-Threshold Calibration (queued)
 
-**Goal:** Validate empirically the filter thresholds that Phase 7B set theoretically,
-using real production vault data instead of pre-production estimates.
+**Status:** Open / queued — unblocked.
 
 **Entry gate:** ≥200 post-7A `knowledge_vault` rows in cloud Postgres — **satisfied**
 (616+ rows available).
 
-| Task | Description |
-|---|---|
-| T7B.1 | Run `filter-analysis` skill on ≥200 post-7A full-body rows; confirm/trim the 10 A1 keyword removals; evaluate trimming political `GENERAL_KEYWORDS` now that `news/Politics` is its own category |
-| T7B.2 | Threshold calibration — pull `relevance_score` distribution; confirm or replace `DEFAULT_THRESHOLD=0.15` |
-| T7B.9 | Semantic-rescue calibration — classify rescued vs. dropped on 100 sniper-rejected rows; pick `GOLD_SEMANTIC_RESCUE_THRESHOLD` for ≥80% rescue precision (current default 0.35) |
-| — | Produce the deferred `docs/phase7_filter_analysis.md` deliverable |
-
-**Next action:** kick off with `sprint-kickoff` + `filter-analysis` skills against cloud
-`knowledge_vault`. Plan detail: `docs/archive/phase7_intelligent_filtering.md`.
+The full task table (T7B.1 / T7B.2 / T7B.9 + the `docs/phase7_filter_analysis.md`
+deliverable), the concrete values under validation, the gate model, and the skills
+all live in the self-contained plan: **`plans/phase7b5_filter_calibration.md`**. Kick
+off there with `sprint-kickoff` + `filter-analysis`.
 
 ---
 
