@@ -85,6 +85,26 @@ GOLD_SEMANTIC_RESCUE_THRESHOLD = float(
 )
 
 # ==========================================================
+# 5c. Filter Observability & Cost Instrumentation (Phase 7B.5-I, §2.6)
+# ==========================================================
+# REJECT_CAPTURE_ENABLED gates the filter_rejects INSERT in the Gold drop
+# branch (GlobalNewsGoldFunction). Default false — reject retention is a
+# collection-run tool, ON only for explicit runs (decision D3); cost
+# instrumentation (llm_cost_events), by contrast, is permanent and has no
+# flag. Read at job startup (open()); toggling requires a pod restart only
+# (env-only change — no image rebuild, no Flink cancel/resubmit).
+REJECT_CAPTURE_ENABLED = (
+    os.getenv("REJECT_CAPTURE_ENABLED", "false").strip().lower()
+    in {"1", "true", "yes"}
+)
+
+# RUN_ID stamps filter_rejects.run_id and llm_cost_events.run_id so a
+# collection run's rows are isolatable by tag (decision D4 — logical
+# isolation, no schema change). Plain env value set at deploy time
+# (e.g. "dayrun-2026-07-XX"). Empty string → stored as SQL NULL.
+RUN_ID = os.getenv("RUN_ID", "")
+
+# ==========================================================
 # 6. Source Credentials — Grouped by Producer
 # ==========================================================
 

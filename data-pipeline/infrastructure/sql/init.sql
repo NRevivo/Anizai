@@ -76,6 +76,9 @@ CREATE TABLE IF NOT EXISTS knowledge_vault (
     relevance_score         FLOAT           NOT NULL DEFAULT 0.0   -- Keyword Sniper score 0.0–1.0 (Section 4.1A)
                             CHECK (relevance_score BETWEEN 0.0 AND 1.0),
     sniper_keywords         JSONB           NOT NULL DEFAULT '[]', -- keywords that triggered passage through Sniper
+    rescue_cosine           REAL,                            -- semantic-rescue cosine similarity; NULL = passed sniper
+                                                             -- directly (rescue never ran), non-NULL = entered via
+                                                             -- rescue promotion (Phase 7B.5-I §2.2)
 
     -- Audit
     ingested_at             TIMESTAMPTZ     NOT NULL DEFAULT NOW()
@@ -491,6 +494,112 @@ CREATE TABLE IF NOT EXISTS reactive_triggers_log (
 
 CREATE INDEX IF NOT EXISTS idx_rtl_session_time
     ON reactive_triggers_log (session_id, trigger_time DESC);
+
+
+-- ==========================================================
+-- 8. FILTER REJECTS — Filter-Calibration Reject Retention (Phase 7B.5-I §2.1)
+-- ==========================================================
+-- Retains articles dropped by the two-stage filter (failed sniper AND
+-- failed semantic rescue) so Phase 7B.5 can classify false negatives and
+-- sweep thresholds against real rejected content. Capture is flag-gated
+-- (REJECT_CAPTURE_ENABLED, default false) — this table is only written
+-- during explicit collection runs, so volume is bounded.
+--
+-- Why full_text_raw is FULL, not truncated: manual FN classification
+-- (T7B.1) requires reading the article.
+--
+-- No reject_stage column (decision D5): the code has exactly one clean-
+-- reject path (a sniper failure always triggers a rescue attempt first),
+-- so the field would hold a single constant value. The three filter
+-- scenarios are derivable: vault row with relevance_score >= threshold =
+-- passed sniper; vault row below threshold = rescued (carries
+-- rescue_cosine); filter_rejects row = failed both.
+--
+-- NOT DLQ traffic: a filter reject is a VALID low-signal article, not an
+-- error. Dedup skips and DLQ traffic never land here (capture point is
+-- the drop branch only).
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS filter_rejects (
+    reject_id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id                TEXT,                    -- day-run tag (RUN_ID env); NULL outside tagged runs
+    source_name           TEXT NOT NULL,           -- newsapi / arxiv / telegram
+    original_url          TEXT,
+    title                 TEXT,
+    inverted_pyramid_lead TEXT,
+    full_text_raw         TEXT,                    -- FULL text, not truncated (T7B.1 manual review)
+    relevance_score       REAL NOT NULL,           -- sniper score (< DEFAULT_THRESHOLD by construction)
+    sniper_keywords       JSONB,
+    rescue_cosine         REAL NOT NULL,           -- rescue similarity (< threshold; 0.0 for the empty-text edge)
+    rejected_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_filter_rejects_run
+    ON filter_rejects (run_id, rejected_at);
+
+
+-- ==========================================================
+-- 9. LLM COST EVENTS — Per-Call OpenAI Cost Tracking (Phase 7B.5-I §2.3)
+-- ==========================================================
+-- One row per runtime OpenAI API call (chat + embeddings), written
+-- fail-open by utils/llm_cost.record_usage() via
+-- persistence/llm_cost_events.py. Permanent instrumentation (always on),
+-- unlike the flag-gated filter_rejects capture.
+--
+-- Why an event table, not an accumulator (decision D2): Flink has no
+-- per-request shared state to accumulate into. Per-event rows + SQL
+-- aggregation deliver the same macro numbers with per-article drill-down.
+--
+-- The two ROLLUP views below are DERIVED — never a second write path —
+-- so macro and micro totals cannot disagree. Each view yields three macro
+-- levels in one result: per usage-type within each source, per-source
+-- totals (the intermediate 'ALL' rows), and the grand-total row.
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS llm_cost_events (
+    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id            TEXT,                 -- day-run tag (RUN_ID env); NULL outside tagged runs
+    site              TEXT NOT NULL,        -- §2.5 tag registry: gold_enrich / gold_consensus / translate / gold_embed / rescue_embed
+    source_name       TEXT,                 -- newsapi / arxiv / telegram / polymarket / hackernews / googletrends
+    model             TEXT NOT NULL,        -- gpt-4o / gpt-3.5-turbo / text-embedding-3-small
+    prompt_tokens     INTEGER NOT NULL,
+    completion_tokens INTEGER NOT NULL,
+    total_tokens      INTEGER NOT NULL,
+    cost_usd          NUMERIC(12,6) NOT NULL,
+    trace_id          TEXT,                 -- canonical_event_id of the processed object (per-article unit
+                                            -- economics; joins rescue_embed events to filter_rejects for
+                                            -- wasted-spend analysis)
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_cost_run
+    ON llm_cost_events (run_id, created_at);
+
+CREATE OR REPLACE VIEW llm_cost_daily_summary AS
+SELECT
+    date_trunc('day', created_at)::date AS day,
+    COALESCE(source_name, 'ALL')        AS source_name,
+    COALESCE(site,        'ALL')        AS usage_type,
+    count(*)                            AS calls,
+    sum(prompt_tokens)                  AS prompt_tokens,
+    sum(completion_tokens)              AS completion_tokens,
+    sum(total_tokens)                   AS total_tokens,
+    round(sum(cost_usd)::numeric, 4)    AS cost_usd
+FROM llm_cost_events
+GROUP BY date_trunc('day', created_at), ROLLUP (source_name, site);
+
+CREATE OR REPLACE VIEW llm_cost_run_summary AS
+SELECT
+    run_id,
+    COALESCE(source_name, 'ALL')        AS source_name,
+    COALESCE(site,        'ALL')        AS usage_type,
+    count(*)                            AS calls,
+    sum(prompt_tokens)                  AS prompt_tokens,
+    sum(completion_tokens)              AS completion_tokens,
+    sum(total_tokens)                   AS total_tokens,
+    round(sum(cost_usd)::numeric, 4)    AS cost_usd
+FROM llm_cost_events
+GROUP BY run_id, ROLLUP (source_name, site);
 
 
 -- ==========================================================
