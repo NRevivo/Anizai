@@ -56,6 +56,7 @@ import threading
 
 from agent.config import settings
 from agent.firestore_client import init_app, subscribe_pending_queries
+from agent.followup.listener import start_followup_listener
 from agent.health import start_health_server
 from agent.process_query import process_query
 
@@ -79,6 +80,22 @@ def _signal_handler(signum: int, _frame) -> None:
     """SIGTERM/SIGINT → set _shutdown_event. Runs on the main thread; the
     watch thread checks the event between docs to drain cleanly."""
     logger.info("worker: received signal %s, draining", signum)
+    _shutdown_event.set()
+
+
+def _on_followup_fatal() -> None:
+    """
+    Fatal-error hook for the follow-up listener (Sprint 24 T24.8).
+
+    The follow-up collection-group Watch (agent/followup/listener.py) has the
+    same no-error-channel constraint as the main listener: its only failure
+    signal is an uncaught exception in its callback. On that, it calls this
+    hook, which sets the same fatal flag + shutdown event the main listener
+    uses — so a fatal error on EITHER listener drains both and exits non-zero,
+    letting the container restart policy take over.
+    """
+    global _listener_error
+    _listener_error = True
     _shutdown_event.set()
 
 
@@ -191,7 +208,17 @@ def main() -> None:
         worker_id,
     )
 
-    # Flip /health to 200 ok now that the listener is registered.
+    # Sprint 24 T24.8: the follow-up listener runs concurrently with the main
+    # listener (its own collection-group Watch on `messages`). It shares the
+    # worker's _shutdown_event for symmetric drain and signals fatal errors
+    # through _on_followup_fatal.
+    followup_watch = start_followup_listener(_shutdown_event, _on_followup_fatal)
+    logger.info(
+        "worker: subscribed to follow-up messages listener, worker_id=%s",
+        worker_id,
+    )
+
+    # Flip /health to 200 ok now that both listeners are registered.
     _ready_event.set()
 
     # Poll-based wait: Python on Windows cannot deliver SIGINT to interrupt
@@ -201,10 +228,13 @@ def main() -> None:
     while not _shutdown_event.is_set():
         _shutdown_event.wait(timeout=1.0)
 
-    logger.info("worker: unsubscribing watch, worker_id=%s", worker_id)
+    logger.info("worker: unsubscribing watches, worker_id=%s", worker_id)
+    # Unsubscribe both listeners symmetrically (T24.8). Each .unsubscribe()
+    # joins its watch thread, waiting for any in-flight callback to return.
+    followup_watch.unsubscribe()
     watch.unsubscribe()
 
-    # Shutdown order: watch first (so no new processing kicks off while
+    # Shutdown order: watches first (so no new processing kicks off while
     # the health server is going down), health server second. The daemon
     # thread auto-exits with the process if shutdown() is missed, but
     # explicit shutdown releases the port immediately.

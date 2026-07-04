@@ -65,6 +65,7 @@ from agent.firestore_client import (
     update_query_status,
     update_session_status,
 )
+from agent.followup.listener import sweep_done_session
 from agent.graph import graph
 
 logger = logging.getLogger(__name__)
@@ -283,3 +284,18 @@ def process_query(query_doc_id: str) -> None:
         "process_query: completed graph processing query_doc_id=%s",
         query_doc_id,
     )
+
+    # Sprint 24 T24.15: done-transition safety-net sweep. A follow-up message
+    # written in the narrow window BEFORE the session flipped to 'done' was
+    # delivered to the follow-up listener while its parent-done check failed,
+    # and the listener never re-delivers it. Now that the forecast has
+    # completed, sweep any still-`sent` user messages for this session.
+    #
+    # Runner seam, not a graph node — the main graph never imports the
+    # followup package (24.15 "without coupling"). Uses mark_failed_session_id
+    # (the real sessions/{id} doc, == query_doc_id for first-time queries; the
+    # resume-session id on clarify-resume). sweep_done_session self-guards on
+    # status=='done' (so an awaiting_clarification terminus is skipped) and
+    # never raises — a sweep hiccup must not fail an already-successful
+    # forecast.
+    sweep_done_session(mark_failed_session_id)

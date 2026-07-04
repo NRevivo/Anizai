@@ -224,8 +224,11 @@ def record_usage(model: str, response: object, *, site: str) -> tuple[int, float
                   "query_understand", "synthesize").
 
     Returns:
-        (total_tokens, cost_usd) — caller adds these to
-        `state.total_tokens_used` / `state.total_cost_usd`.
+        (total_tokens, cost_usd) — the caller accumulates whichever of
+        `total_tokens_used` / `total_cost_usd` its own state defines (the
+        main ForecastState carries both; a leaner state such as Sprint 24's
+        FollowupState may track only `total_cost_usd`). The durable per-call
+        record is the log line above, not the caller's in-state accumulator.
     """
     prompt, completion, total = extract_usage(response)
     cost = compute_cost(model, prompt, completion)

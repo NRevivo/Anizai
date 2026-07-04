@@ -652,6 +652,200 @@ def get_session_doc(session_id: str) -> Optional[dict]:
 
 
 # ==========================================================
+# Follow-up context reads — Sprint 24 T24.3 (load_context node)
+# ==========================================================
+# The follow-up subgraph reasons over the PARENT forecast: its SessionResult,
+# the evidence it used, and the recent chat. All three reads live here (not in
+# the followup node) per hub-principles P2 — Firestore access is centralized in
+# this module; nodes never touch firebase_admin directly.
+
+def get_session_result(session_id: str) -> Optional[dict]:
+    """
+    Read the parent forecast's sessionResults/{session_id} document.
+
+    Used by `agent/followup/nodes/load_context.py` (T24.3) to load the
+    parent forecast a follow-up is about. sessionResults is a TOP-LEVEL
+    collection (server contract D6 — see write_to_firestore docstring), not
+    a subcollection under sessions/.
+
+    Returns:
+        The SessionResult dict if it exists, else None. None means the
+        parent forecast has no persisted result yet — the follow-up node
+        degrades to the transparent insufficient-evidence path rather than
+        crashing.
+    """
+    db = get_db()
+    snap = db.collection("sessionResults").document(session_id).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+def get_session_evidence(session_id: str) -> list[dict]:
+    """
+    Read every doc under sessions/{session_id}/evidence (T24.3).
+
+    The caller (load_context) selects the top-N by `rank` in Python —
+    evidence pools are ~30-50 items per session, so a full stream + in-memory
+    sort is cheaper than composing an order_by/limit query (and needs no
+    composite index).
+
+    Returns:
+        List of evidence dicts (each as written by write_evidence_batch,
+        carrying `rank` / `is_key_evidence` / `relevance_score`). Empty list
+        when the session retrieved no evidence — a valid cold-start outcome.
+    """
+    db = get_db()
+    coll = (
+        db.collection("sessions").document(session_id).collection("evidence")
+    )
+    return [doc.to_dict() for doc in coll.stream()]
+
+
+def get_recent_messages(session_id: str, limit: int) -> list[dict]:
+    """
+    Read the most recent `limit` messages under sessions/{session_id}/messages,
+    returned in chronological (oldest-first) order (T24.3).
+
+    Ordered by `createdAt` (the server stamps it on every message via
+    session.repository.ts `addMessage`). We fetch newest-first + limit, then
+    reverse, so "last 10" is bounded server-side rather than streaming the
+    whole thread.
+
+    Each returned dict carries the message doc id under `messageId` (set from
+    the doc id if the stored payload omits it) so callers can reference a
+    specific message without a second read.
+
+    Returns:
+        List of up to `limit` message dicts, oldest-first. Empty list if the
+        thread has no messages.
+    """
+    db = get_db()
+    coll = (
+        db.collection("sessions").document(session_id).collection("messages")
+    )
+    query = coll.order_by(
+        "createdAt", direction=firestore.Query.DESCENDING
+    ).limit(limit)
+    docs = list(query.stream())
+    docs.reverse()  # chronological (oldest-first) for prompt legibility
+
+    out: list[dict] = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data.setdefault("messageId", doc.id)
+        out.append(data)
+    return out
+
+
+# ==========================================================
+# Follow-up answer — atomic claim + write (Sprint 24 T24.5)
+# ==========================================================
+# The follow-up listener (T24.1) and the done-transition sweep (T24.15) are
+# TWO concurrent processors that can each read the same user message as
+# `status=='sent'` and both try to answer it. A plain read-then-write is not
+# race-safe against that. This mirrors the main path's atomic `claim_query`:
+# a transactional conditional flip `sent -> answered` where only the winner
+# writes the assistant reply (plan §3 "Build resolutions" — idempotency is an
+# ATOMIC claim; no intermediate `processing` state). A crash before the
+# transaction commits leaves the message `sent`, so it is re-answered on the
+# next listener (re)attach — correct recovery, not a double-answer.
+
+@firestore.transactional
+def _claim_and_write_answer_txn(
+    transaction: Transaction,
+    user_msg_ref,
+    assistant_msg_ref,
+    assistant_payload: dict,
+) -> bool:
+    """
+    Inside a Firestore transaction (reads before writes, per Firestore rules):
+      1. Re-read the user message.
+      2. If it is missing or no longer `status=='sent'` (the other processor
+         already answered it, or the server never wrote it): return False —
+         this processor lost the race and must NOT write a duplicate reply.
+      3. Otherwise flip the user message `sent -> answered` AND set the
+         assistant reply, atomically, and return True.
+
+    The flip is what removes the user message from the listener's
+    `status=='sent'` filter set, so it is never re-delivered (the follow-up
+    analogue of the main path's `pending -> done`).
+    """
+    snapshot = user_msg_ref.get(transaction=transaction)
+    if not snapshot.exists:
+        return False
+    data = snapshot.to_dict() or {}
+    if data.get("status") != "sent":
+        return False
+    transaction.update(user_msg_ref, {"status": "answered"})
+    transaction.set(assistant_msg_ref, assistant_payload)
+    return True
+
+
+def claim_and_write_followup_answer(
+    session_id: str,
+    user_message_id: str,
+    assistant_message: dict,
+) -> bool:
+    """
+    Atomically answer one follow-up message exactly once (T24.5 / T24.14).
+
+    If sessions/{session_id}/messages/{user_message_id} is still
+    `status=='sent'`, flip it to `'answered'` and write the assistant reply
+    under a fresh auto-id doc in the same `messages` subcollection — both in
+    a single transaction. If the message was already answered (the
+    listener/sweep race), write nothing and return False.
+
+    The assistant doc id and `createdAt`/`messageId` are stamped here (the
+    firestore_client owns doc-id + server-timestamp stamping, mirroring
+    write_session_result); the caller passes only the semantic payload
+    (`role`, `content`, `replyToMessageId`, `agentVersion`, ...). Assistant
+    messages carry NO frontend-facing status (plan §3 "Build resolutions").
+
+    Args:
+        session_id:       parent session id (== the messages' parent doc).
+        user_message_id:  the specific user message being answered — the
+                          claim target and the `replyToMessageId` value.
+        assistant_message: the assistant reply payload (without id/createdAt).
+
+    Returns:
+        True if this processor won the claim and wrote the reply; False if
+        another processor had already answered the message (no write done).
+    """
+    db = get_db()
+    messages_coll = (
+        db.collection("sessions").document(session_id).collection("messages")
+    )
+    user_msg_ref = messages_coll.document(user_message_id)
+    assistant_msg_ref = messages_coll.document()  # fresh auto-id
+
+    payload = {
+        **assistant_message,
+        "messageId": assistant_msg_ref.id,
+        "sessionId": session_id,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+    }
+
+    transaction = db.transaction()
+    won = _claim_and_write_answer_txn(
+        transaction, user_msg_ref, assistant_msg_ref, payload
+    )
+    if won:
+        logger.info(
+            "claim_and_write_followup_answer: answered message_id=%s "
+            "session_id=%s assistant_id=%s",
+            user_message_id, session_id, assistant_msg_ref.id,
+        )
+    else:
+        logger.info(
+            "claim_and_write_followup_answer: race lost or not 'sent' — "
+            "message_id=%s session_id=%s (already answered elsewhere)",
+            user_message_id, session_id,
+        )
+    return won
+
+
+# ==========================================================
 # Snapshot Listener — forecastQueries where status == 'pending'
 # ==========================================================
 
@@ -690,3 +884,96 @@ def subscribe_pending_queries(callback) -> object:
         filter=FieldFilter("status", "==", "pending")
     )
     return query.on_snapshot(callback)
+
+
+# ==========================================================
+# Follow-up message listener + sweep — Sprint 24 (T24.1 / T24.15)
+# ==========================================================
+
+def subscribe_followup_messages(callback) -> object:
+    """
+    Register a COLLECTION-GROUP snapshot listener on every `messages`
+    subcollection where `role == 'user'` AND `status == 'sent'` (T24.1).
+
+    Collection-group scope: this matches user messages across ALL sessions in
+    one Watch — the follow-up analogue of the main path's forecastQueries
+    listener. The parent `session.status == 'done'` condition is NOT
+    expressible in the query (the parent doc is not in the messages
+    collection group); the caller checks it per-message inside the callback
+    via one parent-doc read (get_session_doc), and skips messages whose parent
+    is not yet `done` (the T24.15 sweep catches those later).
+
+    DEPLOYMENT NOTE (plan §3): the collection-group index / field-scope
+    exemption this query needs is implicit on the local emulator but MUST be
+    explicitly deployed to production Firestore before the initial test, or
+    the query silently returns nothing there. The Firestore config lives in
+    the partner/BFF file `server/firebase/firestore.indexes.json` (NOT under
+    data-pipeline — this side does not edit it), which already declares a
+    COLLECTION_GROUP index for `evidence` as the exact template. The needed
+    entry:
+        { "collectionGroup": "messages", "queryScope": "COLLECTION_GROUP",
+          "fields": [ {"fieldPath": "role",   "order": "ASCENDING"},
+                      {"fieldPath": "status", "order": "ASCENDING"} ] }
+
+    Idempotency: comes from the `status == 'sent'` filter itself plus the
+    atomic claim in `claim_and_write_followup_answer` — answering flips the
+    message to `'answered'`, removing it from this filter set (it never
+    re-delivers as ADDED). Mirrors the main path's `pending -> claimed`.
+
+    Reconnects are not free: on any SDK reconnect the Watch redelivers EVERY
+    currently-matching `sent` message as ADDED, each triggering a parent-doc
+    read in the callback's done-guard. Idempotent (the atomic claim protects
+    against double-answers), but the read cost scales with the outstanding
+    `sent` backlog — worth noting beyond the low-volume initial test.
+
+    Args:
+        callback: invoked with (col_snapshot, changes, read_time). As with
+                  subscribe_pending_queries, the SDK has no separate error
+                  channel — the caller must wrap its body in try/except and
+                  treat an uncaught exception as fatal.
+
+    Returns:
+        Watch handle. Caller MUST call .unsubscribe() during shutdown to join
+        the watch thread and close the gRPC stream cleanly.
+    """
+    db = get_db()
+    query = (
+        db.collection_group("messages")
+        .where(filter=FieldFilter("role", "==", "user"))
+        .where(filter=FieldFilter("status", "==", "sent"))
+    )
+    return query.on_snapshot(callback)
+
+
+def get_unanswered_user_messages(session_id: str) -> list[dict]:
+    """
+    Read the still-unanswered user messages for one session — the docs under
+    sessions/{session_id}/messages where `role == 'user'` AND
+    `status == 'sent'` (T24.15 done-transition sweep).
+
+    This is a scoped subcollection query (single session), not the
+    collection-group query above — so it needs no collection-group index.
+
+    Each returned dict carries the message doc id under `messageId` so the
+    sweep can build the follow-up initial state (trigger_message_id) without
+    a second read.
+
+    Returns:
+        List of unanswered user-message dicts (empty if none). The sweep runs
+        each through the follow-up subgraph; the atomic claim makes a race
+        with the live listener safe (only one processor answers each).
+    """
+    db = get_db()
+    coll = (
+        db.collection("sessions").document(session_id).collection("messages")
+    )
+    query = coll.where(
+        filter=FieldFilter("role", "==", "user")
+    ).where(filter=FieldFilter("status", "==", "sent"))
+
+    out: list[dict] = []
+    for doc in query.stream():
+        data = doc.to_dict() or {}
+        data.setdefault("messageId", doc.id)
+        out.append(data)
+    return out

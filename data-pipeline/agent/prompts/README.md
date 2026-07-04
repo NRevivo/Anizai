@@ -13,6 +13,7 @@ which is distinct from the data-pipeline `prompt-engineering` skill
 |---|---|---|---|
 | `query_understanding.py` | `agent/nodes/query_understand.py` (T19.5) | inline JSON schema, top-3 candidates with closed enums (intent, domain) | 2026-04-30 |
 | `evidence_rating.py` | `agent/nodes/rate_evidence.py` (T20.1) | `EvidenceRatingResponse` strict JSON schema — list of `{evidence_id, relevance_score (0-1), justification}` per batch | 2026-05-04 |
+| `followup.py` | `agent/followup/nodes/answer_from_context.py` (T24.4) | `FollowupOutput` strict JSON schema — `{classification (answerable\|insufficient_evidence\|out_of_scope), classification_reason, answer}`; node substitutes fixed `INSUFFICIENT_EVIDENCE_MESSAGE` / `OUT_OF_SCOPE_MESSAGE` for the two non-answerable classes (deterministic copy, G5) | 2026-07-04 |
 
 ## Conventions
 
