@@ -234,6 +234,81 @@ def cleanup_mapping_dict(test_run_id):
         print(f"\n[conftest] Warning: mapping_dict cleanup failed: {exc}")
 
 
+# ==========================================================
+# Phase 7B.5-I — LLM cost-event hermeticity (autouse)
+# ==========================================================
+
+@pytest.fixture(autouse=True)
+def llm_cost_insert_calls(request, monkeypatch):
+    """
+    Stub persistence.llm_cost_events.insert_event for every test by default
+    (Phase 7B.5-I T5).
+
+    Why autouse: cost instrumentation is PERMANENT (always on, no flag —
+    plan §1 D3), so every Gate 2 test that exercises an instrumented path
+    (gold enrichment, embeddings, translation, semantic rescue) would
+    otherwise attempt a real INSERT into llm_cost_events whenever the local
+    Postgres container happens to be up — polluting the dev cost table with
+    mock-token rows. record_usage() lazy-imports insert_event from the
+    module at call time, so patching the module attribute intercepts it.
+
+    The stub records every call's kwargs and yields the list, so unit tests
+    can assert the exact row shape record_usage would have written without
+    any DB. Tests that need the REAL insert (Gate 3 round-trips / view
+    correctness) opt out with @pytest.mark.llm_cost_db.
+    """
+    if request.node.get_closest_marker("llm_cost_db"):
+        yield None
+        return
+
+    import persistence.llm_cost_events as _lce
+
+    calls: list[dict] = []
+
+    def _stub(**kwargs):
+        calls.append(kwargs)
+        return "00000000-0000-0000-0000-000000000000"
+
+    monkeypatch.setattr(_lce, "insert_event", _stub)
+    yield calls
+
+
+@pytest.fixture(autouse=False)
+def cleanup_filter_rejects(test_run_id):
+    """
+    Delete test rows from filter_rejects after each test function
+    (Phase 7B.5-I). Matches by run_id prefix — Gate 3 tests stamp their
+    inserts with run_id = f"test_{test_run_id}...".
+    """
+    yield
+    try:
+        with get_cursor() as cur:
+            cur.execute(
+                "DELETE FROM filter_rejects WHERE run_id LIKE %s;",
+                (f"test_{test_run_id}%",),
+            )
+    except Exception as exc:
+        print(f"\n[conftest] Warning: filter_rejects cleanup failed: {exc}")
+
+
+@pytest.fixture(autouse=False)
+def cleanup_llm_cost_events(test_run_id):
+    """
+    Delete test rows from llm_cost_events after each test function
+    (Phase 7B.5-I). Matches by run_id prefix, same convention as
+    cleanup_filter_rejects.
+    """
+    yield
+    try:
+        with get_cursor() as cur:
+            cur.execute(
+                "DELETE FROM llm_cost_events WHERE run_id LIKE %s;",
+                (f"test_{test_run_id}%",),
+            )
+    except Exception as exc:
+        print(f"\n[conftest] Warning: llm_cost_events cleanup failed: {exc}")
+
+
 @pytest.fixture(autouse=False)
 def cleanup_reactive_triggers_log(test_run_id):
     """

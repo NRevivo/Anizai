@@ -297,17 +297,23 @@ class TestRescueLogging:
 
         return doc
 
-    def test_compute_rescue_is_pure_no_side_effects(self, caplog):
+    def test_compute_rescue_emits_no_decision_logs(self, caplog):
         """
-        compute_semantic_rescue is a pure function — it must not emit logs.
-        The INFO "dropped"/"promoted" logs are process_element's responsibility (B5).
-        Both drop and rescue paths are exercised to confirm no logging side effects.
+        compute_semantic_rescue must not emit DECISION logs — the INFO
+        "dropped"/"promoted" lines are process_element's responsibility (B5).
+
+        Contract updated by Phase 7B.5-I T4: the function now legitimately
+        emits ONE non-decision record per call — the `llm_usage` cost line
+        from utils.llm_cost.record_usage() (site=rescue_embed, recorded on
+        both branches per §0 wasted-spend analysis). The purity assertion is
+        therefore scoped to the processing.gold_job logger: no promote/drop
+        records may originate here.
         """
         ref_vec     = _unit_vec()
         drop_client = _make_openai_client_with_similarity(_THRESHOLD - 0.10)
         esc_client  = _make_openai_client_with_similarity(_THRESHOLD + 0.10)
 
-        with caplog.at_level(logging.DEBUG, logger="processing.gold_job"):
+        with caplog.at_level(logging.DEBUG):
             rescued_drop, _ = compute_semantic_rescue(
                 _make_silver_doc(), drop_client, ref_vec, _THRESHOLD
             )
@@ -317,8 +323,23 @@ class TestRescueLogging:
 
         assert rescued_drop is False, "Below-threshold doc must not be rescued"
         assert rescued_esc  is True,  "Above-threshold doc must be rescued"
-        assert not caplog.records, (
-            "compute_semantic_rescue must not emit any log records (pure function)"
+
+        gold_job_records = [
+            r for r in caplog.records if r.name == "processing.gold_job"
+        ]
+        assert not gold_job_records, (
+            "compute_semantic_rescue must not emit decision logs — "
+            "promote/drop logging belongs to process_element (B5)"
+        )
+        # 7B.5-I: the rescue embed is a paid call on BOTH branches — each
+        # invocation must emit exactly one llm_usage line (site=rescue_embed).
+        usage_records = [
+            r for r in caplog.records
+            if r.name == "utils.llm_cost" and "site=rescue_embed" in r.getMessage()
+        ]
+        assert len(usage_records) == 2, (
+            f"Expected one rescue_embed llm_usage line per call (2 calls), "
+            f"got {len(usage_records)}"
         )
 
     def test_rescue_logging_contract_documented(self):
