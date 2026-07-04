@@ -416,7 +416,22 @@ class NewsAPIProducer:
         )
         response.raise_for_status()
 
-        data           = response.json()
+        data = response.json()
+
+        # Error-envelope guard (7B.5-I diagnostic stint, 2026-07-02): newsapi.ai
+        # can return HTTP 200 with {"error": "..."} instead of an articles block
+        # (rejected query, plan restriction, origin block). Before this guard,
+        # such a response parsed as articles=[] — indistinguishable from a quiet
+        # no-news window. The smoke-day cloud pulses returned zero articles
+        # invisibly for exactly this reason. Raising ValueError routes into the
+        # callers' existing (KeyError, ValueError) handlers, which log at ERROR
+        # and skip — a provider rejection is now loud, never a silent zero.
+        if isinstance(data, dict) and data.get("error"):
+            raise ValueError(
+                f"newsapi.ai returned an error envelope (HTTP {response.status_code}): "
+                f"{data['error']!r}"
+            )
+
         articles_block = data.get("articles") or {}
         articles       = articles_block.get("results") or []
         total_results  = articles_block.get("totalResults") or 0
@@ -616,7 +631,19 @@ class NewsAPIProducer:
 
         for category in PULSE_CATEGORIES:
             try:
-                articles, _, duration_ms = self._fetch_articles(category)
+                articles, total_results, duration_ms = self._fetch_articles(category)
+                # Zero-article visibility (7B.5-I diagnostic stint): a pulse
+                # category returning nothing is anomalous — the 5 categories
+                # cover continuously-publishing wires. WARNING (not INFO) so a
+                # provider-side failure that still returns a well-formed empty
+                # envelope is operator-visible (T8 first-hour NO-GO check).
+                if not articles:
+                    logger.warning(
+                        "[newsapi] category=%s returned 0 articles "
+                        "(totalResults=%d) — anomalous for a pulse category; "
+                        "check the provider dashboard if this persists",
+                        category, total_results,
+                    )
                 emitted = self._process_and_emit(articles, category, "pulse", duration_ms)
                 logger.info(
                     "[newsapi] category=%-20s fetched=%d  emitted=%d  "
@@ -700,6 +727,16 @@ class NewsAPIProducer:
                 logger.error(
                     "[newsapi] Backfill network error (tier=%s from=%s page=%d): %s — "
                     "stopping pagination for this range",
+                    tier_name, from_str, page, exc,
+                )
+                break
+            except (KeyError, ValueError) as exc:
+                # Error-envelope / parse failure (7B.5-I stint guard) — same
+                # stop-pagination semantics as the HTTP/network branches so a
+                # provider rejection cannot crash an operator backfill run.
+                logger.error(
+                    "[newsapi] Backfill parse/provider error (tier=%s from=%s "
+                    "page=%d): %s — stopping pagination for this range",
                     tier_name, from_str, page, exc,
                 )
                 break
