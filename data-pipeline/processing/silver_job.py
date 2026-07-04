@@ -1050,7 +1050,12 @@ def map_telegram_message_to_silver(raw: dict, envelope: dict, client: Any = None
     # Translation (Section 4.1D) — translate non-English channels to English before
     # sniper scoring and persistence so the Gold Layer receives a unified English corpus.
     # Pass-through when client=None (Gate 2 tests) or when channel is English-only.
-    translated_text = translate_to_english(message_text, channel_username, client)
+    # trace_id (7B.5-I T4): envelope event_id = the canonical_event_id this Silver
+    # doc will carry — stamps the translation's llm_cost_events row.
+    translated_text = translate_to_english(
+        message_text, channel_username, client,
+        trace_id=envelope.get("event_id", ""),
+    )
 
     # Keyword Sniper (Section 4.1A) — run on translated_text so English keywords match
     # content from Hebrew channels (abualiexpress, yediotnews25) correctly.
@@ -1491,7 +1496,9 @@ def _hackernews_dlq_record(
 # Google Trends Silver Branch — Transform Functions
 # ==========================================================
 
-def _translate_keyword(term: str, geo: str = "", client: Any = None) -> str:
+def _translate_keyword(
+    term: str, geo: str = "", client: Any = None, trace_id: str = "",
+) -> str:
     """
     Translate a non-English Google Trends keyword to English (Section 4.1D, B.5).
 
@@ -1504,14 +1511,16 @@ def _translate_keyword(term: str, geo: str = "", client: Any = None) -> str:
     without a client get the original term unchanged (same as pre-Phase 5 behaviour).
 
     Args:
-        term:   Keyword string as returned by Pytrends (may be in any language).
-        geo:    Google Trends geo code (e.g. "US", "IL", "DE").
-        client: openai.OpenAI instance, or None for pass-through.
+        term:     Keyword string as returned by Pytrends (may be in any language).
+        geo:      Google Trends geo code (e.g. "US", "IL", "DE").
+        client:   openai.OpenAI instance, or None for pass-through.
+        trace_id: envelope event_id, stamped on the translation's
+                  llm_cost_events row (7B.5-I T4).
 
     Returns:
         English translation of the term, or the original term unchanged.
     """
-    return translate_keyword_to_english(term, geo, client)
+    return translate_keyword_to_english(term, geo, client, trace_id=trace_id)
 
 
 def map_googletrends_to_silver(raw: dict, envelope: dict, client: Any = None) -> dict:
@@ -1574,7 +1583,9 @@ def map_googletrends_to_silver(raw: dict, envelope: dict, client: Any = None) ->
     # State key in Gold Job uses the English term, so DE/IL keywords
     # (Hebrew/German) are normalised before becoming momentum keyed-state keys.
     # English geos (US, GB, SG) pass through unchanged — zero API cost.
-    keyword_en = _translate_keyword(keyword, geo, client)
+    keyword_en = _translate_keyword(
+        keyword, geo, client, trace_id=envelope.get("event_id", ""),
+    )
 
     # Derive timestamp_utc:
     #   reactive / backfill — use observation_date (the actual data point date),

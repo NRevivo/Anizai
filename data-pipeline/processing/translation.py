@@ -54,9 +54,10 @@ References:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from prompts.translation import TRANSLATION_SYSTEM_PROMPT
+from utils.llm_cost import record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,14 @@ _MAX_TOKENS = 512
 # Private Helper
 # ==========================================================
 
-def _call_translation_api(text: str, source_lang: str, client: Any) -> str:
+def _call_translation_api(
+    text: str,
+    source_lang: str,
+    client: Any,
+    *,
+    source_name: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> str:
     """
     Call GPT-3.5-turbo to translate text to English (Section 4.1D).
 
@@ -111,11 +119,19 @@ def _call_translation_api(text: str, source_lang: str, client: Any) -> str:
     Translation is enrichment, not validation; a failure must not discard a valid
     OSINT signal (Section 4.3).
 
+    Cost instrumentation (Phase 7B.5-I T4): record_usage() runs immediately
+    after the response returns, BEFORE the content is read — a call that was
+    paid for is counted even if the response shape is unexpected (the except
+    branch then passes the original text through). source_name/trace_id are
+    keyword-only with None defaults so existing callers stay valid (P2).
+
     Args:
         text:        The text to translate. Must be non-empty.
         source_lang: ISO 639-1 language code of the source text (e.g. "he", "de").
                      Used only for logging — the model infers the language from the text.
         client:      openai.OpenAI instance, or None for a no-op pass-through.
+        source_name: Producing source for the cost row ("telegram" / "googletrends").
+        trace_id:    canonical_event_id of the processed object, when the caller has one.
 
     Returns:
         Translated English string, or the original text on failure or client=None.
@@ -132,6 +148,12 @@ def _call_translation_api(text: str, source_lang: str, client: Any) -> str:
             ],
             temperature=0.0,   # deterministic — translation has one correct answer
             max_tokens=_MAX_TOKENS,
+        )
+        record_usage(
+            TRANSLATION_MODEL, response,
+            site="translate",
+            source_name=source_name,
+            trace_id=trace_id,
         )
         return response.choices[0].message.content.strip()
 
@@ -166,7 +188,13 @@ def needs_translation(channel_username: str) -> bool:
     return channel_username.lower() in CHANNEL_LANGUAGE
 
 
-def translate_to_english(text: str, channel_username: str, client: Any) -> str:
+def translate_to_english(
+    text: str,
+    channel_username: str,
+    client: Any,
+    *,
+    trace_id: Optional[str] = None,
+) -> str:
     """
     Translate a non-English Telegram message to English (Section 4.1D).
 
@@ -181,6 +209,8 @@ def translate_to_english(text: str, channel_username: str, client: Any) -> str:
         text:             Raw message text from the Telegram Bronze payload.
         channel_username: Channel username used to look up the source language.
         client:           openai.OpenAI instance, or None for a no-op pass-through.
+        trace_id:         canonical_event_id for the cost row (7B.5-I T4);
+                          keyword-only, None default keeps existing callers valid.
 
     Returns:
         English-language string. Equals the original text if the channel is
@@ -190,7 +220,10 @@ def translate_to_english(text: str, channel_username: str, client: Any) -> str:
         return text
 
     source_lang = CHANNEL_LANGUAGE[channel_username.lower()]
-    translated = _call_translation_api(text, source_lang, client)
+    translated = _call_translation_api(
+        text, source_lang, client,
+        source_name="telegram", trace_id=trace_id,
+    )
 
     if translated != text:
         logger.debug(
@@ -201,7 +234,13 @@ def translate_to_english(text: str, channel_username: str, client: Any) -> str:
     return translated
 
 
-def translate_keyword_to_english(term: str, geo: str, client: Any) -> str:
+def translate_keyword_to_english(
+    term: str,
+    geo: str,
+    client: Any,
+    *,
+    trace_id: Optional[str] = None,
+) -> str:
     """
     Translate a non-English Google Trends keyword to English (Section 4.1D, B.5).
 
@@ -218,9 +257,11 @@ def translate_keyword_to_english(term: str, geo: str, client: Any) -> str:
         5. OpenAI call fails        → log warning, return original term (pass-through)
 
     Args:
-        term:   Keyword string as returned by Pytrends (may be in any language).
-        geo:    Google Trends geo code (e.g. "US", "IL", "DE"). Case-insensitive.
-        client: openai.OpenAI instance, or None for a no-op pass-through.
+        term:     Keyword string as returned by Pytrends (may be in any language).
+        geo:      Google Trends geo code (e.g. "US", "IL", "DE"). Case-insensitive.
+        client:   openai.OpenAI instance, or None for a no-op pass-through.
+        trace_id: canonical_event_id for the cost row (7B.5-I T4);
+                  keyword-only, None default keeps existing callers valid.
 
     Returns:
         English-language keyword string, or the original term unchanged.
@@ -229,4 +270,7 @@ def translate_keyword_to_english(term: str, geo: str, client: Any) -> str:
         return term
 
     source_lang = GEO_LANGUAGE[geo.upper()]
-    return _call_translation_api(term, source_lang, client)
+    return _call_translation_api(
+        term, source_lang, client,
+        source_name="googletrends", trace_id=trace_id,
+    )

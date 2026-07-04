@@ -108,6 +108,13 @@ def archive(silver_doc: dict) -> Optional[str]:
     publish_date_raw = silver_doc.get("publish_date", "")
     publish_date: Optional[str] = publish_date_raw if publish_date_raw else None
 
+    # rescue_cosine (Phase 7B.5-I §2.2): present on the doc ONLY when the Gold
+    # semantic-rescue promote path threaded it in (apply_rescue_outcome).
+    # Sniper-passed docs never carry the key → NULL, which is the marker that
+    # rescue never ran for this row.
+    rescue_cosine_raw = silver_doc.get("rescue_cosine")
+    rescue_cosine = float(rescue_cosine_raw) if rescue_cosine_raw is not None else None
+
     sql = """
         INSERT INTO knowledge_vault (
             document_hash,
@@ -121,9 +128,10 @@ def archive(silver_doc: dict) -> Optional[str]:
             inverted_pyramid_lead,
             detected_entities,
             relevance_score,
-            sniper_keywords
+            sniper_keywords,
+            rescue_cosine
         ) VALUES (
-            %s, %s, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         RETURNING doc_id::text;
     """
@@ -140,6 +148,7 @@ def archive(silver_doc: dict) -> Optional[str]:
         Json(silver_doc.get("detected_entities", [])),  # JSONB — empty at Silver layer
         float(silver_doc.get("relevance_score", 0.0)),
         Json(silver_doc.get("sniper_keywords", [])),    # JSONB list of matched keywords
+        rescue_cosine,                                  # REAL or NULL (§2.2)
     )
 
     with get_cursor() as cur:
@@ -219,6 +228,7 @@ def fetch_by_doc_id(doc_id: str) -> Optional[dict]:
             detected_entities,
             relevance_score,
             sniper_keywords,
+            rescue_cosine,
             ingested_at
         FROM knowledge_vault
         WHERE doc_id = %s::uuid;

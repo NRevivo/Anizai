@@ -82,9 +82,27 @@ from utils.validators import (
 )
 
 from utils.logging_config import setup_logging, set_trace_id
+from utils.llm_cost import record_usage
 
 logger = logging.getLogger(__name__)
 setup_logging()
+
+
+# ==========================================================
+# LLM cost instrumentation helper (Phase 7B.5-I, T4)
+# ==========================================================
+
+def _cost_trace_id(record: dict) -> str:
+    """
+    Resolve the cost-event trace_id for a Silver record (plan §2.5).
+
+    canonical_event_id is the cross-layer key; social records set it from
+    bronze_ref at Gold-build time, so before that point bronze_ref IS the
+    canonical id — same fallback chain the logging layer uses (set_trace_id
+    call sites). Joins llm_cost_events rows to vault rows / filter_rejects
+    for per-article unit economics.
+    """
+    return record.get("canonical_event_id") or record.get("bronze_ref", "")
 
 
 # ==========================================================
@@ -268,10 +286,24 @@ def call_openai_consensus(silver_social: dict, client: Any) -> dict:
         temperature=0.3,
         max_tokens=1024,
     )
+    # Cost capture BEFORE parsing (7B.5-I T4): a paid call whose JSON fails
+    # to parse (→ DLQ) must still land in llm_cost_events.
+    record_usage(
+        OPENAI_MODEL_NAME, response,
+        site="gold_consensus",
+        source_name=silver_social.get("source_name", "polymarket"),
+        trace_id=_cost_trace_id(silver_social),
+    )
     return parse_openai_consensus_response(response.choices[0].message.content)
 
 
-def call_openai_embedding(text: str, client: Any) -> list[float]:
+def call_openai_embedding(
+    text: str,
+    client: Any,
+    *,
+    source_name: Optional[str] = None,
+    trace_id: Optional[str] = None,
+) -> list[float]:
     """
     Call text-embedding-3-small to produce a 1536-dim vector (Section 5.2).
 
@@ -279,9 +311,19 @@ def call_openai_embedding(text: str, client: Any) -> list[float]:
     embedding the summary rather than raw comments means the HNSW index
     encodes the synthesised consensus position, not conversational noise.
 
+    Cost instrumentation (7B.5-I T4): recorded HERE, once, because this
+    helper is shared by all 5 embedding paths (polymarket / hackernews /
+    newsapi / arxiv / telegram) — instrumenting the callers would be 5
+    copies of the same line (Section 3.2 DRY). source_name/trace_id are
+    keyword-only with None defaults so pre-existing callers and Gate 2
+    tests stay valid (approved P2); callers pass them so the cost row
+    knows "who is expensive" (§2.5).
+
     Args:
-        text:   The text to embed (typically the consensus executive_summary).
-        client: openai.OpenAI instance (injected for testability).
+        text:        The text to embed (typically the consensus executive_summary).
+        client:      openai.OpenAI instance (injected for testability).
+        source_name: Producing source, for the llm_cost_events row.
+        trace_id:    canonical_event_id of the processed object.
 
     Returns:
         list[float] of length EMBEDDING_DIM (1536).
@@ -289,6 +331,12 @@ def call_openai_embedding(text: str, client: Any) -> list[float]:
     response = client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=text,
+    )
+    record_usage(
+        EMBEDDING_MODEL, response,
+        site="gold_embed",
+        source_name=source_name,
+        trace_id=trace_id,
     )
     return response.data[0].embedding
 
@@ -565,6 +613,8 @@ def process_social_pulse_message(
         embedding = call_openai_embedding(
             ai_meta.get("executive_summary") or silver_social.get("question", ""),
             openai_client,
+            source_name=silver_social.get("source_name", "polymarket"),
+            trace_id=_cost_trace_id(silver_social),
         )
     except Exception as exc:
         logger.error("[gold/polymarket] OpenAI embedding call failed: %s", exc)
@@ -841,6 +891,15 @@ def call_openai_cognitive_metadata(silver_doc: dict, client: Any) -> dict:
         temperature=0.2,
         max_tokens=1024,
     )
+    # Cost capture BEFORE parsing (7B.5-I T4): a paid call whose JSON fails
+    # to parse (→ DLQ) must still land in llm_cost_events. Shared by the
+    # newsapi / arxiv / telegram paths — source_name comes off the doc.
+    record_usage(
+        OPENAI_MODEL_NAME, response,
+        site="gold_enrich",
+        source_name=silver_doc.get("source_name", ""),
+        trace_id=_cost_trace_id(silver_doc),
+    )
     return parse_openai_consensus_response(response.choices[0].message.content)
 
 
@@ -1033,6 +1092,8 @@ def process_newsapi_gold_message(
         embedding = call_openai_embedding(
             ai_meta.get("executive_summary") or silver_doc.get("title", ""),
             openai_client,
+            source_name=silver_doc.get("source_name", "newsapi"),
+            trace_id=_cost_trace_id(silver_doc),
         )
     except Exception as exc:
         logger.error("[gold/newsapi] OpenAI embedding call failed: %s", exc)
@@ -1276,6 +1337,8 @@ def process_arxiv_gold_message(
         embedding = call_openai_embedding(
             ai_meta.get("executive_summary") or silver_doc.get("title", ""),
             openai_client,
+            source_name=silver_doc.get("source_name", "arxiv"),
+            trace_id=_cost_trace_id(silver_doc),
         )
     except Exception as exc:
         logger.error("[gold/arxiv] OpenAI embedding call failed: %s", exc)
@@ -1515,6 +1578,8 @@ def process_telegram_gold_message(
         embedding = call_openai_embedding(
             ai_meta.get("executive_summary") or silver_doc.get("title", ""),
             openai_client,
+            source_name=silver_doc.get("source_name", "telegram"),
+            trace_id=_cost_trace_id(silver_doc),
         )
     except Exception as exc:
         logger.error("[gold/telegram] OpenAI embedding call failed: %s", exc)
@@ -1631,6 +1696,14 @@ def call_hackernews_consensus(silver_social: dict, client: Any) -> dict:
         ],
         temperature=0.3,
         max_tokens=1024,
+    )
+    # Cost capture BEFORE parsing (7B.5-I T4): a paid call whose JSON fails
+    # to parse (→ DLQ) must still land in llm_cost_events.
+    record_usage(
+        OPENAI_MODEL_NAME, response,
+        site="gold_consensus",
+        source_name=silver_social.get("source_name", "hackernews"),
+        trace_id=_cost_trace_id(silver_social),
     )
     return parse_openai_consensus_response(response.choices[0].message.content)
 
@@ -1852,6 +1925,8 @@ def process_hackernews_gold_message(
         embedding = call_openai_embedding(
             ai_meta.get("executive_summary") or silver_social.get("title", ""),
             openai_client,
+            source_name=silver_social.get("source_name", "hackernews"),
+            trace_id=_cost_trace_id(silver_social),
         )
     except Exception as exc:
         logger.error("[gold/hackernews] OpenAI embedding call failed: %s", exc)
@@ -2493,6 +2568,16 @@ def compute_semantic_rescue(
         model="text-embedding-3-small",
         input=[text],
     )
+    # Cost capture on BOTH branches (7B.5-I T4, approved P4): the embed is
+    # paid for whether the article is promoted or dropped — drop-path rows
+    # joined to filter_rejects via trace_id quantify the filter's wasted
+    # spend (§0 goal 2).
+    record_usage(
+        "text-embedding-3-small", response,
+        site="rescue_embed",
+        source_name=silver_doc.get("source_name", ""),
+        trace_id=silver_doc.get("canonical_event_id", ""),
+    )
     article_vec = np.array(response.data[0].embedding, dtype=np.float32)
     norm = float(np.linalg.norm(article_vec))
     if norm == 0.0:
@@ -2501,6 +2586,60 @@ def compute_semantic_rescue(
     # Dot product with pre-normalised ref vector = cosine similarity
     similarity = float(np.dot(article_vec / norm, sniper_ref_vec))
     return similarity >= threshold, similarity
+
+
+def apply_rescue_outcome(
+    silver_doc: dict,
+    rescued: bool,
+    similarity: float,
+    *,
+    capture_enabled: bool = False,
+    run_id: str = "",
+) -> bool:
+    """
+    Apply the semantic-rescue outcome to a sniper-failed doc (Phase 7B.5-I, T3).
+
+    Module-level pure function (PyFlink 1.19 pattern, plan §5.5) so the
+    promote/drop handling is Gate-2-testable without a Flink runtime — the
+    same reason compute_semantic_rescue() lives at module level. Extracted
+    from GlobalNewsGoldFunction.process_element with ZERO change to the
+    filter decision itself: `rescued` is decided by compute_semantic_rescue()
+    before this function runs, and the return value depends only on it —
+    never on capture_enabled (the T6 invariance guard).
+
+    Promote path: flips is_high_signal (pre-existing behavior) and threads
+    the cosine onto the doc as `rescue_cosine`, which knowledge_vault.archive()
+    persists (§2.2) — sniper-passed docs never enter this function, so their
+    vault rows keep rescue_cosine NULL. The validator ignores unknown keys
+    (utils/validators._check_fields checks required fields only), so the new
+    key is schema-safe.
+
+    Drop path: when capture_enabled, retains the reject via
+    persistence/filter_rejects.insert_reject() — which is FAIL-OPEN, so a
+    capture failure can never turn a clean drop into a processing error.
+
+    Args:
+        silver_doc:      The sniper-failed Silver document (mutated on promote).
+        rescued:         Decision from compute_semantic_rescue().
+        similarity:      Cosine score from compute_semantic_rescue().
+        capture_enabled: settings.REJECT_CAPTURE_ENABLED, read at job startup.
+        run_id:          settings.RUN_ID collection-run tag ("" → NULL).
+
+    Returns:
+        True  — doc survives (promoted); caller continues to kv_archive + Gold.
+        False — doc is dropped; caller returns (no kv_archive, no Gold).
+    """
+    if rescued:
+        silver_doc["is_high_signal"] = True
+        silver_doc["rescue_cosine"] = similarity
+        return True
+
+    if capture_enabled:
+        # Lazy import: keeps module import free of DB deps (same pattern as
+        # the persistence imports inside process_element).
+        from persistence.filter_rejects import insert_reject
+        insert_reject(silver_doc, similarity, run_id=run_id)
+    return False
 
 
 if PYFLINK_AVAILABLE:
@@ -2735,12 +2874,29 @@ if PYFLINK_AVAILABLE:
         def open(self, runtime_context):
             # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
             from utils.openai_client import get_openai_client
-            from config.settings import OPENAI_API_KEY, GOLD_SEMANTIC_RESCUE_THRESHOLD
+            from config.settings import (
+                OPENAI_API_KEY,
+                GOLD_SEMANTIC_RESCUE_THRESHOLD,
+                REJECT_CAPTURE_ENABLED,
+                RUN_ID,
+            )
             from processing.keyword_sniper import SNIPER_REFERENCE_VECTOR_PATH
             import numpy as np
 
             self._openai_client = get_openai_client(api_key=OPENAI_API_KEY)
             self._rescue_threshold = GOLD_SEMANTIC_RESCUE_THRESHOLD
+
+            # Phase 7B.5-I (§2.6): reject retention is flag-gated and read at
+            # startup — toggling requires a pod restart only (env-only change).
+            # Logged so a collection run's capture state is verifiable in the
+            # job logs before any traffic flows (T8 checklist).
+            self._reject_capture_enabled = REJECT_CAPTURE_ENABLED
+            self._run_id = RUN_ID
+            logger.info(
+                "[gold/flink] reject capture %s (run_id=%r)",
+                "ENABLED" if self._reject_capture_enabled else "disabled",
+                self._run_id,
+            )
 
             # Load sniper reference vector — hard-fail at startup if missing (B4).
             # Prevents silent regression to keyword-only filtering.
@@ -2797,12 +2953,20 @@ if PYFLINK_AVAILABLE:
                     ))
                     return
 
-                if rescued:
+                # Phase 7B.5-I T3: promote/drop handling extracted to the
+                # module-level apply_rescue_outcome() (Gate-2-testable without
+                # PyFlink). Promote threads rescue_cosine onto the doc for
+                # kv_archive; drop captures the reject when flag-gated ON.
+                survived = apply_rescue_outcome(
+                    silver_doc, rescued, similarity,
+                    capture_enabled=self._reject_capture_enabled,
+                    run_id=self._run_id,
+                )
+                if survived:
                     logger.info(
                         "[gold/semantic_rescue] promoted url=%s score=%.4f threshold=%.2f",
                         url, similarity, self._rescue_threshold,
                     )
-                    silver_doc["is_high_signal"] = True
                 else:
                     logger.info(
                         "[gold/semantic_rescue] dropped url=%s score=%.4f threshold=%.2f",
