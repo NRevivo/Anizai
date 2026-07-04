@@ -1,8 +1,8 @@
 # pipeline_sprints.md
 > Domain: A — Pipeline
 > Type: Sprints
-> Last updated: 2026-06-15
-> TL;DR: Live status of the pipeline — what's closed, the one open sprint (Phase 7B.5 calibration), deferred items, and the Domain A Known Gaps (KG-A-*). Open this to see what pipeline work remains.
+> Last updated: 2026-07-02
+> TL;DR: Live status of the pipeline — what's closed, the open sprints (Phase 7B.5 calibration + its 7B.5-I instrumentation prerequisite), deferred items, and the Domain A Known Gaps (KG-A-*). Open this to see what pipeline work remains.
 
 ## Navigation
 - §1 — Status Summary — every pipeline phase, status, close date, outcome, plan file
@@ -30,6 +30,7 @@
 | Phase 7B — Filter + semantic rescue | Closed | 2026-05-09 | Two-stage gate; threshold 0.09→0.15; semantic rescue live | — |
 | Phase 7C — Scraper retirement | Closed | 2026-05-09 | Scraper deleted; `scrape_attempted` dropped; `newspaper4k` removed | — |
 | Phase 7B.5 — Filter-threshold calibration | Open (queued) | — | Empirically validate the 7B thresholds + A1 removals on production vault data | `plans/phase7b5_filter_calibration.md` |
+| Phase 7B.5-I — Filter observability & cost instrumentation | Open (active) | — | Reject retention + `rescue_cosine` persistence + per-call LLM cost events/views; one-day cloud collection run produces the 7B.5 dataset + the pipeline-day cost number | `plans/phase7b5i_filter_observability_and_cost.md` |
 
 > Closed rows have no `plans/` file — their detail lives in `pipeline_archive.md`
 > (and, for old flat-format work, `../../task_plan_archive.md`).
@@ -51,9 +52,19 @@ distributions and calibrating against pre-7A rows would produce stale thresholds
 
 ## §2 — Open Work
 
+### Phase 7B.5-I — Filter Observability & Cost Instrumentation (active)
+
+**Status:** Open / active (kicked off 2026-07-02).
+
+Instrumentation prerequisite discovered 2026-06-30: the data 7B.5 needs (rejected
+articles, rescue cosine scores) is never persisted, so 7B.5 cannot run against
+today's vault alone. This sprint adds flag-gated reject retention, `rescue_cosine`
+persistence, and permanent per-call LLM cost tracking, then collects one day of
+cloud data. Self-contained plan: **`plans/phase7b5i_filter_observability_and_cost.md`**.
+
 ### Phase 7B.5 — Filter-Threshold Calibration (queued)
 
-**Status:** Open / queued — unblocked.
+**Status:** Open / queued — data collection now gated on the 7B.5-I day-run.
 
 **Entry gate:** ≥200 post-7A `knowledge_vault` rows in cloud Postgres — **satisfied**
 (616+ rows available).
@@ -85,6 +96,10 @@ off there with `sprint-kickoff` + `filter-analysis`.
 | KG-A-4 | Polymarket `/comments` breaking change; comment ingestion feature-flagged off | Surfaced Phase 9.5 | Medium | Reverse-engineer the new `/comments` contract, or retire the comment path |
 | KG-A-5 | OpenSky outbound timeout from GKE (`opensky-network.org` unreachable from main-pool node); local ingestion works | Surfaced Phase 9.5 | Medium | GCP firewall/CIDR investigation; possible cloud-IP block by OpenSky |
 | KG-A-6 | Dormant `reddit`/`predictit` enum values remain in PostgreSQL CHECK constraints (`init.sql`, `postgres-configmap.yaml`); no active writer | Phase 7 doc note | Low | A later infra/schema migration phase |
+| KG-A-7 | `knowledge_vault` dedup does not gate Gold enrichment — duplicate global_news articles re-run GPT enrichment + embedding on every re-fetch (cost + RPD impact) | Phase 7B.5-I | Medium | Exists-check before Gold dispatch (pattern exists in the social path) |
+| KG-A-8 | global_news builders use `uuid4` signal_id — Flink re-deliveries and duplicate articles accumulate duplicate `knowledge_vectors` rows | Phase 7B.5-I | Medium | Deterministic UUID5 from content_hash (pattern exists in the social path) |
+| KG-A-9 | Gold checkpoint fragility under dense backlog — synchronous ~1–2s enrichment stalls barriers → expiry → restart replay loops (2026-07-02 storm: 3,993 calls for 232 unique items) | Phase 7B.5-I | High | Checkpoint tuning / unaligned checkpoints / async enrichment |
+| KG-A-10 | Local compose Flink leg broken — Beam Python-worker crash on first message (env gap since ~Sprint 17); in-process replay is the current local verification path | Phase 7B.5-I | Low | Rebuild/realign the local PyFlink worker env; not cloud-affecting |
 
 > KG-A-3, KG-A-4, and KG-A-5 are pipeline-producer concerns that were first **surfaced
 > during Phase 9.5 (cluster robustness)**; they are owned here as Domain A ingestion gaps,
