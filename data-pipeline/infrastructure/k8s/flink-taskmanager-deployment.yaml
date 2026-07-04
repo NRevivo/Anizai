@@ -73,7 +73,7 @@ spec:
         fsGroup: 9999
       containers:
         - name: flink-taskmanager
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-p95
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7b5i
           imagePullPolicy: IfNotPresent
           # Shell wrapper — same pattern as the JobManager.
           # Reads CSI-mounted secret files, exports as env vars, then
@@ -119,6 +119,13 @@ spec:
             # to gpt-4o-mini. Same fix as JM — explicit override avoids image rebuild.
             - name: OPENAI_MODEL_NAME
               value: "gpt-4o-mini"
+            # Phase 7B.5-I (§2.6) — same values as JM (parity). The TM is where
+            # the Gold Python workers actually run, so these are the copies that
+            # matter at runtime; the JM pair keeps the manifests symmetric.
+            - name: REJECT_CAPTURE_ENABLED
+              value: "true"
+            - name: RUN_ID
+              value: "t7-smoke-2026-07-02"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are read from
             # CSI-mounted files and exported by the shell wrapper above.
           volumeMounts:

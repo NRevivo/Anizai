@@ -74,7 +74,7 @@ spec:
         fsGroup: 9999
       containers:
         - name: flink-jobmanager
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-p95
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7b5i
           imagePullPolicy: IfNotPresent
           # Shell wrapper: reads CSI-mounted secret files and exports them as
           # env vars before handing off to the Flink entrypoint.
@@ -143,6 +143,19 @@ spec:
             # correct (cheaper) model without requiring an image rebuild.
             - name: OPENAI_MODEL_NAME
               value: "gpt-4o-mini"
+            # Phase 7B.5-I (§2.6): flag-gated reject retention + run tagging.
+            # Both are plain (non-secret) values, read by config/settings.py in
+            # the Python workers at startup — toggling either needs only a pod
+            # restart (env-only change), never a rebuild or job resubmit.
+            # REJECT_CAPTURE_ENABLED is ON for the T7 smoke check + T8 day-run;
+            # set back to "false" at day's end (T8 checklist).
+            - name: REJECT_CAPTURE_ENABLED
+              value: "true"
+            # RUN_ID stamps filter_rejects/llm_cost_events rows (D4 logical
+            # isolation). T7 verification tag; T8 replaces it with the real
+            # dayrun-YYYY-MM-DD tag before the day-run starts.
+            - name: RUN_ID
+              value: "t7-smoke-2026-07-02"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are NOT set here.
             # They are read from the CSI-mounted files at /var/secrets/flink/
             # and exported by the shell wrapper command above. The GKE-native

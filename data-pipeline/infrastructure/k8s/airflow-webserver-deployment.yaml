@@ -38,7 +38,7 @@ spec:
       serviceAccountName: pipeline-runtime
       containers:
         - name: airflow-webserver
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3-7b5i
           imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
           args:
