@@ -11,6 +11,11 @@ interface ChatPanelProps {
     suggestedActions: SuggestedAction[];
     isLoading?: boolean;
     isSendingMessage?: boolean;
+    // T3 send-lock: true while the session is still producing an answer
+    // (initial forecast processing, or a prior follow-up not yet answered).
+    // Blocks sending a new message; the input stays editable so the user can
+    // draft while they wait.
+    isSendLocked?: boolean;
     isAwaitingAssistantResponse?: boolean;
     currentQuestion?: string;
     currentAnswer?: string;
@@ -24,14 +29,19 @@ export function ChatPanel({
     suggestedActions,
     isLoading = false,
     isSendingMessage = false,
+    isSendLocked = false,
     isAwaitingAssistantResponse = false,
     onSendMessage,
     onActionClick
 }: ChatPanelProps) {
     const [inputValue, setInputValue] = useState('');
 
+    // The send path is closed while a message is mid-flight (isSendingMessage)
+    // or while the session is still answering (isSendLocked).
+    const isSendDisabled = isSendingMessage || isSendLocked;
+
     const handleSend = () => {
-        if (isSendingMessage) {
+        if (isSendDisabled) {
             return;
         }
 
@@ -109,7 +119,7 @@ export function ChatPanel({
                                 variant="outline"
                                 size="sm"
                                 onClick={() => onActionClick(action)}
-                                disabled={isSendingMessage}
+                                disabled={isSendDisabled}
                                 className="h-auto min-h-8 max-w-full whitespace-normal text-xs hover:border-anizai-teal-400 hover:text-anizai-teal-600"
                             >
                                 <svg className="mr-1.5 h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -134,7 +144,7 @@ export function ChatPanel({
                     />
                     <Button
                         onClick={handleSend}
-                        disabled={!inputValue.trim() || isSendingMessage}
+                        disabled={!inputValue.trim() || isSendDisabled}
                         className="h-10 w-10 shrink-0 bg-anizai-teal-600 hover:bg-anizai-teal-700 text-white border-0 shadow-sm"
                     >
                         {isSendingMessage ? (

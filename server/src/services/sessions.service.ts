@@ -44,8 +44,13 @@ export interface SessionMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
     createdAt: string;
-    status: 'sent' | 'failed' | null;
+    // 'answered' is written by the hub when it flips a user message from 'sent'
+    // once its assistant reply lands (same write batch).
+    status: 'sent' | 'failed' | 'answered' | null;
     userId?: string | null;
+    // Present on hub-written assistant messages: the doc id of the user message
+    // this reply answers. Lets the frontend link answer <-> question.
+    replyToMessageId?: string | null;
     meta: {
         model?: string;
         tokensIn?: number;

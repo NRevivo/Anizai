@@ -54,7 +54,7 @@ export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
     timestamp: Date;
-    status?: 'pending' | 'sent' | 'failed';
+    status?: 'pending' | 'sent' | 'failed' | 'answered';
 }
 
 export interface SentimentDataPoint {
@@ -138,6 +138,9 @@ export type AgentEventStatus = 'pending' | 'running' | 'done' | 'failed';
 export interface AgentEvent {
     eventId: string;
     sessionId: string;
+    // Groups events by forecast run; Rule B renders only the run matching the
+    // session doc's currentRunId. Null on legacy/malformed docs.
+    runId: string | null;
     sequence: number;
     timestamp: Date;
     parentMessageId: string | null;

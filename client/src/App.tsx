@@ -14,6 +14,7 @@ import { PrivacyPage } from './pages/PrivacyPage';
 import { CookiesPage } from './pages/CookiesPage';
 import { StateMessage } from './components/ui/StateMessage';
 import { ApiError } from './lib/api';
+import { selectCurrentRunEvents } from './lib/agentEvents';
 import {
   describeAuthError,
   signInWithEmail,
@@ -251,7 +252,14 @@ function toChatMessage(message: SessionMessage): ChatMessage {
     role: message.role === 'system' ? 'assistant' : message.role,
     content: message.content,
     timestamp: new Date(message.createdAt),
-    status: message.status === 'failed' ? 'failed' : 'sent',
+    // Preserve 'answered' (hub flips the user message sent -> answered once
+    // its reply lands) and 'failed'; everything else reads as 'sent'.
+    status:
+      message.status === 'failed'
+        ? 'failed'
+        : message.status === 'answered'
+          ? 'answered'
+          : 'sent',
   };
 }
 
@@ -286,6 +294,10 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeSessionDetail, setActiveSessionDetail] = useState<SessionDetail | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  // Live currentRunId for the active session, read straight off the session
+  // doc snapshot (not the REST aggregate, which only refreshes on status
+  // transitions). Rule B filters agentEvents against this.
+  const [activeSessionCurrentRunId, setActiveSessionCurrentRunId] = useState<string | null>(null);
   const [isAgentEventsLoading, setIsAgentEventsLoading] = useState(false);
   const [sessionMessages, setSessionMessages] = useState<ChatMessage[] | null>(null);
   const [pendingMessages, setPendingMessages] = useState<ChatMessage[]>([]);
@@ -373,11 +385,18 @@ function App() {
   // the status captured at load time until a manual reload.
   useEffect(() => {
     if (!activeSessionId) {
+      setActiveSessionCurrentRunId(null);
       return;
     }
 
+    // Reset until the first snapshot for the newly-selected session arrives,
+    // so a previous session's currentRunId never bleeds into the new one.
+    setActiveSessionCurrentRunId(null);
+
     const unsubscribe = subscribeToSession(activeSessionId, {
       onData: (session) => {
+        setActiveSessionCurrentRunId(session.currentRunId);
+
         // Keep the sidebar pill in sync with the live status.
         setSessions((current) =>
           current.map((item) =>
@@ -457,9 +476,11 @@ function App() {
       try {
         const profile = await fetchCurrentUser();
         setUserProfile(profile);
-        setAppState((current) =>
-          current === 'landing' || current === 'login' || current === 'signup' ? 'dashboard' : current
-        );
+        // Hydrate the dashboard data in the background but do NOT auto-
+        // navigate. The landing page is always the root entry — a
+        // signed-in user lands there too and clicks "Open workspace" to
+        // enter the dashboard. Explicit navigation lives in the login
+        // handlers below for the post-sign-in case.
         await enterDashboard();
       } catch (error) {
         setAuthError(error instanceof Error ? error.message : 'Could not load your profile.');
@@ -497,8 +518,10 @@ function App() {
     setAuthError(null);
     try {
       await signInWithGoogle();
-      // onAuthStateChanged subscriber takes it from here: hydrates the
-      // profile and routes to the dashboard.
+      // Explicit post-sign-in navigation. The auth subscriber hydrates the
+      // profile in the background, but we navigate from here because the
+      // subscriber no longer auto-redirects (landing is the root entry).
+      setAppState('dashboard');
     } catch (error) {
       setAuthError(describeAuthError(error));
     }
@@ -512,6 +535,7 @@ function App() {
     setAuthError(null);
     try {
       await signInWithEmail(email, password);
+      setAppState('dashboard');
     } catch (error) {
       setAuthError(describeAuthError(error));
     }
@@ -573,6 +597,7 @@ function App() {
     // session state on the user=null transition. Ephemeral UI state
     // that the subscriber doesn't own is cleared here.
     setAgentEvents([]);
+    setActiveSessionCurrentRunId(null);
     setIsAgentEventsLoading(false);
     setSessionMessages(null);
     setPendingMessages([]);
@@ -746,6 +771,14 @@ function App() {
   };
 
   const sidebarSessions = useMemo(() => sessions.map(toSidebarSession), [sessions]);
+  // Rule B: render only the events belonging to the session's live run
+  // (runId === currentRunId), ordered by sequence. Extracted into a pure,
+  // unit-tested helper (lib/agentEvents.ts) since the pipeline emits no events
+  // yet — the helper is the one piece of Rule B provable without live data.
+  const filteredAgentEvents = useMemo(
+    () => selectCurrentRunEvents(agentEvents, activeSessionCurrentRunId),
+    [agentEvents, activeSessionCurrentRunId]
+  );
   const activeSessionState = useMemo(() => toActiveSessionState(activeSessionDetail), [activeSessionDetail]);
   const prediction = useMemo(() => toPrediction(activeSessionDetail), [activeSessionDetail]);
   const sentimentData = useMemo(() => toSentimentPoints(activeSessionDetail), [activeSessionDetail]);
@@ -765,19 +798,17 @@ function App() {
     );
   }, [activeSessionDetail, pendingMessages, sessionMessages]);
   const isAwaitingAssistantResponse = useMemo(() => {
-    let lastUserTimestamp: number | null = null;
-    let lastAssistantTimestamp: number | null = null;
-
-    for (const message of messages) {
-      const timestamp = message.timestamp.getTime();
+    // The hub flips the triggering user message sent -> answered in the same
+    // batch as the assistant reply, so a trailing user message still in
+    // 'sent' (or an optimistic 'pending') means the hub is still working.
+    // 'answered' / 'failed' means it's done.
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
       if (message.role === 'user') {
-        lastUserTimestamp = timestamp;
-      } else if (message.role === 'assistant') {
-        lastAssistantTimestamp = timestamp;
+        return message.status === 'pending' || message.status === 'sent';
       }
     }
-
-    return lastUserTimestamp !== null && (lastAssistantTimestamp === null || lastUserTimestamp > lastAssistantTimestamp);
+    return false;
   }, [messages]);
   const trendingItems = useMemo(() => toTrendingView(trending), [trending]);
 
@@ -901,7 +932,7 @@ function App() {
         prediction={prediction}
         sentimentData={sentimentData}
         timelineEvents={timelineEvents}
-        agentEvents={agentEvents}
+        agentEvents={filteredAgentEvents}
         messages={messages}
         isMessagesLoading={isMessagesLoading}
         isSendingMessage={isSendingMessage}

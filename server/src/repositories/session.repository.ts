@@ -246,6 +246,7 @@ export const sessionRepository = {
                 createdAt: toISOString(data.createdAt) ?? '',
                 status: data.status ?? null,
                 userId: data.userId ?? null,
+                replyToMessageId: data.replyToMessageId ?? null,
                 meta: data.meta ?? null,
             };
         };

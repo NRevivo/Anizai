@@ -45,8 +45,11 @@ export interface SessionMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
     createdAt: string;
-    status: 'sent' | 'failed' | null;
+    status: 'sent' | 'failed' | 'answered' | null;
     userId?: string | null;
+    // Hub-written on assistant messages: links each answer to the exact user
+    // message it replies to (top-level on the doc, not nested in meta).
+    replyToMessageId?: string | null;
     meta: {
         model?: string;
         tokensIn?: number;
@@ -185,6 +188,9 @@ function mapAgentEventDoc(docSnapshot: QueryDocumentSnapshot): AgentEvent {
     return {
         eventId: typeof data.eventId === 'string' ? data.eventId : docSnapshot.id,
         sessionId: typeof data.sessionId === 'string' ? data.sessionId : '',
+        // runId groups events by forecast run. Rule B renders only the group
+        // whose runId matches the session doc's currentRunId.
+        runId: typeof data.runId === 'string' ? data.runId : null,
         sequence: typeof data.sequence === 'number' ? data.sequence : 0,
         timestamp: toDateValue(data.timestamp),
         parentMessageId: typeof data.parentMessageId === 'string' ? data.parentMessageId : null,
@@ -205,8 +211,16 @@ function mapSessionMessageDoc(docSnapshot: QueryDocumentSnapshot): SessionMessag
         role: data.role as SessionMessage['role'],
         content: typeof data.content === 'string' ? data.content : '',
         createdAt: toDateValue(data.createdAt).toISOString(),
-        status: data.status === 'failed' ? 'failed' : data.status === 'sent' ? 'sent' : null,
+        status:
+            data.status === 'failed'
+                ? 'failed'
+                : data.status === 'answered'
+                    ? 'answered'
+                    : data.status === 'sent'
+                        ? 'sent'
+                        : null,
         userId: typeof data.userId === 'string' ? data.userId : null,
+        replyToMessageId: typeof data.replyToMessageId === 'string' ? data.replyToMessageId : null,
         meta: data.meta && typeof data.meta === 'object' ? (data.meta as SessionMessage['meta']) : null,
     };
 }
@@ -251,6 +265,9 @@ export interface SessionDocData {
     status: SessionStatus;
     latestProbability: number | null;
     latestConfidence: number | null;
+    // Written by the hub when a forecast run starts. Identifies which run's
+    // agentEvents are live (Rule B); null until the hub sets it.
+    currentRunId: string | null;
     errorCode: string | null;
     errorMessage: string | null;
     clarificationCandidates: ClarificationCandidate[] | null;
@@ -276,6 +293,7 @@ export function subscribeToSession(
                 status: data.status as SessionStatus,
                 latestProbability: typeof data.latestProbability === 'number' ? data.latestProbability : null,
                 latestConfidence: typeof data.latestConfidence === 'number' ? data.latestConfidence : null,
+                currentRunId: typeof data.currentRunId === 'string' ? data.currentRunId : null,
                 errorCode: typeof data.errorCode === 'string' ? data.errorCode : null,
                 errorMessage: typeof data.errorMessage === 'string' ? data.errorMessage : null,
                 clarificationCandidates: Array.isArray(data.clarificationCandidates)

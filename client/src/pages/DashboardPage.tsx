@@ -143,6 +143,17 @@ export function DashboardPage({
         [prediction]
     );
 
+    // Send-lock (T3): block a new follow-up while the session is still
+    // producing an answer — either the initial forecast is processing
+    // (queued/claimed/running) or a prior follow-up hasn't been answered yet.
+    // The hub answers one follow-up at a time; the lock is the primary guard
+    // against firing overlapping questions.
+    const isSessionProcessing =
+        activeSessionState?.status === 'queued' ||
+        activeSessionState?.status === 'claimed' ||
+        activeSessionState?.status === 'running';
+    const isSendLocked = isSessionProcessing || isAwaitingAssistantResponse;
+
     useEffect(() => {
         setSelectedClarificationId('none');
         setClarificationError(null);
@@ -470,7 +481,13 @@ export function DashboardPage({
                             </h1>
                         </div>
                         {statusPanel}
-                        <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
+                        {/* Rule A (Sprint 25): the reasoning panel is live-only —
+                            render ONLY during an in-flight run. failed /
+                            awaiting_clarification still show the status panel above,
+                            but never the agent timeline. */}
+                        {['queued', 'claimed', 'running'].includes(activeSessionState.status) && (
+                            <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
+                        )}
                     </div>
                 </div>
             );
@@ -506,8 +523,6 @@ export function DashboardPage({
                 prediction={prediction}
                 sentimentData={sentimentData}
                 timelineEvents={timelineEvents}
-                agentEvents={agentEvents}
-                isAgentEventsLoading={isAgentEventsLoading}
             />
         );
     };
@@ -529,6 +544,7 @@ export function DashboardPage({
                 messages={messages}
                 isLoading={isMessagesLoading}
                 isSendingMessage={isSendingMessage}
+                isSendLocked={isSendLocked}
                 isAwaitingAssistantResponse={isAwaitingAssistantResponse}
                 onSendMessage={handleSendMessage}
                 suggestedActions={suggestedActions}
@@ -628,6 +644,7 @@ export function DashboardPage({
                             messages={messages}
                             isLoading={isMessagesLoading}
                             isSendingMessage={isSendingMessage}
+                            isSendLocked={isSendLocked}
                             isAwaitingAssistantResponse={isAwaitingAssistantResponse}
                             suggestedActions={suggestedActions}
                             currentQuestion={prediction?.question}
@@ -674,6 +691,7 @@ export function DashboardPage({
                         messages={messages}
                         isLoading={isMessagesLoading}
                         isSendingMessage={isSendingMessage}
+                        isSendLocked={isSendLocked}
                         isAwaitingAssistantResponse={isAwaitingAssistantResponse}
                         suggestedActions={suggestedActions}
                         currentQuestion={prediction?.question}

@@ -1,22 +1,19 @@
 import { useCallback, useRef, useState } from 'react';
-import type { AgentEvent, Prediction, SentimentDataPoint, TimelineEvent } from '../types';
+import type { Prediction, SentimentDataPoint, TimelineEvent } from '../types';
 import { PredictionOverview } from './cards/predictionOverview';
 import { MarketComparison } from './cards/MarketComparison';
 import { SentimentAnalysis } from './cards/SentimentAnalysis';
 import { EvidenceTimeline } from './cards/EvidenceTimeline';
-import { AgentEventsTimeline } from './cards/AgentEventsTimeline';
 
 interface DashboardProps {
     prediction: Prediction;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
-    agentEvents: AgentEvent[];
-    isAgentEventsLoading?: boolean;
 }
 
 const HIGHLIGHT_DURATION_MS = 3500;
 
-export function Dashboard({ prediction, sentimentData, timelineEvents, agentEvents, isAgentEventsLoading = false }: DashboardProps) {
+export function Dashboard({ prediction, sentimentData, timelineEvents }: DashboardProps) {
     // Evidence IDs to highlight when a Drivers/Headwinds factor is clicked.
     const [highlightedEvidenceIds, setHighlightedEvidenceIds] = useState<string[]>([]);
     const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,10 +79,11 @@ export function Dashboard({ prediction, sentimentData, timelineEvents, agentEven
                             highlightedEvidenceIds={highlightedEvidenceIds}
                         />
                     </div>
-
-                    <div className="w-full">
-                        <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
-                    </div>
+                    {/* Rule A (live-only): the agent reasoning panel is progress
+                        UI, never part of the finished report. Once status === 'done'
+                        this view renders, and the panel must not appear — including
+                        on re-open of an old session. It lives only in the in-progress
+                        branch of DashboardPage. */}
                 </div>
             </div>
         </div>
