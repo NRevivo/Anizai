@@ -17,13 +17,14 @@ When the user picks a candidate, Express writes a new forecastQueries doc
 with `chosenCandidateId`; any available worker claims it and resumes via
 the skip_matching_step path (T21.4/T21.5).
 
-Why no agentEvents write here:
-    Sprint 19 Override D2 deferred ALL agentEvents emission to Sprint 25.
-    The clarification picker UI is triggered by session.status ==
-    'awaiting_clarification' (anizai_handoff_consolidated.md §6.3 step 3),
-    not by a `clarification_needed` agentEvent. The event type exists in the
-    Sprint 25 schema but writing it here before Sprint 25's full implementation
-    would create an out-of-order, partially-structured events subcollection.
+agentEvents (Sprint 25 T25.6):
+    This node now emits a start/complete pair like every main-graph node (via
+    the `@events.emits` decorator). The clarification picker UI is still
+    triggered by session.status == 'awaiting_clarification'
+    (anizai_handoff_consolidated.md §6.3 step 3), not by the event — the event
+    just feeds the reasoning panel. On this terminal branch the graph ends
+    without write_to_firestore's pre-`done` drain, so these events are flushed
+    by process_query's finally-drain (§3 failure-path / awaiting_clarification).
 
 Service isolation (CLAUDE.md §3.3):
     Talks to Firestore only via firestore_client (CLAUDE.md §3.2 —
@@ -42,12 +43,13 @@ from __future__ import annotations
 
 import logging
 
-from agent import firestore_client
+from agent import events, firestore_client
 from agent.errors import AgentProcessingError
 
 logger = logging.getLogger(__name__)
 
 
+@events.emits("write_clarification", "Preparing clarification options…")
 def run(state: dict) -> dict:
     """
     Execute the clarification branch node.

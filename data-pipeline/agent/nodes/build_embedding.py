@@ -38,6 +38,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from agent import events
 from agent.config import settings
 from agent.errors import AgentProcessingError
 from agent.utils import llm_cost
@@ -85,6 +86,7 @@ def _get_default_client() -> Any:
 # ==========================================================
 # Public node function
 # ==========================================================
+@events.emits("build_embedding", "Preparing the search…")
 def run(state: dict, *, client: Optional[Any] = None) -> dict:
     """
     Execute Node 2 of the forecast graph.

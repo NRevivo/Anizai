@@ -101,12 +101,15 @@ def test_happy_path_only_invokes_graph(mocked_runner):
     update_query_status('done') from the runner — those happen inside
     Node 7 (write_to_firestore)."""
     manager, mock_graph, mock_session, mock_query = mocked_runner
-    mock_graph.invoke.return_value = {"session_id": "s1"}
+    # Sprint 25 T25.13: the runner streams (stream_mode="values") so it can read
+    # run_id off the accumulated state before a raise. The happy path yields the
+    # final state and does no writes (Node 7 handles persistence).
+    mock_graph.stream.return_value = [{"session_id": "doc1"}]
 
     process_query("doc1")
 
     assert manager.method_calls == [
-        call.graph.invoke({"session_id": "doc1"}),
+        call.graph.stream({"session_id": "doc1"}, stream_mode="values"),
     ]
     mock_session.assert_not_called()
     mock_query.assert_not_called()
@@ -120,11 +123,13 @@ def test_happy_path_passes_session_id_to_graph(mocked_runner):
     as `session_id` (the input field claim_session reads). Pin the
     initial-state shape — claim_session contract."""
     _, mock_graph, _, _ = mocked_runner
-    mock_graph.invoke.return_value = {"session_id": "s99"}
+    mock_graph.stream.return_value = [{"session_id": "s99"}]
 
     process_query("doc-arbitrary-id")
 
-    mock_graph.invoke.assert_called_once_with({"session_id": "doc-arbitrary-id"})
+    mock_graph.stream.assert_called_once_with(
+        {"session_id": "doc-arbitrary-id"}, stream_mode="values"
+    )
 
 
 # ==========================================================
@@ -136,7 +141,7 @@ def test_race_lost_silent_return(mocked_runner):
     'done' nor 'failed'. The sibling worker that won the claim is
     responsible for the lifecycle."""
     _, mock_graph, mock_session, mock_query = mocked_runner
-    mock_graph.invoke.side_effect = SessionClaimRaceLostError(
+    mock_graph.stream.side_effect = SessionClaimRaceLostError(
         "claim_session: session not claimable session_id=doc1"
     )
 
@@ -157,7 +162,7 @@ def test_graph_failure_marks_failed_and_reraises(mocked_runner):
     == query_doc_id, so the runner uses query_doc_id for both. Both
     docs get 'failed' writes and the original exception propagates."""
     _, mock_graph, mock_session, mock_query = mocked_runner
-    mock_graph.invoke.side_effect = AgentProcessingError(
+    mock_graph.stream.side_effect = AgentProcessingError(
         "synthesize: missing raw_question in state"
     )
 
@@ -190,7 +195,7 @@ def test_write_to_firestore_failure_marks_failed_and_reraises(mocked_runner):
       - 'done' transitions never happen"""
     _, mock_graph, mock_session, mock_query = mocked_runner
     # Simulate a Firestore batch commit failure escaping Node 7
-    mock_graph.invoke.side_effect = RuntimeError("firestore batch commit failed")
+    mock_graph.stream.side_effect = RuntimeError("firestore batch commit failed")
 
     with pytest.raises(RuntimeError, match="firestore batch commit failed"):
         process_query("doc1")
@@ -220,7 +225,7 @@ def test_mark_failed_swallows_cleanup_exceptions(mocked_runner):
     per cleanup step, so the queue-side 'failed' write must still run
     even after the session-side cleanup raised."""
     _, mock_graph, mock_session, mock_query = mocked_runner
-    mock_graph.invoke.side_effect = RuntimeError("primary")
+    mock_graph.stream.side_effect = RuntimeError("primary")
     # First call (cleanup 'failed') raises
     mock_session.side_effect = RuntimeError("cleanup-error")
 
@@ -240,10 +245,43 @@ def test_keyboard_interrupt_propagates_without_marking_failed(mocked_runner):
     Exception`. Pin this so a future edit to `except BaseException`
     doesn't mask a Ctrl-C with cleanup writes that delay shutdown."""
     _, mock_graph, mock_session, mock_query = mocked_runner
-    mock_graph.invoke.side_effect = KeyboardInterrupt()
+    mock_graph.stream.side_effect = KeyboardInterrupt()
 
     with pytest.raises(KeyboardInterrupt):
         process_query("doc1")
 
     mock_session.assert_not_called()
     mock_query.assert_not_called()
+
+
+# ==========================================================
+# 8. Sprint 25 T25.13 — fail_event fires with the CAPTURED run_id
+# ==========================================================
+def test_failure_calls_fail_event_with_captured_run_id(mocked_runner):
+    """Sprint 25 T25.13: on a mid-graph failure the runner must call
+    events.fail_event with the run_id CAPTURED from the streamed state (the
+    exact-run path in events._resolve_for_failure), not None. This is the whole
+    reason process_query streams instead of invokes — pin it so the invoke→stream
+    swap can't quietly lose run_id capture (which would demote every failure to
+    the session_id fallback, or a no-op if session lookup ever changed)."""
+    _, mock_graph, _, _ = mocked_runner
+
+    def _stream_then_raise(*_a, **_k):
+        yield {"session_id": "doc1"}                       # claim_session output
+        yield {"session_id": "doc1", "run_id": "run-xyz"}  # after run_id minted
+        raise RuntimeError("boom mid-graph")
+
+    mock_graph.stream.side_effect = _stream_then_raise
+
+    with (
+        patch("agent.events.fail_event") as mock_fail,
+        patch("agent.events.drain"),
+        patch("agent.events.dispose_run"),
+    ):
+        with pytest.raises(RuntimeError, match="boom mid-graph"):
+            process_query("doc1")
+
+    # Captured run_id (exact-run path) + session_id backup — NOT run_id=None.
+    mock_fail.assert_called_once()
+    assert mock_fail.call_args.kwargs["run_id"] == "run-xyz"
+    assert mock_fail.call_args.kwargs["session_id"] == "doc1"

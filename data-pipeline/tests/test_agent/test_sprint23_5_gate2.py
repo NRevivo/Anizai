@@ -164,6 +164,19 @@ class TestSufficiencyRoutingSubgraph:
 class TestTotalCostAccumulation:
 
     def test_total_cost_usd_accumulates_across_nodes(self):
+        """R9: total_cost_usd accumulates cleanly across sequential nodes.
+
+        KG-B-19 (closed 2026-07-15, Sprint 25 T25.0): this originally called
+        ``graph.invoke({})`` with an EMPTY input and raised LangGraph
+        ``InvalidUpdateError`` — a TEST DEFECT, not library drift. An empty
+        invoke seeds no input channel; a non-empty initial state (which every
+        real run has — ``claim_session`` seeds ``session_id``) lets the two
+        sequential deltas merge cleanly. The artifact never reflected the
+        production path (four real nodes already write these shared scalars
+        sequentially and are green in graph-integration + the Sprint-24 E2E).
+        Do NOT restore the empty invoke, and do NOT pin ``requirements*`` over
+        this — the root cause was the test input, confirmed by this passing.
+        """
         def node_a(state: dict) -> dict:
             return {"total_cost_usd": float(state.get("total_cost_usd") or 0.0) + 0.0025}
 
@@ -178,7 +191,7 @@ class TestTotalCostAccumulation:
         builder.add_edge("b", END)
         graph = builder.compile()
 
-        final = graph.invoke({})
+        final = graph.invoke({"session_id": "x"})
         # float accumulation merges cleanly across the two node deltas.
         assert abs(final["total_cost_usd"] - 0.0125) < 1e-9
 

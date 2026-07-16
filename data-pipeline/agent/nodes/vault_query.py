@@ -49,6 +49,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from datetime import datetime
 from typing import Optional
 
+from agent import events
 from agent.agents import market_bridge, pulse_analyst, researcher
 from agent.errors import AgentProcessingError
 
@@ -71,6 +72,7 @@ PER_AGENT_TIMEOUT_S: float = 15.0
 # ==========================================================
 # Public node function
 # ==========================================================
+@events.emits("vault_query", "Gathering evidence…")
 def run(state: dict, *, now: Optional[datetime] = None) -> dict:
     """
     Execute Node 3 of the forecast graph.

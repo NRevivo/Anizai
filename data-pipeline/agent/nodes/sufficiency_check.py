@@ -69,6 +69,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from agent import events
 from agent.config import settings
 from agent.utils.evidence_counting import count_raw_signals
 
@@ -78,6 +79,7 @@ logger = logging.getLogger(__name__)
 # ==========================================================
 # Public node function
 # ==========================================================
+@events.emits("sufficiency_check", "Checking evidence coverage…")
 def run(state: dict) -> dict:
     """
     Execute Node 4 of the forecast graph.

@@ -132,6 +132,29 @@ AGENT_POLYMARKET_DRIFT_THRESHOLD = float(
 # ==========================================================
 AGENT_FOLLOWUP_BUDGET_MS = int(os.getenv("AGENT_FOLLOWUP_BUDGET_MS", "6000"))
 
+# Suggested-actions budget (Sprint 25, T25.1). The post-synthesis
+# `generate_suggested_actions` node is a NON-ESSENTIAL cosmetic call: on
+# overrun it degrades to an empty list and never fails the forecast
+# (hub-principles G4 — graceful degradation, not a hang or a raise). Kept
+# tight (5s) because it runs AFTER synthesis on the critical path, so a hung
+# call here would eat into the ≤60s p95 main-forecast NFR (KG-B-5). Enforced
+# as a TRUE ceiling: the node builds its OpenAI client with max_retries=0 so
+# the timeout cannot be multiplied by SDK retries.
+AGENT_SUGGESTED_ACTIONS_BUDGET_MS = int(
+    os.getenv("AGENT_SUGGESTED_ACTIONS_BUDGET_MS", "5000")
+)
+
+# agentEvents drain timeouts (Sprint 25 T25.6 / T25.13). Bounded waits for the
+# non-blocking agentEvents writer to flush. The pre-done drain
+# (write_to_firestore, before the session flips to 'done') and the
+# process_query finally-drain use the per-run value; worker shutdown uses a
+# longer ceiling since it may flush the tail of an in-flight run. Both are hard
+# ceilings so a stuck Firestore write can't hang the forecast or shutdown.
+AGENT_EVENT_DRAIN_TIMEOUT_MS = int(os.getenv("AGENT_EVENT_DRAIN_TIMEOUT_MS", "5000"))
+AGENT_EVENT_SHUTDOWN_DRAIN_TIMEOUT_MS = int(
+    os.getenv("AGENT_EVENT_SHUTDOWN_DRAIN_TIMEOUT_MS", "10000")
+)
+
 # ==========================================================
 # 9. Health Endpoint (Sprint 18 T7)
 # ==========================================================

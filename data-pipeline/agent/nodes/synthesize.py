@@ -69,7 +69,7 @@ import json
 import logging
 from typing import Any, Optional
 
-from agent import labels
+from agent import events, labels
 from agent.config import settings
 from agent.errors import AgentProcessingError
 from agent.utils import llm_cost
@@ -151,6 +151,7 @@ def _get_default_client() -> Any:
 # ==========================================================
 # Public node function
 # ==========================================================
+@events.emits("synthesize", "Writing the forecast…")
 def run(state: dict, *, client: Optional[Any] = None) -> dict:
     """
     Execute Node 6 of the forecast graph.

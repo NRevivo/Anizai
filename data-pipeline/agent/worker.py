@@ -54,6 +54,7 @@ import signal
 import sys
 import threading
 
+from agent import events
 from agent.config import settings
 from agent.firestore_client import init_app, subscribe_pending_queries
 from agent.followup.listener import start_followup_listener
@@ -233,6 +234,11 @@ def main() -> None:
     # joins its watch thread, waiting for any in-flight callback to return.
     followup_watch.unsubscribe()
     watch.unsubscribe()
+
+    # Sprint 25 T25.13: drain any queued agentEvents after both watches stop
+    # (no new processing can enqueue now) and before the health server goes
+    # down. Non-raising, bounded — a stuck Firestore write can't hang shutdown.
+    events.drain(settings.AGENT_EVENT_SHUTDOWN_DRAIN_TIMEOUT_MS / 1000.0)
 
     # Shutdown order: watches first (so no new processing kicks off while
     # the health server is going down), health server second. The daemon

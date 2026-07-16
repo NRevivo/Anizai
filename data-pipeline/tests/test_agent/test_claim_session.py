@@ -68,6 +68,11 @@ def mocked_firestore():
     with (
         patch("agent.firestore_client.claim_query") as mock_claim,
         patch("agent.firestore_client.update_session_status") as mock_status,
+        # Sprint 25 T25.6: stub the events emitter so claim_session's bootstrap
+        # doesn't spin up the real background writer / touch Firestore — these
+        # tests isolate CLAIM behaviour (bootstrap event → test_sprint25_gate1).
+        patch("agent.events.init_run"),
+        patch("agent.events.emit_done_event"),
     ):
         manager = MagicMock()
         manager.attach_mock(mock_claim, "claim_query")
@@ -110,12 +115,14 @@ def test_run_calls_claim_then_claimed_then_running_in_order(mocked_firestore):
     mock_claim.return_value = _claim_payload(session_id="s1")
 
     with patch.object(claim_session.settings, "AGENT_WORKER_ID", "worker-1"):
-        claim_session.run({"session_id": "s1"})
+        out = claim_session.run({"session_id": "s1"})
 
+    # Sprint 25 T25.6: the 'running' transition now also carries current_run_id
+    # (the minted run_id, also returned as state.run_id); 'claimed' does NOT.
     assert manager.method_calls == [
         call.claim_query("s1", "worker-1"),
         call.update_session_status("s1", "claimed"),
-        call.update_session_status("s1", "running"),
+        call.update_session_status("s1", "running", current_run_id=out["run_id"]),
     ]
 
 
@@ -152,11 +159,13 @@ def test_run_propagates_question_and_user_id_from_payload(mocked_firestore):
 
     out = claim_session.run({"session_id": "s99"})
 
-    assert out == {
-        "session_id": "s99",
-        "raw_question": "Will BTC hit 100k by EOY 2026?",
-        "user_id": "user-abc",
-    }
+    # Sprint 25 T25.6: claim_session also mints + returns run_id (the
+    # single-writer ForecastState field); the other three fields are unchanged.
+    assert out["session_id"] == "s99"
+    assert out["raw_question"] == "Will BTC hit 100k by EOY 2026?"
+    assert out["user_id"] == "user-abc"
+    assert out["run_id"]  # minted uuid4 hex
+    assert set(out) == {"session_id", "raw_question", "user_id", "run_id"}
 
 
 # ==========================================================
@@ -261,10 +270,13 @@ def test_run_wraps_running_status_update_failure(mocked_firestore):
 
     assert "status update failed" in str(exc_info.value)
     assert isinstance(exc_info.value.__cause__, RuntimeError)
-    assert mock_status.call_args_list == [
-        call("s1", "claimed"),
-        call("s1", "running"),
-    ]
+    # Sprint 25 T25.6: 'claimed' then 'running'; the 'running' call carries the
+    # minted current_run_id (a uuid4 — not capturable here since run() raised).
+    claimed_call, running_call = mock_status.call_args_list
+    assert claimed_call == call("s1", "claimed")
+    assert running_call.args == ("s1", "running")
+    assert set(running_call.kwargs) == {"current_run_id"}
+    assert running_call.kwargs["current_run_id"]
 
 
 # ==========================================================
@@ -299,7 +311,10 @@ def test_run_uses_session_id_from_claimed_doc_on_resume(mocked_firestore):
     assert manager.method_calls[0] == call.claim_query("fresh-uuid-doc-id", "worker-1")
     # Status updates go to the ACTUAL session, not the fresh UUID.
     assert manager.method_calls[1] == call.update_session_status("original-session-id", "claimed")
-    assert manager.method_calls[2] == call.update_session_status("original-session-id", "running")
+    # Sprint 25 T25.6: 'running' carries current_run_id (== the returned run_id).
+    assert manager.method_calls[2] == call.update_session_status(
+        "original-session-id", "running", current_run_id=out["run_id"]
+    )
     # Returned state carries the actual session id, not the query doc id.
     assert out["session_id"] == "original-session-id"
     assert out["raw_question"] == "Middle East question?"

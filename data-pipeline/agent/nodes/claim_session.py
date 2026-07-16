@@ -40,10 +40,11 @@ Spec references:
 from __future__ import annotations
 
 import logging
+import uuid
 
 from agent.config import settings
 from agent.errors import AgentProcessingError, SessionClaimRaceLostError
-from agent import firestore_client
+from agent import events, firestore_client
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,16 @@ def run(state: dict) -> dict:
 
     Returns:
         Partial state dict containing `raw_question`, `user_id`,
-        `session_id` (echoed back for explicitness).
+        `session_id` (the resolved actual session id), and `run_id` — the
+        single-writer run identifier minted here (Sprint 25 T25.6).
+
+    Sprint 25 T25.6 — this node is also the emitter BOOTSTRAP: after the claim
+    resolves the real session id it mints `run_id`, writes `currentRunId` onto
+    the 'running' transition, calls `events.init_run`, and emits one one-shot
+    'done' bootstrap event. It cannot emit a start/complete pair for its own
+    claim work — the run context does not exist until `init_run` — so it is the
+    one main-graph node that emits a single event rather than a pair (§3-E,
+    Flag #1).
 
     Raises:
         AgentProcessingError: when session_id is missing or a Firestore
@@ -99,9 +109,20 @@ def run(state: dict) -> dict:
     # server/src/repositories/session.repository.ts:428 (requeueClarifiedSession).
     actual_session_id: str = claimed.get("sessionId") or session_id
 
+    # Sprint 25 T25.6 — mint run_id BEFORE the 'running' transition so it rides
+    # onto that same write as currentRunId (no extra session-doc write). run_id
+    # is the single-writer ForecastState field (plan §3 findings #2) and
+    # namespaces this run's agentEvents.
+    run_id = uuid.uuid4().hex
+
     try:
         firestore_client.update_session_status(actual_session_id, "claimed")
-        firestore_client.update_session_status(actual_session_id, "running")
+        # currentRunId lands on the 'running' transition — it MUST precede the
+        # first emitted event so the panel's `runId == currentRunId` filter
+        # never drops early events (ordering contract, plan §3).
+        firestore_client.update_session_status(
+            actual_session_id, "running", current_run_id=run_id,
+        )
     except AgentProcessingError:
         raise
     except Exception as exc:
@@ -109,13 +130,27 @@ def run(state: dict) -> dict:
             f"claim_session: status update failed — {exc!r}"
         ) from exc
 
+    # Initialize the emitter's run context ONLY now — after the real session id
+    # is resolved and currentRunId has landed (§3 ordering). No event may be
+    # emitted before this point (findings #3). A failure ABOVE this line leaves
+    # no run context, so process_query's fail_event safely no-ops (heads-up #2).
+    events.init_run(actual_session_id, run_id)
+
+    # Flag #1 bootstrap: a single one-shot 'done' event — the panel's first
+    # line at first paint (an empty panel under status 'running' reads as
+    # stuck). NOT a start/complete pair: the claim is instantaneous, so a pair
+    # would write a meaningless durationMs.
+    events.emit_done_event(run_id, "claim_session", "Analyzing your question…")
+
     logger.info(
-        "claim_session: claimed and running session_id=%s actual_session_id=%s queryId=%s",
-        session_id, actual_session_id, claimed.get("queryId"),
+        "claim_session: claimed and running session_id=%s actual_session_id=%s "
+        "run_id=%s queryId=%s",
+        session_id, actual_session_id, run_id, claimed.get("queryId"),
     )
 
     return {
         "session_id": actual_session_id,
         "raw_question": claimed["question"],
         "user_id": claimed["userId"],
+        "run_id": run_id,
     }

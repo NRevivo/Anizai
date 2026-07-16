@@ -58,6 +58,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from agent import events
+from agent.config import settings
 from agent.errors import AgentProcessingError, SessionClaimRaceLostError
 from agent.firestore_client import (
     get_query_doc,
@@ -257,13 +259,20 @@ def process_query(query_doc_id: str) -> None:
     # runner-internal signal, not a ForecastState field.
     mark_failed_session_id: str = initial_state.pop("_resume_session_id", query_doc_id)
 
+    final_state: dict = {}
     try:
-        graph.invoke(initial_state)
+        # Sprint 25 T25.13: stream (stream_mode="values") rather than invoke so
+        # we capture the latest accumulated state — and thus run_id, minted by
+        # claim_session — BEFORE it is lost when a later node raises. Otherwise
+        # equivalent to invoke: the final yielded value is the complete final
+        # state, which the happy path ignores exactly as invoke's return was.
+        for chunk in graph.stream(initial_state, stream_mode="values"):
+            final_state = chunk
     except SessionClaimRaceLostError:
         # Another worker won the claim, or the doc is gone. Quiet
         # no-op — the sibling worker (or the absent doc) is responsible
         # for any state transition. claim_session already logged the
-        # details.
+        # details. No run context exists yet, so there is no event to fail.
         logger.info(
             "process_query: claim race lost or doc missing query_doc_id=%s",
             query_doc_id,
@@ -277,8 +286,29 @@ def process_query(query_doc_id: str) -> None:
             "process_query: graph processing failed query_doc_id=%s",
             query_doc_id,
         )
+        # Sprint 25 T25.13: mark the in-flight agentEvent 'failed' so an aborted
+        # run never leaves a dangling 'running' event (§3-D). run_id (captured
+        # from the streamed state) fires the EXACT-run path in
+        # events._resolve_for_failure; session_id is the backup when the graph
+        # raised inside claim_session before run_id landed. Non-raising.
+        events.fail_event(
+            run_id=final_state.get("run_id"),
+            session_id=mark_failed_session_id,
+            description=f"Forecast failed: {exc!r}",
+        )
         _mark_failed(mark_failed_session_id, query_doc_id, str(exc))
         raise
+    finally:
+        # Sprint 25 T25.13: flush queued events for this run. Belt-and-
+        # suspenders under write_to_firestore's pre-`done` drain on the happy
+        # path; the SOLE drain on the failure path and the
+        # awaiting_clarification terminus (which ends without
+        # write_to_firestore). Non-raising, bounded.
+        events.drain(settings.AGENT_EVENT_DRAIN_TIMEOUT_MS / 1000.0)
+        # Dispose this run's emitter context (bounded registry). Concurrency-
+        # safe explicit end-of-run disposal — not prune-by-idle. run_id is None
+        # only when the graph raised before claim_session minted it → no-op.
+        events.dispose_run(final_state.get("run_id"))
 
     logger.info(
         "process_query: completed graph processing query_doc_id=%s",
@@ -298,4 +328,11 @@ def process_query(query_doc_id: str) -> None:
     # status=='done' (so an awaiting_clarification terminus is skipped) and
     # never raises — a sweep hiccup must not fail an already-successful
     # forecast.
+    #
+    # Sprint 25 note: this runs AFTER the try/finally, i.e. after both event
+    # drains. Clean today because follow-ups emit NO agentEvents (T25.7) — the
+    # sweep enqueues nothing. If that is ever reversed (the deferred "follow-up
+    # events" item), the sweep's events would enqueue after the drains and only
+    # flush on the next request's drain or worker shutdown — this call would
+    # then need its own drain.
     sweep_done_session(mark_failed_session_id)

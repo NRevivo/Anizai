@@ -266,6 +266,7 @@ def update_session_status(
     error_message: Optional[str] = None,
     clarification_candidates: Optional[list[dict]] = None,
     tier: Optional[str] = None,
+    current_run_id: Optional[str] = None,
     canonical_key: "Union[str, None, _UnsetType]" = UNSET,
 ) -> None:
     """
@@ -283,7 +284,8 @@ def update_session_status(
     carefully:
 
     Convention A (kwargs with `Optional[X] = None` default):
-        `error_code`, `error_message`, `clarification_candidates`, `tier`.
+        `error_code`, `error_message`, `clarification_candidates`, `tier`,
+        `current_run_id`.
         These use dict-conditional `if x is not None`. Passing `None`
         means "don't update this field" — preserves any existing
         Firestore value rather than clearing it. Each status transition
@@ -315,6 +317,12 @@ def update_session_status(
         tier: written to tier on 'done' (Sprint 21 T21.8). Matches the
               session doc schema (frontend-integration skill): 'tier_1' |
               'tier_2' | null. Convention A.
+        current_run_id: written to currentRunId on the 'running' transition
+              (Sprint 25 T25.6). Convention A. The frontend reasoning panel
+              renders only the events whose runId == session.currentRunId, so
+              this MUST land before the run's first agentEvent is emitted
+              (ordering contract, plan §3). claim_session attaches it to its
+              existing 'running' update — no extra session-doc write.
         canonical_key: written to canonicalKey on 'done' (Sprint 22 T22.7).
                        Convention B. The resolved Polymarket market
                        identifier on Tier 1; explicit `None` on Tier 2
@@ -343,6 +351,12 @@ def update_session_status(
         update_data["clarificationCandidates"] = clarification_candidates
     if tier is not None:
         update_data["tier"] = tier
+    # Convention A (Sprint 25 T25.6): currentRunId — the run whose agentEvents
+    # the frontend panel should render (runId == currentRunId). claim_session
+    # attaches it to the 'running' transition (no extra write); the ordering
+    # contract requires it to land BEFORE the run's first event is emitted.
+    if current_run_id is not None:
+        update_data["currentRunId"] = current_run_id
     # Convention B: only write canonicalKey when the caller explicitly
     # provided a value (string OR None). UNSET preserves any prior write
     # so failed/awaiting_clarification transitions don't clobber the
@@ -607,6 +621,54 @@ def write_sentiment_time_series(session_id: str, points: list[dict]) -> int:
         session_id, written,
     )
     return written
+
+
+# ==========================================================
+# agentEvents subcollection — Sprint 25 T25.5 (non-blocking emitter)
+# ==========================================================
+
+def write_agent_event(
+    session_id: str,
+    event_id: str,
+    fields: dict,
+    *,
+    merge: bool = False,
+) -> None:
+    """
+    Write (create or merge-update) one agentEvents doc at
+    sessions/{session_id}/agentEvents/{event_id} (Sprint 25 T25.5).
+
+    Called ONLY by the background writer thread in `agent/events.py` (the
+    non-blocking chain-of-thought emitter), never on a node's critical path.
+    Two modes:
+      - merge=False (create): the START event — a full doc (eventId, sessionId,
+        runId, sequence, type, title, description, status='running',
+        durationMs=None, payload, timestamp).
+      - merge=True (update): the COMPLETION / FAILURE — a partial doc
+        (status='done'|'failed', durationMs, optional payload) merged onto the
+        SAME doc id, so the frontend panel sees the step transition
+        running -> done|failed.
+
+    Using event_id as the Firestore doc id makes create+complete target one doc
+    and makes a re-emit idempotent (the FIFO writer guarantees the create is
+    written before its completion).
+
+    Lives here (not in events.py) per hub-principles P2 / CLAUDE.md §3.2 — no
+    firebase_admin imports outside firestore_client. The caller (the events.py
+    writer thread) swallows exceptions; this function just performs the write.
+    """
+    db = get_db()
+    ref = (
+        db.collection("sessions")
+        .document(session_id)
+        .collection("agentEvents")
+        .document(event_id)
+    )
+    ref.set(fields, merge=merge)
+    logger.debug(
+        "write_agent_event: session_id=%s event_id=%s merge=%s",
+        session_id, event_id, merge,
+    )
 
 
 # ==========================================================

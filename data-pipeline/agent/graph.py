@@ -17,6 +17,7 @@ the routing function `_route_after_query_understand` branches on
                                                   → vault_query
                                                   → rate_evidence
                                                   → synthesize
+                                                  → generate_suggested_actions
                                                   → write_to_firestore → END
 
 The `skip_matching_step` path (resume-on-clarify, T21.4/T21.5) is transparent
@@ -41,6 +42,12 @@ evidence is currently available** — it does not wait for ingestion
 (AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION). This is the locked V1 topology:
 a SINGLE sufficiency_check with no second vault query (`vault_query_2`) and
 no refine loop (Advisor↔Ron decision record §6 R5; plan §6).
+
+Sprint 25 T25.3 — inserts `generate_suggested_actions` (Node 6.5) between
+`synthesize` and `write_to_firestore` (unconditional edges, no routing): a
+GPT-4o-mini call producing three contextual follow-up suggestions written into
+SessionResult.suggestedActions. Degrades to `[]` on any failure and never
+fails the forecast (hub-principles G4).
 
 Sprint 20 deliberate omissions (filled in by later sprints):
     - vault_query_2 / reactive_search refine loop (the richer multi-attempt
@@ -73,6 +80,7 @@ from agent.config import settings
 from agent.nodes import (
     build_embedding,
     claim_session,
+    generate_suggested_actions,
     query_understand,
     rate_evidence,
     sufficiency_check,
@@ -99,6 +107,7 @@ NODE_SUFFICIENCY_CHECK = "sufficiency_check"
 NODE_TRIGGER_REACTIVE_INGESTION = "trigger_reactive_ingestion"
 NODE_RATE_EVIDENCE = "rate_evidence"
 NODE_SYNTHESIZE = "synthesize"
+NODE_GENERATE_SUGGESTED_ACTIONS = "generate_suggested_actions"
 NODE_WRITE_TO_FIRESTORE = "write_to_firestore"
 
 
@@ -216,6 +225,9 @@ def _build_graph() -> StateGraph:
     )
     builder.add_node(NODE_RATE_EVIDENCE, rate_evidence.run)
     builder.add_node(NODE_SYNTHESIZE, synthesize.run)
+    builder.add_node(
+        NODE_GENERATE_SUGGESTED_ACTIONS, generate_suggested_actions.run
+    )
     builder.add_node(NODE_WRITE_TO_FIRESTORE, write_to_firestore.run)
 
     builder.add_edge(START, NODE_CLAIM_SESSION)
@@ -247,7 +259,10 @@ def _build_graph() -> StateGraph:
     )
     builder.add_edge(NODE_TRIGGER_REACTIVE_INGESTION, NODE_RATE_EVIDENCE)
     builder.add_edge(NODE_RATE_EVIDENCE, NODE_SYNTHESIZE)
-    builder.add_edge(NODE_SYNTHESIZE, NODE_WRITE_TO_FIRESTORE)
+    # Sprint 25 T25.3: generate_suggested_actions (Node 6.5) sits between
+    # synthesize and write_to_firestore — unconditional, no routing.
+    builder.add_edge(NODE_SYNTHESIZE, NODE_GENERATE_SUGGESTED_ACTIONS)
+    builder.add_edge(NODE_GENERATE_SUGGESTED_ACTIONS, NODE_WRITE_TO_FIRESTORE)
     builder.add_edge(NODE_WRITE_TO_FIRESTORE, END)
 
     return builder

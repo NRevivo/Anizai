@@ -9,10 +9,14 @@ real-time listener never reads a `done` session before its supporting
 subcollections exist.
 
 Write order (frontend-integration skill — preserves frontend invariants):
+    0. emit a start('running') agentEvent at entry (Sprint 25 T25.6)
     1. evidence subcollection           (sessions/{id}/evidence/{eid})
     2. predictionSeries subcollection   (sessions/{id}/predictionSeries)
     3. sentimentTimeSeries subcollection(sessions/{id}/sentimentTimeSeries)
-    4. sessionResults top-level doc     (sessionResults/{id})
+    4. sessionResults top-level doc     (sessionResults/{id}, incl. suggestedActions)
+    4b. complete THIS node's agentEvent, then DRAIN the agentEvents queue
+        (Sprint 25 T25.4/T25.6 §3-D — BEFORE 'done', so the panel gets every
+        event; 'done' hides the panel and an undrained tail would dangle)
     5. session.status = 'done'          (sessions/{id})
     6. forecastQueries.status = 'done'  (forecastQueries/{id})
 
@@ -97,7 +101,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from agent import firestore_client
+from agent import events, firestore_client
+from agent.config import settings
 from agent.errors import AgentProcessingError
 from agent.schemas import SOURCE_TYPE_TO_FRONTEND_TYPE
 from agent.utils.sentiment_bucketing import bucket_sentiment_by_time
@@ -130,6 +135,13 @@ def run(state: dict) -> dict:
             propagate unwrapped — process_query._mark_failed catches
             them and writes session=failed/query=failed.
     """
+    # Sprint 25 T25.6: emit the start event at entry (manual, not via the
+    # @events.emits decorator — this node's complete must be ordered before the
+    # pre-`done` drain and the 'done' flip, §3-D). run_id comes from state
+    # (claim_session's single-writer field); missing run_id → emit no-ops.
+    run_id = state.get("run_id")
+    event_id = events.emit_event(run_id, "write_to_firestore", "Saving your forecast…")
+
     session_id = state.get("session_id")
     if not session_id:
         raise AgentProcessingError(
@@ -175,8 +187,24 @@ def run(state: dict) -> dict:
         session_id, sentiment_time_series_points,
     )
 
+    # Sprint 25 T25.4: inject the suggested actions produced by
+    # generate_suggested_actions (Node 6.5) into the SessionResult. synthesize
+    # stubs `suggestedActions: []`; overwrite it here with the real list (or []
+    # when the node degraded / produced none). No firestore_client change —
+    # write_session_result persists the passed dict verbatim.
+    synthesis_result["suggestedActions"] = state.get("suggested_actions") or []
+
     # 4. sessionResults — top-level collection (server contract D6).
     firestore_client.write_session_result(session_id, synthesis_result)
+
+    # 4b. §3-D pre-`done` drain (pinned order, T25.4/T25.6): all forecast
+    # outputs are now written. Complete THIS node's event (the last event), then
+    # DRAIN the agentEvents queue BEFORE flipping the session to 'done'. Flipping
+    # 'done' first would let the panel (which hides on 'done') stop rendering
+    # before the final events land; with no drain, the last event would dangle
+    # 'running' forever. drain() is a bounded, non-raising wait.
+    events.complete_event(run_id, event_id)
+    events.drain(settings.AGENT_EVENT_DRAIN_TIMEOUT_MS / 1000.0)
 
     # 5. session.status = done (frontend's "render now" signal).
     # Sprint 21 T21.8: include tier on the session doc so the frontend's

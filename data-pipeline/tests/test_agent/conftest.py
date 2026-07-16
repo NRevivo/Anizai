@@ -24,9 +24,12 @@ T12 (real Firestore emulator):
         and sessionResults.
 """
 
+import json
 import os
 import socket
 import uuid
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import firebase_admin
 import google.auth.credentials
@@ -50,6 +53,69 @@ class _EmulatorCredentials(credentials.Base):
 
     def get_credential(self):
         return google.auth.credentials.AnonymousCredentials()
+
+
+# ==========================================================
+# Hermetic reactive-trigger producer (Sprint 25 test-hygiene)
+# ==========================================================
+
+@pytest.fixture
+def mock_reactive_producer(monkeypatch):
+    """Hermetic fake KafkaProducer for Gate 2 / integration tests that route
+    through `trigger_reactive_ingestion`.
+
+    Sprint 23.5 wired the reactive trigger into the forecast graph, so any
+    full-graph test whose (mocked) evidence is insufficient now dispatches a
+    real Kafka send — needing a broker (NoBrokersAvailable when down). Gate 2
+    must not hit a real broker; this fixture closes that pre-existing
+    test-hygiene gap (surfaced while running the Sprint-25 suite with Kafka
+    down). It patches:
+      - `_get_producer` → a fake whose `send().get()` yields a stub
+        RecordMetadata, so the trigger records 'emitted' and the graph proceeds;
+      - `_log_attempt` → a no-op, so the trigger's Postgres audit-log insert
+        needs no DB either.
+    Fully hermetic — no Kafka, no Postgres. The trigger's own Gate 1/2/3 tests
+    still cover the real send + log paths.
+    """
+    from agent.nodes import trigger_reactive_ingestion
+
+    metadata = SimpleNamespace(offset=0, partition=0)
+    future = MagicMock()
+    future.get = MagicMock(return_value=metadata)
+    producer = MagicMock()
+    producer.send = MagicMock(return_value=future)
+
+    monkeypatch.setattr(trigger_reactive_ingestion, "_get_producer", lambda: producer)
+    monkeypatch.setattr(trigger_reactive_ingestion, "_log_attempt", lambda *a, **k: None)
+    return producer
+
+
+@pytest.fixture
+def mock_suggested_actions_client(monkeypatch):
+    """Mock the generate_suggested_actions node's OpenAI client for full-forecast
+    tests written before Sprint 25.
+
+    generate_suggested_actions (Node 6.5) is new in Sprint 25, so pre-existing
+    full-graph tests don't mock its `_get_default_client`. Once such a test runs
+    the whole graph it reaches this node, which would otherwise build a real
+    OpenAI client and make a real call (or degrade to [] if no key). This fixture
+    returns a client yielding a valid 3-action response so the node's success
+    path runs hermetically and deterministically — the same test-hygiene pattern
+    as mock_reactive_producer.
+    """
+    from agent.nodes import generate_suggested_actions
+
+    client = MagicMock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"actions": [
+            {"label": "Why so confident?", "prompt": "What drives the confidence?"},
+            {"label": "Strongest driver", "prompt": "Which evidence mattered most?"},
+            {"label": "Compare to the market", "prompt": "How does this compare?"},
+        ]})))],
+        usage=SimpleNamespace(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+    )
+    monkeypatch.setattr(generate_suggested_actions, "_get_default_client", lambda: client)
+    return client
 
 
 # ==========================================================

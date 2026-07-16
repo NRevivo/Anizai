@@ -59,7 +59,8 @@ def test_build_graph_returns_uncompiled_state_graph():
 def test_graph_registers_all_nodes():
     """Sprint 23.5 T23.5.5 wires the reactive/sufficiency path: adds
     sufficiency_check (after vault_query) and trigger_reactive_ingestion
-    (insufficient branch) on top of the Sprint 21 node set."""
+    (insufficient branch). Sprint 25 T25.3 adds generate_suggested_actions
+    between synthesize and write_to_firestore — 11 nodes total."""
     builder = graph_module._build_graph()
 
     expected = {
@@ -72,6 +73,7 @@ def test_graph_registers_all_nodes():
         graph_module.NODE_TRIGGER_REACTIVE_INGESTION,
         graph_module.NODE_RATE_EVIDENCE,
         graph_module.NODE_SYNTHESIZE,
+        graph_module.NODE_GENERATE_SUGGESTED_ACTIONS,
         graph_module.NODE_WRITE_TO_FIRESTORE,
     }
     assert set(builder.nodes.keys()) == expected
@@ -95,6 +97,10 @@ def test_node_name_constants_match_string_values():
     )
     assert graph_module.NODE_RATE_EVIDENCE == "rate_evidence"
     assert graph_module.NODE_SYNTHESIZE == "synthesize"
+    assert (
+        graph_module.NODE_GENERATE_SUGGESTED_ACTIONS
+        == "generate_suggested_actions"
+    )
     assert graph_module.NODE_WRITE_TO_FIRESTORE == "write_to_firestore"
 
 
@@ -122,7 +128,8 @@ def test_static_edges_in_graph():
     - write_clarification → END   (ambiguous path terminal)
     - build_embedding → vault_query → sufficiency_check
     - trigger_reactive_ingestion → rate_evidence   (trigger-and-forget rejoin)
-    - rate_evidence → synthesize → write_to_firestore → END
+    - rate_evidence → synthesize → generate_suggested_actions →
+      write_to_firestore → END   (Sprint 25 T25.3 inserts Node 6.5)
 
     The conditional edges (query_understand ambiguous?, sufficiency_check
     sufficient?) are verified separately below. The edge out of
@@ -141,7 +148,14 @@ def test_static_edges_in_graph():
             graph_module.NODE_RATE_EVIDENCE,
         ),
         (graph_module.NODE_RATE_EVIDENCE, graph_module.NODE_SYNTHESIZE),
-        (graph_module.NODE_SYNTHESIZE, graph_module.NODE_WRITE_TO_FIRESTORE),
+        (
+            graph_module.NODE_SYNTHESIZE,
+            graph_module.NODE_GENERATE_SUGGESTED_ACTIONS,
+        ),
+        (
+            graph_module.NODE_GENERATE_SUGGESTED_ACTIONS,
+            graph_module.NODE_WRITE_TO_FIRESTORE,
+        ),
         (graph_module.NODE_WRITE_TO_FIRESTORE, END),
     }
     assert builder.edges == expected_straight_edges

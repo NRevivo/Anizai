@@ -168,7 +168,7 @@ def _make_synthesis_response(
 # Fixtures
 # ==========================================================
 @pytest.fixture
-def mocked_boundaries():
+def mocked_boundaries(mock_reactive_producer):
     """Patch every external boundary the graph reaches: Firestore, both
     OpenAI clients, and the three retrieval agents. Yields a namespace
     with named children so tests can configure each independently.
@@ -216,6 +216,9 @@ def mocked_boundaries():
         patch(
             "agent.nodes.synthesize._get_default_client"
         ) as mock_synth_factory,
+        patch(
+            "agent.nodes.generate_suggested_actions._get_default_client"
+        ) as mock_sa_factory,
         patch("agent.agents.researcher.run") as mock_researcher,
         patch("agent.agents.pulse_analyst.run") as mock_pulse,
         patch("agent.agents.market_bridge.run") as mock_market,
@@ -254,6 +257,21 @@ def mocked_boundaries():
         synth_client = MagicMock()
         synth_client.chat.completions.create.return_value = _make_synthesis_response()
         mock_synth_factory.return_value = synth_client
+
+        # Sprint 25: generate_suggested_actions (Node 6.5) — a valid 3-action
+        # response so the node runs its success path hermetically.
+        sa_client = MagicMock()
+        sa_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+                "actions": [
+                    {"label": "Why so confident?", "prompt": "What drives the confidence?"},
+                    {"label": "Strongest driver", "prompt": "Which evidence mattered most?"},
+                    {"label": "Compare to the market", "prompt": "How does this compare to the market?"},
+                ]
+            })))],
+            usage=SimpleNamespace(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+        )
+        mock_sa_factory.return_value = sa_client
 
         # write_to_firestore helper return values (counts of items written)
         mock_write_evidence.return_value = 0

@@ -110,6 +110,7 @@ from typing import Any
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 
+from agent import events
 from agent.config.settings import (
     AGENT_REACTIVE_DEFAULT_WINDOW_DAYS,
     AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION,
@@ -245,6 +246,7 @@ def _build_keywords(state: dict) -> list[str]:
 # Node Entry Point
 # ==========================================================
 
+@events.emits("trigger_reactive_ingestion", "Requesting fresh data…")
 def run(state: dict) -> dict:
     """
     Emit one ingestion_triggers message to the NewsAPI producer, log the

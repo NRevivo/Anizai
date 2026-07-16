@@ -122,11 +122,16 @@ def test_writes_subcollections_before_session_result_before_done(mocked_firestor
     # Sprint 22 T22.7: session_status now also receives canonical_key=None
     # since the test fixture has no market_evidence.polymarket payload
     # (Tier 2 path → explicit None per Convention B).
+    # Sprint 25 T25.4: write_to_firestore injects suggestedActions into the
+    # SessionResult before persisting (this state has no suggested_actions → []).
     assert manager.method_calls == [
         call.evidence("s1", [{**_evidence_item(), "type": "news"}]),
         call.prediction_series("s1", []),
         call.sentiment_time_series("s1", []),
-        call.session_result("s1", {"finalProbability": 0.7, "tier": "tier_1"}),
+        call.session_result(
+            "s1",
+            {"finalProbability": 0.7, "tier": "tier_1", "suggestedActions": []},
+        ),
         call.session_status("s1", "done", tier=None, canonical_key=None),
         call.query_status("s1", "done"),
     ]

@@ -46,6 +46,7 @@ import logging
 import uuid as _uuid_module
 from typing import Any, Optional
 
+from agent import events
 from agent.config import settings
 from agent.errors import AgentProcessingError
 from agent.utils import llm_cost
@@ -112,6 +113,7 @@ def _get_default_client() -> Any:
 # ==========================================================
 # Public node function
 # ==========================================================
+@events.emits("query_understand", "Understanding your question…")
 def run(state: dict, *, client: Optional[Any] = None) -> dict:
     """
     Execute Node 1 of the forecast graph.

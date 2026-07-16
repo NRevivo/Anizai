@@ -79,6 +79,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from agent import events
 from agent.config import settings
 from agent.errors import AgentProcessingError
 from agent.utils import llm_cost
@@ -178,6 +179,7 @@ def _get_default_client() -> Any:
 # ==========================================================
 # Public node function
 # ==========================================================
+@events.emits("rate_evidence", "Weighing the evidence…")
 def run(state: dict, *, client: Optional[Any] = None) -> dict:
     """
     Execute the rate_evidence node.

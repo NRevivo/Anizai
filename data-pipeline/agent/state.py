@@ -46,6 +46,16 @@ class ForecastState(TypedDict, total=False):
     session_id: str
     user_id: str
 
+    # --- Run identity (Sprint 25 T25.6) ---
+    # Minted once by claim_session (uuid4) as the SINGLE-WRITER field that
+    # namespaces this run's agentEvents (plan §3 findings #2). The per-run
+    # `sequence` counter + registry live in the emitter (agent/events.py), NOT
+    # on state; run_id is the ONLY events-related state field. Nodes pass
+    # state["run_id"] to events.emit_event/complete_event; it is also written to
+    # the session doc as `currentRunId` so the panel renders only this run's
+    # events. Read defensively via state.get("run_id") (total=False semantics).
+    run_id: str
+
     # --- Query Understanding Output ---
     question_tier: Literal["polymarket_backed", "freeform"]
     structured_intent: dict

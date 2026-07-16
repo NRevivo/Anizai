@@ -135,6 +135,7 @@ def _mocked_graph(qu_candidates=None, polymarket_market=None):
         patch("agent.nodes.build_embedding._get_default_client") as mock_emb_factory,
         patch("agent.nodes.rate_evidence._get_default_client") as mock_rate_factory,
         patch("agent.nodes.synthesize._get_default_client") as mock_synth_factory,
+        patch("agent.nodes.generate_suggested_actions._get_default_client") as mock_sa_factory,
         patch("agent.agents.researcher.run") as mock_researcher,
         patch("agent.agents.pulse_analyst.run") as mock_pulse,
         patch("agent.agents.market_bridge.run") as mock_market,
@@ -165,6 +166,21 @@ def _mocked_graph(qu_candidates=None, polymarket_market=None):
         synth_client.chat.completions.create.return_value = _make_synthesis_response()
         mock_synth_factory.return_value = synth_client
 
+        # Sprint 25: generate_suggested_actions (Node 6.5) — valid 3-action
+        # response so the node runs its success path hermetically.
+        sa_client = MagicMock()
+        sa_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+                "actions": [
+                    {"label": "Why so confident?", "prompt": "What drives the confidence?"},
+                    {"label": "Strongest driver", "prompt": "Which evidence mattered most?"},
+                    {"label": "Compare to the market", "prompt": "How does this compare to the market?"},
+                ]
+            })))],
+            usage=SimpleNamespace(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+        )
+        mock_sa_factory.return_value = sa_client
+
         mock_researcher.return_value = {
             "articles": [], "source_diversity": {}, "recency_range": None, "empty": True
         }
@@ -191,7 +207,7 @@ def _mocked_graph(qu_candidates=None, polymarket_market=None):
 # Path A — Clear Tier 1 auto-pick (with polymarket data → tier_1)
 # ==========================================================
 
-def test_gate2_clear_tier1_path_with_polymarket_data():
+def test_gate2_clear_tier1_path_with_polymarket_data(mock_reactive_producer):
     """Clear question + polymarket data → tier_1 synthesis, full pipeline."""
     polymarket_data = {"current_odds": 0.72, "market_slug": "fed-cut-q2-2026"}
     with _mocked_graph(
@@ -282,7 +298,7 @@ def test_gate2_ambiguous_writes_awaiting_clarification_on_both_docs():
 # Path C — Resume-on-clarify (skip_matching_step=True)
 # ==========================================================
 
-def test_gate2_resume_on_clarify_skips_llm_call_and_completes_forecast():
+def test_gate2_resume_on_clarify_skips_llm_call_and_completes_forecast(mock_reactive_producer):
     """skip_matching_step=True + structured_intent pre-populated → no LLM call
     in query_understand, full forecast runs and produces synthesis_result."""
     resume_state = {
@@ -344,7 +360,7 @@ def test_gate2_resume_on_clarify_null_means_tier2_freeform():
 # Path D — Tier 2 freeform (no polymarket, first-time run)
 # ==========================================================
 
-def test_gate2_tier2_freeform_clear_question_produces_tier2_synthesis():
+def test_gate2_tier2_freeform_clear_question_produces_tier2_synthesis(mock_reactive_producer):
     """Clear but non-Polymarket question → single candidate, auto-pick,
     market_bridge returns polymarket=None → tier_2 synthesis."""
     with _mocked_graph(
@@ -369,7 +385,7 @@ def test_gate2_tier2_freeform_clear_question_produces_tier2_synthesis():
     assert "done" in statuses
 
 
-def test_gate2_tier2_marketprobability_is_null():
+def test_gate2_tier2_marketprobability_is_null(mock_reactive_producer):
     """Tier 2 SessionResult must have marketProbability=None."""
     with _mocked_graph(polymarket_market=None) as mocks:
         final = graph.invoke({"session_id": "doc1"})
