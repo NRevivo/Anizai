@@ -41,7 +41,7 @@ could be identified, the date column says so.
 | Slices 2.5–2.7 — payload audit follow-ups | Closed | date not identified | Backend payload audit; canonical `impactOnForecast`; `consensusScore` plumbing removed |
 | Sprint 24 + 25 — frontend/BFF contract | Closed | 2026-07-15 | `'answered'` status, `replyToMessageId`, send-lock, thinking indicator, suggested-action chips, Rule A + Rule B agent timeline, CG index + rules deployed |
 
-> Slices 2.5–2.7 are documented in `../backend-audit.md` and referenced by CLAUDE.md,
+> Slices 2.5–2.7 are documented in `../archive/backend-audit.md` and referenced by CLAUDE.md,
 > but no commit on `client/`/`server/` could be matched to them by message. Their
 > outcomes are visible in current code (the canonical-`impactOnForecast` read, the
 > absent `consensusScore`), so the work landed — only the dating is unverified.
@@ -147,7 +147,7 @@ Client test files: `src/lib/agentEvents.test.ts` (4), `…/predictionOverview/li
 `…/predictionOverview/lib/deriveVerdict.test.ts` (16).
 
 > **Two stale claims corrected here.** `hub-handoff-summary-task-16.md §13` and
-> `final-validation-task-16.md` both state that *"no client test runner is currently
+> `../archive/final-validation-task-16.md` both state that *"no client test runner is currently
 > wired in `client/package.json`."* A runner **is** wired (`"test": "vitest"`, vitest
 > 2.1 in devDependencies) and 31 tests pass. Only the **lint** blocker in those docs
 > is still real.

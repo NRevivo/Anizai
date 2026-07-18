@@ -124,7 +124,7 @@ Rule 1 is the product-critical one: **low confidence overrides any probability**
 0.9 probability on thin evidence never renders as a bet. The signature takes only
 probability and confidence — there is no consensus parameter.
 
-> `docs/backend-audit.md` Drift #2 describes a `consensus_score: number` parameter on
+> `docs/archive/backend-audit.md` Drift #2 describes a `consensus_score: number` parameter on
 > `deriveVerdict`. That parameter no longer exists. Superseded.
 
 **`extractDeadline`** is a heuristic, LLM-free parse of the question string, tried in
@@ -354,7 +354,7 @@ modal to **359 px** with 8 px margins. Both fit. The overflow risk
 `ui-map-task-0-1.md §6` flagged for fixed `w-80`/`w-96` drawers does not occur.
 
 > The settings modal also **does** stack on mobile — its section nav renders as a
-> horizontally scrollable tab strip, not a fixed two-column sidebar. `ui-map-task-0-1.md`
+> horizontally scrollable tab strip, not a fixed two-column sidebar. `../archive/ui-map-task-0-1.md`
 > records "Fixed two-column modal body; no mobile-specific stacking." Superseded.
 
 > **What this pass did not cover:** `SubscriptionSettings` payment/cancel sub-flows,
@@ -375,7 +375,7 @@ modal to **359 px** with 8 px margins. Both fit. The overflow risk
 | `mapSessionStatus` is dead code | `App.tsx:74` defines it; `App.tsx:89` immediately does `void mapSessionStatus;`. The `stable`/`volatile` collapse it implements is retired — both `Prediction.status` and `PredictionSession.status` carry the full `SessionStatus` union. |
 | Reasoning trace is not retained | Rule A drops `AgentEventsTimeline` the moment status becomes `done`, so the completed forecast has no record of how it was produced even though the events persist in Firestore. Deliberate per Sprint 25 — noted because it is a product decision, not an oversight. |
 | Market / sentiment cards are permanently empty | No live data upstream; both render `StateMessage` fallbacks. Tracked KG-C-6. Expected shapes: `../backend-specs/market-sentiment-spec.md`. |
-| Landing-page audit not re-verified | `../audits/landing-audit.md` (dated 2026-05-20) inventories landing copy and layout. Component names still match, but **its copy-level claims were not re-checked** during this rewrite. |
+| Landing-page audit not re-verified | `../archive/audits/landing-audit.md` (dated 2026-05-20) inventories landing copy and layout. Component names still match, but **its copy-level claims were not re-checked** during this rewrite. |
 | Shared UI primitives are widely bypassed | `components/ui/` provides `Button`, `Card`, `Badge`, and `Input`, but many surfaces build the same affordances by hand with local Tailwind classes instead — raw `<button>` elements throughout the modals, settings, subscription/payment, landing and icon-button surfaces; card-like containers assembled manually in settings, plan cards, chat bubbles and evidence rows; and status/plan/confidence/source badges written as local `<span>`s despite `badge.tsx` existing. There is also no single radius or spacing scale: `Card` uses `rounded-lg`, settings surfaces `rounded-xl`, the modal `rounded-2xl`, and badges range across `rounded` / `rounded-md` / `rounded-lg` / `rounded-full`. The risk is not any individual style but the **number of one-off variants** — a change to a primitive does not propagate to the surfaces that reimplemented it. Carried forward from the Task-0.2 consistency audit; the design-system observations were re-read against current source, but a component-by-component re-audit was **not** performed. |
 | Three layout trees mount simultaneously | `DashboardPage` renders the wide-desktop grid, the tablet grid, and the mobile stack as three sibling subtrees, hidden from each other by `hidden`/`lg:hidden`/`xl:hidden`. All three are in the DOM at once — confirmed at runtime (every card heading appears three times) and corroborated by `sprint-24-25-frontend-tasks.md`, which describes passing props to "all three `ChatPanel` instances". Correct, and it keeps each layout independently readable, but it triples the mounted component count and means any per-instance state or effect runs three times. Known and intentional; recorded so it is not rediscovered as a bug. |
 | Responsive: three sub-surfaces still source-verified only | The 2026-07-18 browser pass (§6.2) cleared every major dashboard surface at 375/768/1280 with zero unclipped overflow and zero console errors. Not exercised: `SubscriptionSettings` payment/cancel sub-flows, `CreateForecastContext` at tablet width, and the `awaiting_clarification` candidate picker — no reachable state during the run. |

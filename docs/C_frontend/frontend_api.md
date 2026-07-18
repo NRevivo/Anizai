@@ -313,9 +313,9 @@ client fetch('/sessions')
 `client/vite.config.ts` owns the rewrite. In a deployment without that proxy,
 `VITE_API_BASE_URL` must be set to an origin that resolves to the server root.
 
-> Two docs in `docs/` disagree about this: `api-prefix-audit-task-3-1.md` states the
+> Two docs in `docs/` disagree about this: `../archive/api-prefix-audit-task-3-1.md` states the
 > base defaults to `http://localhost:3000`, which was superseded by
-> `api-prefix-fix-task-3.md`. The code is authoritative — the default is `/api`.
+> `../archive/api-prefix-fix-task-3.md`. The code is authoritative — the default is `/api`.
 
 ### §7.4 Local dev
 
