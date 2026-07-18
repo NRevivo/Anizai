@@ -1,0 +1,381 @@
+# frontend_ui.md
+> Domain: C — Frontend / BFF
+> Type: Spec
+> Last updated: 2026-07-18
+> TL;DR: The React SPA's screens and components — the routerless `AppState` model, the 12 screens, the dashboard card composition, the two live-render rules that govern the agent timeline, and which UI states actually exist. Open this before changing a screen, adding a card, or reasoning about what renders during a run.
+
+## Navigation
+- §1 — Overview — the routerless model and where state lives
+- §2 — Screen Matrix — the 12 `AppState` values and their files
+- §3 — Dashboard Composition — shell → cards → subcomponents
+- §4 — Live Surfaces — Rule A and Rule B, the agent timeline
+- §5 — UI States — status, loading, empty, error, and their implementations
+- §6 — Styling — Tailwind, primitives, palettes, markdown
+- §7 — Known Constraints
+
+---
+
+## §1 — Overview
+
+The client is a Vite 6 / React 19 SPA. **There is no router library.** Navigation is a
+`useState<AppState>` union in `client/src/App.tsx:52-64`, and each screen is rendered
+conditionally. Consequences that follow from this and cannot be worked around locally:
+no deep links, no browser back/forward, no URL-addressable forecast.
+
+`App.tsx` (962 lines) owns four responsibilities simultaneously: pseudo-routing, all
+data fetching, all view-model mapping (`frontend_contracts.md §5`), and the three
+Firestore listener subscriptions. `DashboardPage.tsx` (744 lines) owns the dashboard
+shell — panel layout, drawers, modals, and the status-panel rendering. Tracked KG-C-3.
+
+Component files are otherwise small and composable. The forecast overview in particular
+was decomposed out of a former god-component into `cards/predictionOverview/`
+(§3.2).
+
+---
+
+## §2 — Screen Matrix
+
+`AppState` has exactly **12** values (`App.tsx:52-64`). Each maps to one page component.
+
+| `AppState` | Page component | Purpose |
+|---|---|---|
+| `landing` | `pages/LandingPage.tsx` | Public marketing page |
+| `login` | `pages/LoginPage.tsx` | Google + email sign-in |
+| `signup` | `pages/SignupPage.tsx` | Account creation |
+| `plan-selection` | `pages/PlanSelection.tsx` | Free / Premium choice |
+| `dashboard` | `pages/DashboardPage.tsx` | The logged-in workspace |
+| `contact` | `pages/ContactPage.tsx` | Public |
+| `features` | `pages/FeaturesPage.tsx` | Public |
+| `methodology` | `pages/MethodologyPage.tsx` | Public |
+| `about` | `pages/AboutPage.tsx` | Public |
+| `terms` | `pages/TermsPage.tsx` | Legal |
+| `privacy` | `pages/PrivacyPage.tsx` | Legal |
+| `cookies` | `pages/CookiesPage.tsx` | Legal |
+
+> `docs/ui-map-task-0-1.md §2` lists two further screens — **Changelog** and **Blog**.
+> Neither `ChangelogPage.tsx` nor `BlogPage.tsx` exists in `client/src/pages/`. That
+> doc is superseded by this section.
+
+**Landing composition** (`pages/LandingPage.tsx:1-7`) — six sections plus a shell:
+`Hero`, `DashboardPreview`, `HowItWorks`, `WhatYouGet`, `QuestionsWeTrack`,
+`ClosingCTA`, wrapped in `components/site/PageShell`.
+
+> The same stale doc lists `ProductExplanation`, `UIShowcase`, `WhoItsFor`, and
+> `FinalCTA` as the landing children. None of those files exist.
+
+**Auth is real.** Sign-in runs through Firebase (`services/auth.service.ts`), and
+`App.tsx:465` subscribes to `subscribeToAuthState` to hydrate the session. There is no
+demo-dashboard shortcut on the auth path.
+
+---
+
+## §3 — Dashboard Composition
+
+### §3.1 Shell
+
+```
+DashboardPage.tsx                       ← shell: layout, drawers, modals, status panels
+├── Sidebar.tsx                         ← session list, search, new-forecast, user menu
+├── (center) CreateForecastView.tsx     ← when currentView === 'new-forecast'
+├── (center) status panel + AgentEventsTimeline   ← when status !== 'done'  (§4)
+├── (center) Dashboard.tsx              ← when status === 'done' and a Prediction exists
+│   ├── cards/predictionOverview/       ← §3.2
+│   ├── cards/MarketComparison.tsx
+│   ├── cards/SentimentAnalysis.tsx
+│   └── cards/EvidenceTimeline.tsx      ← §3.3
+├── (right) ChatPanel.tsx               ← follow-up conversation
+├── (right) CreateForecastContext.tsx   ← trending suggestions during creation
+├── SettingsModal.tsx → settings/*      ← 6 sections
+└── ui/ConfirmDialog.tsx                ← delete confirmation
+```
+
+`DashboardPage` holds 14 `useState` hooks covering drawers, modals, deletion,
+clarification submit, retry submit, and `currentView` (`'dashboard' | 'new-forecast'`).
+
+### §3.2 `cards/predictionOverview/`
+
+Six components plus two unit-tested pure modules:
+
+| File | Role |
+|---|---|
+| `index.tsx` | Composition root; owns markdown rendering config |
+| `ProbabilityRing.tsx` | The probability dial |
+| `VerdictBanner.tsx` | Verdict, deadline, thesis |
+| `MetricsRow.tsx` | Probability / confidence / consensus tiles |
+| `DriversAndHeadwinds.tsx` | `keyFactors` split by `direction` |
+| `GapsNotice.tsx` | `whatIDidntFind` |
+| `ReasoningChain.tsx` | `reasoningChain` steps |
+| `lib/deriveVerdict.ts` | Pure verdict decision table (+ `.test.ts`) |
+| `lib/extractDeadline.ts` | Heuristic deadline parse (+ `.test.ts`) |
+
+**`deriveVerdict`** maps `{ finalProbability, confidence }` to one of six actions.
+Rules are evaluated in order, first match wins (`lib/deriveVerdict.ts:36-57`):
+
+| # | Condition | Verdict | Tone |
+|---|---|---|---|
+| 1 | `confidence < 0.2` | `insufficient` — "Don't Bet — Insufficient Evidence" | warning |
+| 2 | `probability ≥ 0.7` and `confidence ≥ 0.6` | `strong-bet-yes` — "Strong Yes" | positive |
+| 3 | `probability ≤ 0.3` and `confidence ≥ 0.6` | `strong-bet-no` — "Strong No" | negative |
+| 4 | `0.4 ≤ probability ≤ 0.6` | `avoid` — "Coin Flip — Avoid" | neutral |
+| 5 | `probability ≥ 0.6` | `lean-yes` — "Lean Yes" | positive |
+| 6 | `probability ≤ 0.4` | `lean-no` — "Lean No" | negative |
+
+Rule 1 is the product-critical one: **low confidence overrides any probability**, so a
+0.9 probability on thin evidence never renders as a bet. The signature takes only
+probability and confidence — there is no consensus parameter.
+
+> `docs/archive/backend-audit.md` Drift #2 describes a `consensus_score: number` parameter on
+> `deriveVerdict`. That parameter no longer exists. Superseded.
+
+**`extractDeadline`** is a heuristic, LLM-free parse of the question string, tried in
+pattern order: explicit ISO `YYYY-MM-DD`, then `before YYYY`, then further patterns.
+Month-only matches resolve to the last day of that month. Returns `null` on no match.
+
+**Markdown.** `summaryMarkdown` renders through `react-markdown` with an explicit
+`Components` map, because **no Tailwind typography plugin is installed** — `prose`
+classes are unavailable, so every element is styled by hand (`index.tsx:14-30`).
+Summaries longer than `SUMMARY_COLLAPSE_THRESHOLD = 400` characters collapse into a
+`<details>` disclosure.
+
+### §3.3 `EvidenceTimeline.tsx`
+
+The most behavior-dense card (366 lines). Confirmed behaviors:
+
+- **Deduplication** — `dedupeEvents()` (`:82`) keys rows by both `id` and `evidenceId`,
+  merging duplicates and OR-ing `isKeyEvidence` across the merged set. A row's
+  `evidenceIds` retains every id that collapsed into it.
+- **Grouping** — rows are grouped by `sourceType` in a fixed `SOURCE_ORDER`; only
+  types actually present render a group or a filter tab (`:266-283`).
+- **Filtering** — an `all` tab plus one per present type.
+- **Real links** — the title renders as `<a href={row.url ?? undefined}>` (`:203`),
+  not a styled non-link.
+- **Factor highlight** — `highlightedEvidenceIds` (set by clicking a
+  Drivers/Headwinds row) is matched against each row's `evidenceIds`. A non-empty
+  highlight **forces the filter back to `all`** so highlighted rows can't hide behind
+  an active tab, and scrolls the card into view (`:255-263`).
+- **Impact** — read from `impactOnForecast` only; the legacy `impact` field is absent
+  from the component.
+
+The factor→evidence round trip is coordinated by `Dashboard.tsx`, which holds
+`highlightedEvidenceIds` state and clears it after
+`HIGHLIGHT_DURATION_MS = 3500` (`Dashboard.tsx:14-35`). It re-creates the array on every
+selection (`[...evidenceIds]`) so re-clicking the same factor re-triggers the scroll.
+
+---
+
+## §4 — Live Surfaces
+
+Two named rules govern what renders while a forecast is in flight. Both are enforced in
+code and commented as such.
+
+### §4.1 Rule A — the reasoning panel is live-only
+
+`AgentEventsTimeline` renders **only** when status is `queued`, `claimed`, or `running`
+(`DashboardPage.tsx:488`):
+
+```tsx
+{['queued', 'claimed', 'running'].includes(activeSessionState.status) && (
+    <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
+)}
+```
+
+`failed` and `awaiting_clarification` still show their status panel, but never the
+timeline. Once status is `done`, the whole status-panel branch is replaced by the
+`Dashboard` card stack — so the reasoning trace is not part of the finished forecast.
+
+### §4.2 Rule B — only the current run's events render
+
+`selectCurrentRunEvents(events, currentRunId)` (`client/src/lib/agentEvents.ts`) filters
+the subcollection to events whose `runId` matches the session document's
+`currentRunId`, sorted by `sequence`. **A null `currentRunId` yields an empty array.**
+Full contract in `frontend_contracts.md §4.2`.
+
+### §4.3 `AgentEventsTimeline` rendering
+
+Status → visual mapping (`AgentEventsTimeline.tsx:14-49`):
+
+| Condition | Dot | Label |
+|---|---|---|
+| `status === 'failed'` **or** `type === 'error'` | rose | Failed |
+| `status === 'running'` / `'pending'` | amber | Running / Pending |
+| `status === 'done'` | teal | Done |
+| anything else | slate | Event |
+
+The final branch is a deliberate degrade-not-crash path for unknown or missing status
+values. Durations format as `ms` below 1s, `s` above, dropping the decimal past 10s.
+`payload` is never rendered.
+
+**In production this component shows its empty state.** The read path is complete and
+verified in this repo; events are absent because the deployed agent image predates the
+emission mechanism. See `frontend_overview.md §2` and KG-C-7 — that is upstream
+(Domain-B) state relayed from its owner, not verifiable here.
+
+---
+
+## §5 — UI States
+
+### §5.1 Per-status panels
+
+`DashboardPage.renderStatusPanel()` returns a distinct `StateMessage` per session
+status (`DashboardPage.tsx:279-451`). All five non-`done` statuses are implemented:
+
+| Status | Surface |
+|---|---|
+| `queued` | Status panel |
+| `claimed` | Status panel |
+| `running` | Status panel |
+| `failed` | Status panel + **retry action**; `failedRetryError` renders inline on failure |
+| `awaiting_clarification` | Candidate picker + submit; `clarificationError` inline |
+| `done` | Panel replaced by the `Dashboard` card stack |
+
+Clarification and retry each have their own in-flight flag (`isSubmittingClarification`,
+`isRetryingFailedSession`) and each guards on the current status before firing
+(`:201`, `:220`).
+
+> `docs/ui-map-task-0-1.md §5` records `awaiting_clarification` as **"No — not found in
+> frontend types or UI"** and reports no failed-state screen. Both are implemented.
+> Superseded.
+
+### §5.2 The shared state primitive
+
+`components/ui/StateMessage.tsx` is the single presentation primitive for non-content
+states — four variants (`empty`, `loading`, `error`, `warning`), with `compact` and
+`align` modifiers and an optional `action` slot. The `loading` variant renders a
+spinner. It is used across the dashboard, chat, evidence, trending, and settings.
+
+### §5.3 Coverage
+
+| State | Implemented | Where |
+|---|---|---|
+| Dashboard loading | ✅ | `DashboardPage` center panel |
+| No sessions | ✅ | Center panel "No forecasts yet" + create action; `Sidebar` empty state |
+| Session selected, none active | ✅ | "Select a forecast" |
+| No search results | ✅ | `Sidebar` — "Try a different search term." |
+| No evidence / no filter match | ✅ | `EvidenceTimeline:355-360` |
+| No chat messages | ✅ | `ChatPanel:63` |
+| Awaiting assistant reply | ✅ | `ChatPanel:98`, `isAwaitingAssistantResponse` |
+| Send lock while busy | ✅ | `isSendDisabled` gates composer, send button, and suggested-action chips |
+| Failed session | ✅ | Status panel + retry |
+| Clarification | ✅ | Candidate picker |
+| Plan limit | ✅ | Structured `PLAN_LIMIT_EXCEEDED` surfaced from the API (`frontend_api.md §6.1`) |
+| Empty market / sentiment charts | ✅ | Cards fall back to `StateMessage` |
+| Agent events empty | ✅ | `AgentEventsTimeline` empty state |
+
+**Sidebar** implements search (`searchQuery` filter, `Sidebar.tsx:33-34`) and a
+per-status dot with label for all six statuses (`:47-61`). It displays probability
+(`—` when null) but **not confidence** — see §7.
+
+**ChatPanel** renders assistant content through `react-markdown`, shows up to the
+provided `suggestedActions` as chips, and disables the composer, the send button, and
+the chips together while a send is in flight or the session is busy.
+
+---
+
+## §6 — Styling
+
+- **Tailwind CSS 3.4** utilities only. No CSS modules, no styled-components, no
+  runtime CSS-in-JS.
+- **shadcn-style primitives** in `components/ui/`: `card`, `button`, `badge`, `input`,
+  plus the project-specific `StateMessage` and `ConfirmDialog`. `class-variance-authority`
+  + `clsx` + `tailwind-merge` back the variant API.
+- **Custom palettes** `anizai-teal`, `anizai-blue`, `anizai-purple`
+  (`client/tailwind.config.js:9-33`).
+- **Icons** `lucide-react`.
+- **Charts** `recharts` 2.15 — `MarketComparison` (bar), `SentimentAnalysis` (area).
+- **No typography plugin** — markdown styling is hand-mapped, see §3.2.
+- **Page shells** `components/site/PageShell` and `AuthShell` wrap public and auth
+  screens respectively.
+
+### §6.1 Responsive layout — measured values
+
+Dashboard grid and drawer widths, read from `pages/DashboardPage.tsx`:
+
+| Breakpoint | Layout | Class |
+|---|---|---|
+| `< lg` (mobile) | Single column; fixed top bar; both panels are slide-over drawers | `lg:hidden` (`:665`) |
+| `lg` → `xl` (tablet) | Two columns: sidebar + main; chat is a right slide-over | `lg:grid-cols-[264px_minmax(0,1fr)]` (`:617`) |
+| `xl` (desktop) | Three columns | `xl:grid-cols-[252px_minmax(0,1fr)_304px]` (`:594`) |
+| `2xl` (wide) | Three columns, wider rails | `2xl:grid-cols-[272px_minmax(0,1fr)_340px]` (`:594`) |
+
+Drawer widths are **viewport-clamped**, not fixed:
+
+- Sidebar drawer — `w-[min(20rem,calc(100vw-1rem))]` (`:675`)
+- Chat drawer — `w-full max-w-[min(24rem,100vw)]` (`:642`, `:689`)
+
+> `docs/ui-map-task-0-1.md §6` records fixed `w-80` / `w-96` drawers and flags "fixed
+> mobile chat width may exceed viewport" as a layout risk, and gives the desktop grid
+> as `[280px_minmax(0,1fr)_360px]`. All four values are stale — the drawers are
+> `min()`-clamped and the grid is narrower. The overflow risk it describes is resolved.
+
+### §6.2 Browser verification — 2026-07-18
+
+Run against the Vite dev server, signed in, with a fully-populated `done` session
+selected (`seed-recession-2026` — 10 evidence items, sentiment series, all four cards).
+
+**Method.** Two measurements per surface: (1) `document.documentElement.scrollWidth`
+vs `clientWidth` — the page-level overflow signal; (2) a per-element sweep for boxes
+whose right edge exceeds the viewport, each classified by whether an ancestor clips it
+(`overflow-x: auto|scroll|hidden`) and excluding elements parked off-canvas by a
+drawer transform. An escape that no ancestor clips is a real break; a clipped one is a
+scroll region.
+
+**Public pages**
+
+| Surface | 375 | 768 | 1280 |
+|---|---|---|---|
+| Landing | ✅ | ✅ | ✅ |
+| Features | ✅ | — | — |
+| Signup | ✅ | — | — |
+
+**Dashboard**
+
+| Surface | Viewport | Page overflow | Unclipped escapes | Result |
+|---|---|---|---|---|
+| Full dashboard, `done` session | 1280 | none | 0 | ✅ |
+| Full dashboard, `done` session | 768 | none | 0 | ✅ |
+| Full dashboard, `done` session | 375 | none | 0 | ✅ |
+| Sidebar drawer open | 375 | none | 0 | ✅ measured 320 px wide |
+| Chat drawer open | 375 | none | 0 | ✅ |
+| Settings modal open | 375 | none | 0 | ✅ measured 359 px at `left: 8` |
+| CreateForecastView | 375 | none | 0 | ✅ |
+| `queued` session — status panel + agent timeline | 375 | none | 0 | ✅ |
+
+**No console errors at any viewport, on any surface, across the whole session.**
+
+Two clipped escapes were observed and are **not** breaks:
+
+- The evidence filter-tab strip at 768 (42 px past the edge, parent `overflow-x: auto`).
+- The public header nav at 375 (parent `overflow-x-auto no-scrollbar`). The
+  `no-scrollbar` class makes the scroll affordance invisible — cosmetic, not tracked.
+
+**Measured values confirm the §6.1 source reading.** The sidebar drawer resolves to
+`min(20rem, 100vw − 1rem)` = **320 px** inside a 375 px viewport, and the settings
+modal to **359 px** with 8 px margins. Both fit. The overflow risk
+`ui-map-task-0-1.md §6` flagged for fixed `w-80`/`w-96` drawers does not occur.
+
+> The settings modal also **does** stack on mobile — its section nav renders as a
+> horizontally scrollable tab strip, not a fixed two-column sidebar. `../archive/ui-map-task-0-1.md`
+> records "Fixed two-column modal body; no mobile-specific stacking." Superseded.
+
+> **What this pass did not cover:** `SubscriptionSettings` payment/cancel sub-flows,
+> `CreateForecastContext` (trending panel) at tablet width, and the
+> `awaiting_clarification` candidate picker — none had reachable state during the run.
+> Their responsive behavior remains source-verified only.
+
+---
+
+## §7 — Known Constraints
+
+| Constraint | Detail |
+|---|---|
+| No router | Navigation is a `useState` union (`App.tsx:52`). No deep links, no browser history, no shareable forecast URL. Structural — not fixable without adopting a router. |
+| `App.tsx` is a four-role god-component | 962 lines covering routing, fetching, mapping, and listener lifecycle. Tracked KG-C-3. |
+| `DashboardPage.tsx` is a large shell | 744 lines, 14 `useState` hooks, layout + status panels + modal state in one component. |
+| Sidebar omits confidence | `PredictionSession` carries no confidence field and the sidebar renders probability only (`Sidebar.tsx:143`), although `Session.latestConfidence` is available on the wire type. A probability shown without its confidence is exactly the misread the verdict logic exists to prevent (§3.2 rule 1). |
+| `mapSessionStatus` is dead code | `App.tsx:74` defines it; `App.tsx:89` immediately does `void mapSessionStatus;`. The `stable`/`volatile` collapse it implements is retired — both `Prediction.status` and `PredictionSession.status` carry the full `SessionStatus` union. |
+| Reasoning trace is not retained | Rule A drops `AgentEventsTimeline` the moment status becomes `done`, so the completed forecast has no record of how it was produced even though the events persist in Firestore. Deliberate per Sprint 25 — noted because it is a product decision, not an oversight. |
+| Market / sentiment cards are permanently empty | No live data upstream; both render `StateMessage` fallbacks. Tracked KG-C-6. Expected shapes: `../backend-specs/market-sentiment-spec.md`. |
+| Landing-page audit not re-verified | `../archive/audits/landing-audit.md` (dated 2026-05-20) inventories landing copy and layout. Component names still match, but **its copy-level claims were not re-checked** during this rewrite. |
+| Shared UI primitives are widely bypassed | `components/ui/` provides `Button`, `Card`, `Badge`, and `Input`, but many surfaces build the same affordances by hand with local Tailwind classes instead — raw `<button>` elements throughout the modals, settings, subscription/payment, landing and icon-button surfaces; card-like containers assembled manually in settings, plan cards, chat bubbles and evidence rows; and status/plan/confidence/source badges written as local `<span>`s despite `badge.tsx` existing. There is also no single radius or spacing scale: `Card` uses `rounded-lg`, settings surfaces `rounded-xl`, the modal `rounded-2xl`, and badges range across `rounded` / `rounded-md` / `rounded-lg` / `rounded-full`. The risk is not any individual style but the **number of one-off variants** — a change to a primitive does not propagate to the surfaces that reimplemented it. Carried forward from the Task-0.2 consistency audit; the design-system observations were re-read against current source, but a component-by-component re-audit was **not** performed. |
+| Three layout trees mount simultaneously | `DashboardPage` renders the wide-desktop grid, the tablet grid, and the mobile stack as three sibling subtrees, hidden from each other by `hidden`/`lg:hidden`/`xl:hidden`. All three are in the DOM at once — confirmed at runtime (every card heading appears three times) and corroborated by `sprint-24-25-frontend-tasks.md`, which describes passing props to "all three `ChatPanel` instances". Correct, and it keeps each layout independently readable, but it triples the mounted component count and means any per-instance state or effect runs three times. Known and intentional; recorded so it is not rediscovered as a bug. |
+| Responsive: three sub-surfaces still source-verified only | The 2026-07-18 browser pass (§6.2) cleared every major dashboard surface at 375/768/1280 with zero unclipped overflow and zero console errors. Not exercised: `SubscriptionSettings` payment/cancel sub-flows, `CreateForecastContext` at tablet width, and the `awaiting_clarification` candidate picker — no reachable state during the run. |

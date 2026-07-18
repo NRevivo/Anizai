@@ -1,16 +1,37 @@
 # Anizai
 
-AI-powered forecasting platform with a React client, an Express API, and an experimental data pipeline for event/news ingestion.
+RAG-based event-forecasting platform with a React client, an Express BFF, and a Kafka/Flink data pipeline feeding a LangGraph forecasting agent.
 
 ![Anizai Hero](docs/images/landing-hero.png)
 
 ## Overview
 
+A user asks a future-oriented question ("Will X happen before Y?") and receives a
+structured forecast: probability, confidence, key drivers, a reasoning chain, and an
+evidence trail.
+
 Anizai is organized as a monorepo with three main parts:
 
-- `client/`: React + TypeScript web app (dashboard, sessions, trending, auth flows)
-- `server/`: Express + TypeScript backend API with Firebase-authenticated endpoints
-- `data-pipeline/`: Python ingestion and streaming infrastructure (Kafka-first, Spark/Delta planned)
+- `client/`: React + TypeScript SPA (dashboard, sessions, trending, auth flows)
+- `server/`: Express + TypeScript **BFF** — auth, session CRUD, idempotency, usage
+  charging, and Firestore reads. It is a mediator: it does not call OpenAI, does not
+  query the vector store, and does not generate forecasts.
+- `data-pipeline/`: Python — Kafka + Flink medallion pipeline (Bronze → Silver → Gold)
+  into PostgreSQL/pgvector, plus the LangGraph agent that produces the forecasts.
+
+The two halves meet in Firestore: the BFF writes a queue document, the agent claims it,
+runs its graph, and writes the result back for the client to read.
+
+## Documentation
+
+| Area | Start here |
+|---|---|
+| Client + BFF (`client/`, `server/`) | [`docs/C_frontend/frontend_overview.md`](docs/C_frontend/frontend_overview.md) |
+| Data pipeline (`data-pipeline/`) | [`data-pipeline/docs/A_pipeline/pipeline_overview.md`](data-pipeline/docs/A_pipeline/pipeline_overview.md) |
+
+Historical task logs and audits live at the top level of `docs/` and are indexed —
+with accuracy warnings where they have gone stale — in
+[`docs/C_frontend/frontend_archive.md`](docs/C_frontend/frontend_archive.md).
 
 ## Tech Stack
 
@@ -35,20 +56,29 @@ Anizai is organized as a monorepo with three main parts:
 
 ### Data Pipeline
 
-- Python
+- Python 3.11
 - Kafka (`kafka-python`)
-- Spark + Delta (`pyspark`, `delta-spark`)
-- OpenAI + LangChain
-- ChromaDB
+- Apache Flink / PyFlink 1.19 (runs in Docker; not installed in the local venv)
+- PostgreSQL + pgvector + TimescaleDB (`psycopg2`, `pgvector`)
+- OpenAI (GPT-4o, `text-embedding-3-small`) + LangGraph
+- Airflow (scheduled producers)
 
 ## Repository Structure
 
 ```text
 .
-├── client/            # Frontend (Vite + React + TS)
-├── server/            # Backend API (Express + TS)
-├── data-pipeline/     # Ingestion/streaming pipeline (Python)
-├── docs/images/       # README and product images
+├── client/                  # Frontend (Vite + React + TS)
+├── server/                  # BFF (Express + TS)
+│   ├── firebase/            # Firestore rules + indexes
+│   ├── scripts/             # Seed, probe, emulator, migration scripts
+│   └── tests/               # Vitest suites
+├── data-pipeline/           # Ingestion/streaming pipeline + LangGraph agent (Python)
+│   └── docs/A_pipeline/     # Pipeline documentation
+├── docs/
+│   ├── C_frontend/          # Client + BFF documentation
+│   ├── backend-specs/       # Cross-team data contracts
+│   ├── audits/              # Historical audits
+│   └── images/              # README and product images
 └── README.md
 ```
 
@@ -129,18 +159,24 @@ Copy from `server/.env.example`:
 
 - `PORT` (default: `3000`)
 - `NODE_ENV` (`development`, `production`, `test`)
-- `FIREBASE_PROJECT_ID`
+- `FIREBASE_PROJECT_ID` (required)
+- `ALLOW_DEMO_ROUTES` (`true` / `false`, default off) — must be `true` **and**
+  `NODE_ENV=development` for the `/demo/*` routes to mount at all
 - Optional emulator vars:
   - `FIREBASE_AUTH_EMULATOR_HOST`
   - `FIRESTORE_EMULATOR_HOST`
 
 ## API Endpoints (Current)
 
+Routes are mounted at the server root — there is no `/api` prefix on the server. The
+client prefixes `/api` and the Vite dev proxy strips it. See
+[`frontend_api.md`](docs/C_frontend/frontend_api.md) §7.3.
+
 Public:
 
 - `GET /`
 - `GET /health`
-- `GET /trending`
+- `GET /trending` (`?limit`, default 20, max 100)
 
 Protected (Firebase ID token required):
 
@@ -148,9 +184,18 @@ Protected (Firebase ID token required):
 - `PATCH /me/plan`
 - `GET /sessions`
 - `GET /sessions/:id`
-- `POST /sessions`
+- `POST /sessions` — requires a UUID `idempotencyKey`
 - `POST /sessions/:id/messages`
+- `POST /sessions/:id/clarify` — only when status is `awaiting_clarification`
+- `POST /sessions/:id/retry` — only when status is `failed`
 - `DELETE /sessions/:id`
+
+Development only (both gates required, see `ALLOW_DEMO_ROUTES`):
+
+- `GET /demo/sessions`, `GET /demo/sessions/:id`, `GET /demo/user`
+
+Full route matrix with validation, status codes, and error codes:
+[`frontend_api.md`](docs/C_frontend/frontend_api.md) §3.
 
 ## Development Commands
 
@@ -160,9 +205,16 @@ Protected (Firebase ID token required):
 cd client
 npm run dev
 npm run build
-npm run lint
+npm run test     # vitest
+npm run lint     # currently fails — see note below
 npm run preview
 ```
+
+> **Known issue:** `npm run lint` in `client/` fails with
+> `Cannot find package '@eslint/js'` — the root `eslint.config.js` imports ESLint
+> packages that are installed per-package rather than at the repo root. Typecheck and
+> tests are unaffected. Tracked as KG-C-2 in
+> [`frontend_sprints.md`](docs/C_frontend/frontend_sprints.md) §4.
 
 ### Server
 
@@ -179,13 +231,20 @@ Emulator helpers:
 
 ```bash
 cd server
-npm run dev:emu
+npm run dev:emu             # run against the Firebase emulators
 npm run emu:token
 npm run emu:test:me
 npm run test:session-result
+npm run seed                # seed one fully-populated forecast session
+npm run seed:clean -- --yes # remove it
+npm run probe:all-sessions  # read-only inventory of the sessions collection
 ```
 
-## Data Pipeline (Experimental)
+## Data Pipeline
+
+Owned by a separate track — see
+[`pipeline_overview.md`](data-pipeline/docs/A_pipeline/pipeline_overview.md) for the
+authoritative documentation. Quick local start below.
 
 Install dependencies:
 
@@ -203,11 +262,11 @@ cd data-pipeline/infrastructure
 docker compose up -d
 ```
 
-Run the news producer:
+Run a producer (nine are available in `data-pipeline/ingestion/`):
 
 ```bash
 cd data-pipeline
-python ingestion/news_producer.py
+python ingestion/newsapi_producer.py
 ```
 
 ## One-time: migrate legacy demo-user data
@@ -247,7 +306,16 @@ This is a one-time operation tied to the legacy seed data; remove it once it has
 
 ## Status
 
-Current repository includes an active frontend, backend, and early-stage ingestion pipeline. Some pipeline/orchestration components are scaffolded and still under active development.
+Client, BFF, and data pipeline are all implemented and running end to end. Current
+state per area:
+
+- **Client + BFF** — no sprint currently open. Known gaps are tracked as `KG-C-*` in
+  [`frontend_sprints.md`](docs/C_frontend/frontend_sprints.md) §4.
+- **Data pipeline** — fully implemented and operationally closed; the one open item is
+  filter-threshold calibration. See
+  [`pipeline_sprints.md`](data-pipeline/docs/A_pipeline/pipeline_sprints.md).
+- **Not yet live in the product** — market comparison and sentiment time series (the
+  agent emits nothing for them yet), and the live agent reasoning trace.
 
 ## License
 
