@@ -326,13 +326,15 @@ def _build_clarification_candidates(candidates: list[dict]) -> list[dict]:
     (spec §8.2.4, anizai_handoff_consolidated.md §6.3) for Firestore
     storage and frontend display.
 
-    Each candidate gets a stable UUID4 `id` so process_query can match
-    the user's `chosenCandidateId` back to the original candidate on
-    resume-on-clarify (T21.4). The ID is stable within the session
-    (assigned once here); reruns produce different UUIDs, which is
-    acceptable — each clarification flow is its own session.
+    Each candidate gets a stable UUID4 `id` that round-trips the user's
+    choice: Express returns it as `chosenCandidateId` and writes it to the
+    session's `canonicalKey`, which process_query reads on resume-on-clarify
+    (T21.4). The ID is stable within the session (assigned once here); reruns
+    produce different UUIDs, which is acceptable — each clarification flow is
+    its own session.
 
-    Frontend-facing fields (ClarificationCandidate schema):
+    Frontend-facing fields (ClarificationCandidate schema) — the ONLY fields
+    written (KG-B-8, Sprint 26):
         id               UUID4, returned as chosenCandidateId by Express
         label            Human-readable from top 3 entities
         source           "polymarket" — only platform pre-Phase-7
@@ -341,9 +343,13 @@ def _build_clarification_candidates(candidates: list[dict]) -> list[dict]:
                          similarity; true vault resolution deferred per
                          KG-PHASE8-12).
 
-    Hub-recovery fields (stored in Firestore, ignored by frontend,
-    consumed by process_query on resume to rebuild structured_intent):
-        intent, domain, entities, polymarket_search_terms
+    No hub-internal fields are written. Earlier drafts also emitted
+    intent/domain/entities/polymarket_search_terms as "hub-recovery" fields
+    "consumed by process_query on resume" — but nothing ever consumed them:
+    process_query._build_initial_state hardcodes structured_intent, and
+    Express clears clarificationCandidates before requeue (so the terms are
+    unrecoverable anyway). They were dead writes leaking hub state to
+    Firestore; KG-B-8 strips them.
 
     Why no vault lookup here:
         A canonical Polymarket market ID requires the polymarket vector
@@ -356,7 +362,6 @@ def _build_clarification_candidates(candidates: list[dict]) -> list[dict]:
         entities: list[str] = list(candidate.get("entities") or [])
         search_terms: list[str] | None = candidate.get("polymarket_search_terms")
         intent: str = str(candidate.get("intent") or "forecast")
-        domain: str = str(candidate.get("domain") or "general")
         confidence: float = float(candidate.get("confidence") or 0.0)
 
         label = ", ".join(entities[:3]) if entities else "Unknown market"
@@ -367,16 +372,15 @@ def _build_clarification_candidates(candidates: list[dict]) -> list[dict]:
         description = f"{intent.title()} question about {terms_display}"
 
         result.append({
-            # Frontend-facing ClarificationCandidate fields (§8.2.4)
+            # Frontend-facing ClarificationCandidate fields (§8.2.4) — the ONLY
+            # fields written. KG-B-8 (Sprint 26): no hub-internal state leaks to
+            # Firestore. The former intent/domain/entities/polymarket_search_terms
+            # "hub-recovery" fields were dead writes (nothing consumed them on
+            # resume — process_query hardcodes structured_intent) and are stripped.
             "id": str(_uuid_module.uuid4()),
             "label": label,
             "source": "polymarket",
             "description": description,
             "matchConfidence": confidence,
-            # Hub-recovery fields for T21.4 resume-on-clarify
-            "intent": intent,
-            "domain": domain,
-            "entities": entities,
-            "polymarket_search_terms": search_terms,
         })
     return result

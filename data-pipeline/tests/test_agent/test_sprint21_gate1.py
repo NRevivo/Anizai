@@ -258,8 +258,12 @@ def test_clarification_candidate_label_fallback_when_no_entities():
     assert label  # non-empty
 
 
-def test_clarification_candidate_has_hub_recovery_fields():
-    """Hub-recovery fields (intent, domain, entities, polymarket_search_terms) present."""
+def test_clarification_candidate_omits_hub_internal_fields():
+    """KG-B-8 (Sprint 26): only the 5 spec-contracted ClarificationCandidate
+    fields are written — the former intent/domain/entities/
+    polymarket_search_terms hub-internal fields are stripped (they were dead
+    writes leaking hub state to Firestore; nothing consumed them on resume,
+    process_query hardcodes structured_intent)."""
     response = _make_response(
         candidates=[
             _make_candidate(
@@ -274,14 +278,18 @@ def test_clarification_candidate_has_hub_recovery_fields():
     )
     out = query_understand.run({"raw_question": "q"}, client=_make_client(response))
     c = out["clarification_candidates"][0]
-    assert c["intent"] == "forecast"
-    assert c["domain"] == "crypto"
-    assert c["entities"] == ["Bitcoin"]
-    assert c["polymarket_search_terms"] == ["btc 100k 2026"]
+    # Exactly the 5 spec fields, nothing else.
+    assert set(c.keys()) == {"id", "label", "source", "description", "matchConfidence"}
+    for leaked in ("intent", "domain", "entities", "polymarket_search_terms"):
+        assert leaked not in c
+    # The stripped inputs still drive the derived spec fields.
+    assert c["label"] == "Bitcoin"
+    assert c["matchConfidence"] == 0.80
 
 
-def test_clarification_candidate_hub_recovery_null_search_terms():
-    """polymarket_search_terms preserved as None when not provided by LLM."""
+def test_clarification_candidate_omits_hub_internal_fields_null_search_terms():
+    """KG-B-8 regression: a null polymarket_search_terms input must not sneak
+    back in as a candidate key (previously written through as None)."""
     response = _make_response(
         candidates=[
             _make_candidate(
@@ -293,7 +301,9 @@ def test_clarification_candidate_hub_recovery_null_search_terms():
         ]
     )
     out = query_understand.run({"raw_question": "q"}, client=_make_client(response))
-    assert out["clarification_candidates"][0]["polymarket_search_terms"] is None
+    c = out["clarification_candidates"][0]
+    assert "polymarket_search_terms" not in c
+    assert set(c.keys()) == {"id", "label", "source", "description", "matchConfidence"}
 
 
 def test_clarification_needed_contains_shaped_candidates():
@@ -583,7 +593,7 @@ def test_build_initial_state_first_time_run_same_ids(mock_session, mock_query):
         "question": "Will the Fed cut rates?",
     }
     result = _build_initial_state("session-1")
-    assert result == {"session_id": "session-1"}
+    assert result == {"session_id": "session-1", "query_doc_id": "session-1"}
     mock_session.assert_not_called()
 
 
@@ -593,7 +603,7 @@ def test_build_initial_state_first_time_run_no_session_id_field(mock_session, mo
     """Legacy first-time query without sessionId field → plain state (safe fallback)."""
     mock_query.return_value = {"status": "pending", "question": "q"}
     result = _build_initial_state("session-1")
-    assert result == {"session_id": "session-1"}
+    assert result == {"session_id": "session-1", "query_doc_id": "session-1"}
     mock_session.assert_not_called()
 
 
@@ -603,7 +613,7 @@ def test_build_initial_state_doc_missing(mock_session, mock_query):
     """get_query_doc returns None → safe fallback to plain state."""
     mock_query.return_value = None
     result = _build_initial_state("session-1")
-    assert result == {"session_id": "session-1"}
+    assert result == {"session_id": "session-1", "query_doc_id": "session-1"}
 
 
 @patch("agent.process_query.get_query_doc")
@@ -620,6 +630,9 @@ def test_build_initial_state_resume_freeform_null_canonical_key(mock_session, mo
         "clarificationCandidates": None,  # Express cleared it
     }
     result = _build_initial_state(FRESH_QUERY_DOC_ID)
+    # T26.11: query_doc_id carries the PROCESSED (fresh) doc id, distinct from the
+    # resolved session id — this is what write_to_firestore step 6 marks 'done'.
+    assert result["query_doc_id"] == FRESH_QUERY_DOC_ID
     assert result["skip_matching_step"] is True
     assert result["chosen_candidate_id"] is None
     assert result["structured_intent"]["has_market_question_intent"] is False
@@ -734,9 +747,11 @@ def test_synthesize_tier2_sets_spec_exact_caption():
     )
 
 
-def test_synthesize_agent_version_bumped_to_sprint_23_5():
-    # Sprint 23.5 T23.5.12 relocated AGENT_VERSION to settings and bumped it.
-    assert synthesize.AGENT_VERSION == "0.5.0-sprint23.5"
+def test_synthesize_agent_version_bumped_to_sprint_26():
+    # Sprint 23.5 relocated AGENT_VERSION to settings; Sprint 26 T26.5 bumped the
+    # base to 0.5.0-sprint26 and appends +<git-sha> when the build env var is set.
+    # With no sha env (unit test), AGENT_VERSION is just the base.
+    assert synthesize.AGENT_VERSION == "0.5.0-sprint26"
 
 
 # ==========================================================

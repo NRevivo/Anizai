@@ -44,25 +44,19 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
 from agent.config import settings
 # Sprint 23.5 T23.5.12: AGENT_VERSION's canonical home is settings (Track 3).
 # Import from there rather than reaching into synthesize.py — health no
 # longer transitively imports the synthesis node (and its OpenAI deps) just
 # to read the version string.
 from agent.config.settings import AGENT_VERSION
+# Sprint 26 T26.4: importing agent.metrics registers the three metric singletons
+# on the default registry so /metrics (generate_latest) serializes them.
+from agent import metrics  # noqa: F401 — imported for registry side-effect
 
 logger = logging.getLogger(__name__)
-
-
-_METRICS_STUB = (
-    "# Sprint 18 stub — Prometheus metrics populated in Sprint 26\n"
-    "# Planned counters:\n"
-    "#   agent_queries_claimed_total{worker_id}\n"
-    "#   agent_queries_done_total{worker_id}\n"
-    "#   agent_queries_failed_total{worker_id}\n"
-    "#   agent_inflight_queries{worker_id}\n"
-    "#   agent_listener_callback_errors_total{worker_id}\n"
-)
 
 
 class _HealthRequestHandler(BaseHTTPRequestHandler):
@@ -106,9 +100,13 @@ class _HealthRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _handle_metrics(self) -> None:
-        body = _METRICS_STUB.encode("utf-8")
+        # Sprint 26 T26.4: real Prometheus exposition of the agent metrics
+        # (agent/metrics.py) registered on the default registry. generate_latest()
+        # returns bytes in the 0.0.4 text format; CONTENT_TYPE_LATEST is its
+        # matching content-type. Replaces the Sprint-18 comment-only stub.
+        body = generate_latest()
         self.send_response(200)
-        self.send_header("Content-Type", "text/plain; version=0.0.4")
+        self.send_header("Content-Type", CONTENT_TYPE_LATEST)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

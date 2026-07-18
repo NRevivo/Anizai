@@ -188,20 +188,36 @@ OPENAI_MODEL_SUGGESTED_ACTIONS = os.getenv(
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
 # ==========================================================
-# 11. Agent Version (Sprint 23.5 T23.5.12 — canonical home)
+# 11. Agent Version (Sprint 23.5 T23.5.12 — canonical home; Sprint 26 T26.5)
 # ==========================================================
 # Single source of version truth (Track 3 / absorbs the relocation half of
 # the old T26.5). Previously hardcoded in agent/nodes/synthesize.py:93, which
 # split version identity from config. synthesize.py and health.py now import
-# it from here. Sprint 26 adds the git short-hash on top
-# (AGENT_GIT_COMMIT_SHORT_SHA) without re-splitting the source.
+# it from here.
+#
+# Sprint 26 T26.5: AGENT_VERSION now resolves to `<base>+<git-short-sha>` so the
+# deployed build is identifiable from the health response AND every SessionResult
+# / follow-up message. The base is the human-readable label; the short-sha
+# (AGENT_GIT_COMMIT_SHORT_SHA, injected at image-build time) carries the real
+# build identity. Kept as a single `AGENT_VERSION` name — NOT a separate _FULL —
+# so all consumers (health, synthesize's re-export, followup) read one value and
+# the emulator coupling `result["agentVersion"] == synthesize.AGENT_VERSION`
+# holds by construction. When the sha env var is unset (local dev / tests),
+# AGENT_VERSION is just the base (no trailing '+').
 #
 # History: 0.1.0-sprint18-stub → 0.2.0-sprint19-retrieval-stub-synthesis →
 #          0.3.0 (real synthesis + Firestore) →
-#          0.4.0-sprint21-clarification-tier2 → 0.5.0-sprint23.5.
-# Env-overridable so a hotfix build can stamp its own version without a code
-# change; defaults to the sprint value.
-AGENT_VERSION = os.getenv("AGENT_VERSION", "0.5.0-sprint23.5")
+#          0.4.0-sprint21-clarification-tier2 → 0.5.0-sprint23.5 →
+#          0.5.0-sprint26 (+sha).
+# The BASE is env-overridable (via AGENT_VERSION) so a hotfix build can stamp
+# its own label without a code change; the sha still appends on top.
+_AGENT_VERSION_BASE = os.getenv("AGENT_VERSION", "0.5.0-sprint26")
+AGENT_GIT_COMMIT_SHORT_SHA = os.getenv("AGENT_GIT_COMMIT_SHORT_SHA", "").strip()
+AGENT_VERSION = (
+    f"{_AGENT_VERSION_BASE}+{AGENT_GIT_COMMIT_SHORT_SHA}"
+    if AGENT_GIT_COMMIT_SHORT_SHA
+    else _AGENT_VERSION_BASE
+)
 
 # ==========================================================
 # 12. Logging (T19.14 — closes KG-PHASE8-7)
@@ -215,3 +231,23 @@ AGENT_VERSION = os.getenv("AGENT_VERSION", "0.5.0-sprint23.5")
 # at the top of `agent/worker.py:main()`. Default INFO matches the
 # pipeline-side producers; flip to DEBUG via env var for local triage.
 LOG_LEVEL = os.getenv("AGENT_LOG_LEVEL", "INFO")
+
+# ==========================================================
+# 13. Vault-read retry profile (Sprint 26 T26.6)
+# ==========================================================
+# Transient-error retry for the agent's vault READS (agent/tools/*), wrapping
+# utils.retry.retry_on_transient at the tools chokepoint (hub-principles P2).
+# DELIBERATELY TIGHTER than Gold's insert profile (5 / 1.0 / 16.0 → ~15s
+# backoff): agent reads run inside vault_query's per-agent future, hard-capped
+# at PER_AGENT_TIMEOUT_S (15s, vault_query.py:69), and vault_query is fail-fast
+# — an exhausted-retry read raises and fails the whole forecast. Gold's backoff
+# would exceed that window (the future times out first, paying the full wait and
+# still failing). 3 attempts / 0.5s base / 2.0s cap → ≤1.5s total backoff rides
+# out short transient DNS/connection races (the Phase-9.5 F6 threat model) with
+# room for the ~10 DB queries an agent issues. It does NOT paper over a full
+# Postgres scale-restart (<15s) — the per-agent timeout fails that regardless
+# (accepted existing property, unchanged by 26.6). Env-overridable for tuning
+# during the initial cloud test.
+AGENT_VAULT_RETRY_MAX_ATTEMPTS = int(os.getenv("AGENT_VAULT_RETRY_MAX_ATTEMPTS", "3"))
+AGENT_VAULT_RETRY_BASE_DELAY_S = float(os.getenv("AGENT_VAULT_RETRY_BASE_DELAY_S", "0.5"))
+AGENT_VAULT_RETRY_MAX_DELAY_S = float(os.getenv("AGENT_VAULT_RETRY_MAX_DELAY_S", "2.0"))

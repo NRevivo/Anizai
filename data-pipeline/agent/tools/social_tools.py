@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from agent.tools._retry import vault_read_retry
 from persistence import social_vault, social_vectors
 
 
@@ -63,12 +64,14 @@ def similarity_search(
     impact_arg = min_impact_level if min_impact_level is not None else 1
     reliab_arg = min_reliability if min_reliability is not None else 0.0
 
-    rows = social_vectors.similarity_search(
+    rows = vault_read_retry(
+        social_vectors.similarity_search,
         query_vector=query_embedding,
         limit=limit,
         min_impact=impact_arg,
         platforms=source_platforms,
         min_reliability=reliab_arg,
+        op_name="social.similarity_search",
     )
     # D-1: rename in place. social_vectors.similarity_search returns dicts
     # built from RealDictRow; mutating the dict is safe.
@@ -98,4 +101,8 @@ def fetch_raw_comments(social_id: str) -> Optional[dict]:
         `platform_data`; see persistence/social_vault.py module docstring
         for the per-platform shape.
     """
-    return social_vault.fetch_by_social_id(social_id)
+    return vault_read_retry(
+        social_vault.fetch_by_social_id,
+        social_id,
+        op_name="social.fetch_raw_comments",
+    )

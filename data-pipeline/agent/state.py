@@ -46,6 +46,20 @@ class ForecastState(TypedDict, total=False):
     session_id: str
     user_id: str
 
+    # --- Delivery-path identity (Sprint 26 T26.11 — closes KG-B-18) ---
+    # The forecastQueries doc id this run actually claimed and processed.
+    # SINGLE-WRITER: set once by process_query._build_initial_state (in BOTH the
+    # first-time and resume-on-clarify paths) and never overwritten. Distinct
+    # from session_id, which claim_session OVERWRITES on resume with the resolved
+    # original session id — so by write_to_firestore step 6 the processed queue
+    # doc's id survives ONLY here. First-time run: query_doc_id == session_id.
+    # Resume-on-clarify: the fresh-UUID doc the server minted in
+    # requeueClarifiedSession (id != sessionId). write_to_firestore marks THIS
+    # doc `done`, so the doc that ran is the one cleared from the queue (the
+    # original clarified doc correctly stays `awaiting_clarification`). Read
+    # defensively via state.get("query_doc_id") (total=False semantics).
+    query_doc_id: str
+
     # --- Run identity (Sprint 25 T25.6) ---
     # Minted once by claim_session (uuid4) as the SINGLE-WRITER field that
     # namespaces this run's agentEvents (plan §3 findings #2). The per-run

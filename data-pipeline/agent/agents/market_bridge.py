@@ -264,8 +264,10 @@ def _build_polymarket_from_question(question: str) -> Optional[dict]:
           renders the chart's empty state and keeps the market_comparison
           BI card.
         - `fetch_time_series` raises → propagates to vault_query's
-          `_await` handler (Sprint 26 T26.6 will wrap this call site with
-          `utils.retry.retry_on_transient`). Same behavior as today's
+          `_await` handler. Transient DB errors (DNS/connection races) are
+          retried inside the tools wrapper (Sprint 26 T26.6 — market_tools
+          wraps every read in `vault_read_retry`); only an exhausted-retry
+          or a permanent error reaches here. Same behavior as today's
           `_build_polymarket(slug)` path.
 
     Skipping a redundant `fetch_latest`:

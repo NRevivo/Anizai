@@ -58,7 +58,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from agent import events
+from agent import events, metrics
 from agent.config import settings
 from agent.errors import AgentProcessingError, SessionClaimRaceLostError
 from agent.firestore_client import (
@@ -85,6 +85,10 @@ def _mark_failed(
     """
     Best-effort transition of both docs to 'failed' on processing error.
 
+    Guarded (Sprint 26 T26.11, closes KG-B-18): if the session is already
+    'done', the forecast was delivered — refuse to downgrade it and return
+    without writing either doc (the no-downgrade invariant).
+
     Each cleanup write is wrapped in its own try/except so a failure on
     the session-side update does not skip the queue-side update. The
     original processing exception has already been logged by the runner;
@@ -104,6 +108,24 @@ def _mark_failed(
     state for V1; Sprint 22+ may add transactional rollback.
     """
     if session_id is not None:
+        # Layer 2 (Sprint 26 T26.11, closes KG-B-18): NEVER downgrade a delivered
+        # forecast. If the session already reached 'done' (write_to_firestore
+        # completed the delivery), a late runner failure must not reverse it —
+        # invariant: "no write after the done-flip may fail or reverse a delivered
+        # forecast". Skip BOTH cleanup writes and return. (session_id is None only
+        # when the failure predates claim_session, i.e. nothing was delivered.)
+        try:
+            current_status = (get_session_doc(session_id) or {}).get("status")
+        except Exception:
+            current_status = None  # status read failed → fall through to cleanup
+        if current_status == "done":
+            logger.info(
+                "_mark_failed: session %s already 'done' — refusing to downgrade a "
+                "delivered forecast to 'failed' (KG-B-18 invariant); skipping "
+                "cleanup for query_doc_id=%s",
+                session_id, query_doc_id,
+            )
+            return
         try:
             update_session_status(
                 session_id,
@@ -117,6 +139,11 @@ def _mark_failed(
                 session_id,
             )
 
+    # Sprint 26 T26.4: count this failed session (failed terminal). Placed AFTER
+    # the Layer-2 no-downgrade guard's early return, so a delivered session that
+    # skipped cleanup is never miscounted as failed. tier is "unknown" — _mark_failed
+    # has no state, and a failure often predates synthesize's tier inference.
+    metrics.SESSION_TOTAL.labels(tier="unknown", status="failed").inc()
     try:
         update_query_status(
             query_doc_id, "failed", error_message=error_message,
@@ -168,8 +195,18 @@ def _build_initial_state(query_doc_id: str) -> dict:
         cleanup when the graph raises mid-execution. Since state["session_id"]
         stays as query_doc_id here, we pass the actual id as a side-channel
         hint. process_query() pops it before calling graph.invoke().
+
+    Why `query_doc_id` is set (Sprint 26 T26.11 — closes KG-B-18):
+        write_to_firestore step 6 must mark the doc this run PROCESSED `done`,
+        not the original session doc. claim_session overwrites
+        state["session_id"] with the resolved session id on resume, so the
+        processed queue doc's id would otherwise be lost by step 6. query_doc_id
+        is the single-writer channel that carries it. It is the function's
+        `query_doc_id` arg in BOTH paths (first-time: == session_id; resume: the
+        fresh-UUID doc id), so one assignment on the base dict below covers every
+        return path.
     """
-    initial_state: dict = {"session_id": query_doc_id}
+    initial_state: dict = {"session_id": query_doc_id, "query_doc_id": query_doc_id}
 
     query_doc = get_query_doc(query_doc_id)
     if query_doc is None:

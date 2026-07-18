@@ -141,7 +141,9 @@ def test_run_clarifies_when_margin_too_narrow():
     assert out["awaiting_clarification"] is True
     assert out["clarification_candidates"] is not None
     assert len(out["clarification_candidates"]) == 2
-    assert out["clarification_needed"]["candidates"][0]["entities"] == ["Bitcoin"]
+    # KG-B-8 (Sprint 26): candidates carry only the 5 spec fields — the hub-internal
+    # `entities` was stripped. Assert identity via `label` (derived from entities).
+    assert out["clarification_needed"]["candidates"][0]["label"] == "Bitcoin"
     # rank-1 still seeded into structured_intent so downstream nodes have
     # something to read while the user clarifies.
     assert out["structured_intent"]["entities"] == ["Bitcoin"]

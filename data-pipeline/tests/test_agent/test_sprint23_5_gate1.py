@@ -380,7 +380,9 @@ class TestVersionHygiene:
 
     def test_agent_version_in_settings(self):
         from agent.config import settings
-        assert settings.AGENT_VERSION == "0.5.0-sprint23.5"
+        # Sprint 26 T26.5 bumped the base to 0.5.0-sprint26. With no sha env
+        # (unit test), AGENT_VERSION is just the base — no trailing '+'.
+        assert settings.AGENT_VERSION == "0.5.0-sprint26"
 
     def test_synthesize_reexports_settings_version(self):
         from agent.config import settings
@@ -398,6 +400,20 @@ class TestVersionHygiene:
         importlib.reload(settings_mod)
         try:
             assert settings_mod.AGENT_VERSION == "9.9.9-hotfix"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(settings_mod)
+
+    def test_version_appends_git_short_sha(self, monkeypatch):
+        # Sprint 26 T26.5: when the build injects AGENT_GIT_COMMIT_SHORT_SHA,
+        # AGENT_VERSION resolves to `<base>+<sha>`; the base stays env-overridable.
+        monkeypatch.setenv("AGENT_VERSION", "0.5.0-sprint26")
+        monkeypatch.setenv("AGENT_GIT_COMMIT_SHORT_SHA", "abc1234")
+        import agent.config.settings as settings_mod
+        importlib.reload(settings_mod)
+        try:
+            assert settings_mod.AGENT_GIT_COMMIT_SHORT_SHA == "abc1234"
+            assert settings_mod.AGENT_VERSION == "0.5.0-sprint26+abc1234"
         finally:
             monkeypatch.undo()
             importlib.reload(settings_mod)

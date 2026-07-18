@@ -698,10 +698,11 @@ def get_session_doc(session_id: str) -> Optional[dict]:
     """
     Read a sessions/{session_id} document and return its data dict.
 
-    Used by process_query.py (T21.4) on resume-on-clarify runs to fetch the
-    stored `clarificationCandidates` array so the chosen candidate's
-    polymarket_search_terms and entities can be recovered for
-    structured_intent pre-population.
+    Used by process_query.py (T21.4) on resume-on-clarify runs to read the
+    session's `canonicalKey` — the chosen candidate's id, written by Express —
+    which becomes state's chosen_candidate_id. (It does NOT recover candidate
+    fields for structured_intent: Express clears `clarificationCandidates`
+    before requeue and process_query hardcodes structured_intent — see KG-B-8.)
 
     Returns:
         dict of field values if the document exists, else None.

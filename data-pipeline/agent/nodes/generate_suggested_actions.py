@@ -73,9 +73,10 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Optional
 
-from agent import events
+from agent import events, metrics
 from agent.config import settings
 from agent.utils import llm_cost
 from agent.prompts.suggested_actions import (
@@ -162,6 +163,10 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
     event_id = events.emit_event(
         run_id, "generate_suggested_actions", "Suggesting follow-ups…",
     )
+    # Sprint 26 T26.4: this node emits MANUALLY (not via @events.emits), so it is
+    # outside the decorator's histogram hook — it observes its own duration below
+    # (gap surfaced by the 26.3 latency run; mirrors write_to_firestore).
+    start = time.monotonic()
 
     synthesis_result: dict = state.get("synthesis_result") or {}
     question: str = state.get("raw_question") or ""
@@ -228,6 +233,12 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
         len(suggested), cost_usd,
     )
     events.complete_event(run_id, event_id)
+    # Sprint 26 T26.4: record node duration (success path — mirrors
+    # write_to_firestore's manual observe; a degrade path returns [] and is not
+    # observed, matching the decorator's observe-on-normal-return semantics).
+    metrics.NODE_DURATION_SECONDS.labels(
+        node_name="generate_suggested_actions"
+    ).observe(time.monotonic() - start)
     return {"suggested_actions": suggested, **cost_delta}
 
 

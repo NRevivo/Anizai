@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from agent.tools._retry import vault_read_retry
 from persistence import momentum_vault
 
 
@@ -49,7 +50,12 @@ def fetch_latest(
     Returns:
         Most-recent row dict from momentum_vault, or None.
     """
-    return momentum_vault.fetch_latest(source_name, external_reference_id)
+    return vault_read_retry(
+        momentum_vault.fetch_latest,
+        source_name,
+        external_reference_id,
+        op_name="market.fetch_latest",
+    )
 
 
 def fetch_time_series(
@@ -72,10 +78,12 @@ def fetch_time_series(
     Returns:
         List of rows ordered by timestamp_utc ASC. Empty list if no data.
     """
-    return momentum_vault.fetch_time_series(
+    return vault_read_retry(
+        momentum_vault.fetch_time_series,
         source_name=source_name,
         external_reference_id=external_reference_id,
         hours=hours,
+        op_name="market.fetch_time_series",
     )
 
 
@@ -93,7 +101,11 @@ def fetch_fred_anomalies(days: int) -> list[dict]:
         List of rows ordered by timestamp_utc DESC. Empty list if no
         anomalies were detected in the window.
     """
-    return momentum_vault.fetch_fred_anomalies(days=days)
+    return vault_read_retry(
+        momentum_vault.fetch_fred_anomalies,
+        days=days,
+        op_name="market.fetch_fred_anomalies",
+    )
 
 
 def find_polymarket_market_by_question(
@@ -117,7 +129,9 @@ def find_polymarket_market_by_question(
         Most-recent matching momentum_vault row as a dict (with added
         `match_score`), or None.
     """
-    return momentum_vault.find_polymarket_market_by_question(
+    return vault_read_retry(
+        momentum_vault.find_polymarket_market_by_question,
         question_text=question_text,
         threshold=threshold,
+        op_name="market.find_polymarket_market_by_question",
     )

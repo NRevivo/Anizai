@@ -120,6 +120,13 @@ pgvector==0.3.2
 # compatibility. Sampling logic (1% INFO, 100% ERROR) built on top (Section 7.2).
 python-json-logger==2.0.7
 
+# Prometheus client — agent /metrics exposition (Sprint 26 T26.4). Pure-Python,
+# zero transitive deps. agent/metrics.py defines three collectors on the default
+# registry; agent/health.py serves them via generate_latest(). Range pin mirrors
+# the openai/langchain style (upper bound guards a future major); requirements.lock
+# pins the exact resolved version (§4.4).
+prometheus-client>=0.20,<1.0
+
 
 # ----------------------------------------------------------
 # Agentic Hub (Section 8)

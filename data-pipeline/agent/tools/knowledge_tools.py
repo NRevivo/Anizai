@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from agent.tools._retry import vault_read_retry
 from persistence import knowledge_vault, knowledge_vectors
 
 
@@ -69,12 +70,14 @@ def similarity_search(
         if len(source_platforms) == 1:
             source_platform = source_platforms[0]
 
-    return knowledge_vectors.similarity_search(
+    return vault_read_retry(
+        knowledge_vectors.similarity_search,
         query_vector=query_embedding,
         limit=limit,
         source_platform=source_platform,
         min_impact_level=min_impact_level,
         min_reliability=min_reliability,
+        op_name="knowledge.similarity_search",
     )
 
 
@@ -95,4 +98,8 @@ def fetch_full_text(doc_id: str) -> Optional[dict]:
         full_text_raw, inverted_pyramid_lead, detected_entities,
         relevance_score, sniper_keywords, ingested_at), or None if not found.
     """
-    return knowledge_vault.fetch_by_doc_id(doc_id)
+    return vault_read_retry(
+        knowledge_vault.fetch_by_doc_id,
+        doc_id,
+        op_name="knowledge.fetch_full_text",
+    )

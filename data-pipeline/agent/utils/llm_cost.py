@@ -53,6 +53,8 @@ import os
 import re
 from typing import Optional
 
+from agent import metrics
+
 logger = logging.getLogger(__name__)
 
 
@@ -232,6 +234,11 @@ def record_usage(model: str, response: object, *, site: str) -> tuple[int, float
     """
     prompt, completion, total = extract_usage(response)
     cost = compute_cost(model, prompt, completion)
+    # Sprint 26 T26.4: cumulative USD by model. record_usage is the single site
+    # where model + cost coexist per call (NOT state.total_cost_usd, which is one
+    # aggregate scalar with no per-model split). inc(0.0) is a valid no-op for an
+    # unpriced/embedding call — cost is always >= 0, so this never raises.
+    metrics.LLM_COST_USD_TOTAL.labels(model=model).inc(cost)
     logger.info(
         "llm_usage site=%s model=%s prompt_tokens=%d completion_tokens=%d "
         "total_tokens=%d cost_usd=%.6f",

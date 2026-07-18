@@ -17,7 +17,7 @@ Coverage:
 - missing session_id → AgentProcessingError
 - missing synthesis_result → AgentProcessingError
 - mid-batch failure (write_evidence_batch raises) → propagates to runner
-- session_id == query_doc_id contract (one id used for both writes)
+- step 6 targets query_doc_id, falling back to session_id when absent (T26.11)
 """
 
 from __future__ import annotations
@@ -232,9 +232,12 @@ def test_empty_evidence_trail_still_runs_full_write_sequence(mocked_firestore):
 # session_id usage
 # ==========================================================
 def test_session_id_used_for_both_session_and_query_status(mocked_firestore):
-    """Per server contract (session.repository.ts:347), session_id ==
-    query_doc_id. write_to_firestore uses state.session_id for BOTH
-    sessions/{id} and forecastQueries/{id} writes — pin this."""
+    """First-time contract: with no query_doc_id in state, step 6 falls back to
+    session_id, so the session write (step 5) and the queue write (step 6) target
+    the same id. Sprint 26 T26.11 retargeted step 6 to state["query_doc_id"]; when
+    it is absent (or == session_id, the first-time case) behaviour is unchanged —
+    pin that here. The resume case (query_doc_id != session_id) is covered by a
+    dedicated 26.8 test."""
     _, _, _, _, _, ss, qs = mocked_firestore
     write_to_firestore.run(_state(session_id="abc-123"))
 

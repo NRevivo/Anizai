@@ -77,6 +77,10 @@ def mocked_runner():
     with (
         patch("agent.process_query.graph") as mock_graph,
         patch("agent.process_query.get_query_doc", return_value=None) as mock_get_query_doc,
+        # Sprint 26 T26.11: _mark_failed's no-downgrade guard reads session status
+        # via get_session_doc. Patch it (default None → not 'done' → cleanup
+        # proceeds) so failure-path tests stay self-contained (no real Firestore).
+        patch("agent.process_query.get_session_doc", return_value=None) as mock_get_session_doc,
         patch("agent.process_query.update_session_status") as mock_session,
         patch("agent.process_query.update_query_status") as mock_query,
     ):
@@ -89,6 +93,7 @@ def mocked_runner():
         # lifecycle calls, so keeping it off manager.method_calls preserves
         # the exact ordered call sequence the happy-path test pins.
         _ = mock_get_query_doc
+        _ = mock_get_session_doc
         yield manager, mock_graph, mock_session, mock_query
 
 
@@ -109,7 +114,9 @@ def test_happy_path_only_invokes_graph(mocked_runner):
     process_query("doc1")
 
     assert manager.method_calls == [
-        call.graph.stream({"session_id": "doc1"}, stream_mode="values"),
+        call.graph.stream(
+            {"session_id": "doc1", "query_doc_id": "doc1"}, stream_mode="values",
+        ),
     ]
     mock_session.assert_not_called()
     mock_query.assert_not_called()
@@ -128,7 +135,8 @@ def test_happy_path_passes_session_id_to_graph(mocked_runner):
     process_query("doc-arbitrary-id")
 
     mock_graph.stream.assert_called_once_with(
-        {"session_id": "doc-arbitrary-id"}, stream_mode="values"
+        {"session_id": "doc-arbitrary-id", "query_doc_id": "doc-arbitrary-id"},
+        stream_mode="values",
     )
 
 

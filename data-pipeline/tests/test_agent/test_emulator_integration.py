@@ -866,20 +866,6 @@ def test_sprint21_gate3_clarification_path_writes_awaiting_status(
     mock_researcher.assert_not_called()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "KG-B-18 (T25.14 interim guard): write_to_firestore step 6 calls "
-        "update_query_status on the ORIGINAL session's forecastQueries doc, "
-        "which this Tier-2-resume test never seeds → emulator 404 'no entity "
-        "to update'. A pre-existing Sprint-21 limitation (see this test's "
-        "docstring), latent while the emulator was down. Gate 3 brings the "
-        "emulator up and makes it execute + fail; this marker lets the Sprint-25 "
-        "closeout suite read clean WITHOUT hiding the gap. The fix (seed the "
-        "original queue doc / tolerate a missing resume doc) is earmarked for "
-        "Sprint 26 — remove this marker then."
-    ),
-    strict=False,
-)
 def test_sprint21_gate3_tier2_resume_freeform_completes_forecast(
     emulator_db, emulator_test_id
 ):
@@ -892,12 +878,14 @@ def test_sprint21_gate3_tier2_resume_freeform_completes_forecast(
       - process_query detects resume via sessionId!=query_doc_id in the
         forecastQueries doc (NOT via chosenCandidateId field).
 
-    Sprint 21 known limitation (noted in G1 report):
-      - write_to_firestore calls update_query_status(state["session_id"])
-        which marks forecastQueries/{original_session_id} as "done" (not
-        the fresh UUID doc). The fresh UUID doc stays at "claimed". This is
-        acceptable for now — the worker listener only picks up "pending" docs
-        so no re-processing occurs. Sprint 26 adds query_doc_id to state.
+    KG-B-18 fix (Sprint 26 T26.11):
+      - write_to_firestore step 6 now calls update_query_status(
+        state["query_doc_id"]) — the fresh UUID doc this run actually
+        processed — so the FRESH doc is the one marked "done" (asserted
+        below). The original session's queue doc is never seeded here and is
+        not touched; in production it correctly stays "awaiting_clarification"
+        (it never produced a forecast). This closes the pre-existing Sprint-21
+        wrong-target limitation this test previously xfailed on.
     """
     db = emulator_db
     session_id = f"{emulator_test_id}_tier2_resume"
@@ -941,11 +929,11 @@ def test_sprint21_gate3_tier2_resume_freeform_completes_forecast(
     assert session["status"] == "done"
     assert session["tier"] == "tier_2"  # T21.8
 
-    # Fresh forecastQueries doc stays at "claimed" (Sprint 21 known limitation —
-    # write_to_firestore uses actual_session_id for update_query_status, which
-    # marks the original session's forecastQueries doc, not the fresh one).
+    # Fresh forecastQueries doc is marked "done" — KG-B-18 fix (Sprint 26
+    # T26.11): step 6 targets state["query_doc_id"] (the fresh doc this run
+    # processed), so the doc that actually ran is the one cleared from the queue.
     fq_fresh = db.collection("forecastQueries").document(fresh_query_doc_id).get().to_dict()
-    assert fq_fresh["status"] == "claimed"  # not "done" — Sprint 26 fix
+    assert fq_fresh["status"] == "done"
 
 
 def test_sprint21_gate3_tier1_clear_path_writes_tier1(

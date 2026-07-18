@@ -98,10 +98,11 @@ Spec references:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from agent import events, firestore_client
+from agent import events, firestore_client, metrics
 from agent.config import settings
 from agent.errors import AgentProcessingError
 from agent.schemas import SOURCE_TYPE_TO_FRONTEND_TYPE
@@ -141,6 +142,10 @@ def run(state: dict) -> dict:
     # (claim_session's single-writer field); missing run_id → emit no-ops.
     run_id = state.get("run_id")
     event_id = events.emit_event(run_id, "write_to_firestore", "Saving your forecast…")
+    # Sprint 26 T26.4: time the whole node manually — write_to_firestore is the
+    # load-dependent node (evidence subcollection size + the pre-`done` agentEvents
+    # drain) and is NOT @events.emits-decorated, so it observes its own duration.
+    start = time.monotonic()
 
     session_id = state.get("session_id")
     if not session_id:
@@ -227,9 +232,36 @@ def run(state: dict) -> dict:
         canonical_key=canonical_key,
     )
 
-    # 6. forecastQueries.status = done (clear out of the worker queue).
-    # By server contract session_id == query_doc_id (session.repository.ts:347).
-    firestore_client.update_query_status(session_id, "done")
+    # 6. forecastQueries.status = done (clear the PROCESSED doc out of the worker
+    # queue). KG-B-18 (Sprint 26 T26.11): mark the doc this run actually claimed —
+    # state["query_doc_id"] — NOT session_id. On a first-time run they are equal;
+    # on resume-on-clarify claim_session overwrote session_id with the resolved
+    # ORIGINAL id, while the run processed the fresh-UUID queue doc the server
+    # minted in requeueClarifiedSession. Marking session_id here would (a) 404 in
+    # tests that never seed the original doc and (b) in production spuriously flip
+    # the original doc `done` while stranding the fresh doc at `claimed`. Fall back
+    # to session_id defensively if the field is somehow absent (older callers).
+    #
+    # Layer 1 (T26.11): this write runs AFTER step 5 already flipped the session to
+    # `done`, so a queue-write failure must never fail/reverse a delivered
+    # forecast — log a WARNING and continue. (The KG-B-18 correctness now rides on
+    # the retarget above; this try/except is belt-and-suspenders hardening.)
+    query_doc_id = state.get("query_doc_id") or session_id
+    try:
+        firestore_client.update_query_status(query_doc_id, "done")
+    except Exception:
+        logger.warning(
+            "write_to_firestore: failed to mark forecastQueries/%s 'done' after "
+            "the session was delivered; continuing — a queue-write error must not "
+            "reverse a delivered forecast (KG-B-18)",
+            query_doc_id, exc_info=True,
+        )
+
+    # Sprint 26 T26.4: count this delivered session by tier (done terminal). tier
+    # is set by synthesize; "none" only if somehow unresolved by this point.
+    metrics.SESSION_TOTAL.labels(
+        tier=(state.get("tier") or "none"), status="done"
+    ).inc()
 
     logger.info(
         "write_to_firestore: session_id=%s evidence=%d done",
@@ -243,6 +275,12 @@ def run(state: dict) -> dict:
     # check without actually mutating state. (A future state schema
     # extension could add `persistence_complete: bool` here; for
     # Sprint 20 the identity-echo is the smallest-footprint fix.)
+    # Sprint 26 T26.4: record this node's (load-dependent) wall-clock. Reached only
+    # on the happy path — a mid-node raise skips it, matching the decorator's
+    # observe-on-normal-return semantics.
+    metrics.NODE_DURATION_SECONDS.labels(node_name="write_to_firestore").observe(
+        time.monotonic() - start
+    )
     return {"errors": list(state.get("errors") or [])}
 
 

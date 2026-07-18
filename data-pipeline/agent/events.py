@@ -60,7 +60,7 @@ import time
 import uuid
 from typing import Optional
 
-from agent import firestore_client
+from agent import firestore_client, metrics
 from agent.firestore_client import SERVER_TIMESTAMP
 
 logger = logging.getLogger(__name__)
@@ -317,7 +317,16 @@ def emits(event_type: str, title: str):
         def wrapper(state, *args, **kwargs):
             run_id = state.get("run_id") if isinstance(state, dict) else None
             event_id = emit_event(run_id, event_type, title)
+            start = time.monotonic()
             result = fn(state, *args, **kwargs)  # raise → event left in-flight
+            # Sprint 26 T26.4: record per-node latency on the happy path. A raising
+            # node's event is left in-flight for fail_event and its (failed)
+            # duration is not part of the latency profile 26.3 reads, so observe
+            # only on normal return. Covers the 9 decorated pair-nodes;
+            # write_to_firestore (manual emit) observes itself.
+            metrics.NODE_DURATION_SECONDS.labels(node_name=event_type).observe(
+                time.monotonic() - start
+            )
             complete_event(run_id, event_id)
             return result
         return wrapper

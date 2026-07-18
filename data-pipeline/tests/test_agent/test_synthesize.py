@@ -150,10 +150,11 @@ def _evidence_item(
 # ==========================================================
 # AGENT_VERSION pin
 # ==========================================================
-def test_agent_version_bumped_to_sprint_23_5():
+def test_agent_version_bumped_to_sprint_26():
     # Sprint 23.5 T23.5.12: AGENT_VERSION relocated to settings (canonical
-    # home) and bumped. synthesize re-exports it under the original name.
-    assert synthesize.AGENT_VERSION == "0.5.0-sprint23.5"
+    # home). Sprint 26 T26.5 bumped the base to 0.5.0-sprint26 and appends
+    # +<git-sha> when the build injects it; synthesize re-exports the value.
+    assert synthesize.AGENT_VERSION == "0.5.0-sprint26"
 
 
 def test_agent_version_sourced_from_settings():

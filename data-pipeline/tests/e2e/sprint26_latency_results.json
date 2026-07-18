@@ -1,0 +1,85 @@
+[
+  {
+    "label": "tier1",
+    "question": "Will the Federal Reserve cut interest rates by Q2 2026?",
+    "tier": "tier_1",
+    "session_id": "lat_tier1_94d6eff4",
+    "total_s": 35.95,
+    "status": "done",
+    "reached_synthesis": true,
+    "n_evidence": 11,
+    "sufficient_path": true,
+    "path": [
+      "claim_session",
+      "query_understand",
+      "build_embedding",
+      "vault_query",
+      "sufficiency_check",
+      "rate_evidence",
+      "synthesize",
+      "generate_suggested_actions",
+      "write_to_firestore"
+    ],
+    "event_ms": {
+      "claim_session": null,
+      "query_understand": 2592,
+      "build_embedding": 765,
+      "vault_query": 30,
+      "sufficiency_check": 0,
+      "rate_evidence": 14280,
+      "synthesize": 15953,
+      "generate_suggested_actions": 2202,
+      "write_to_firestore": 63
+    },
+    "hist_delta_ms": {
+      "query_understand": 2593.0,
+      "build_embedding": 766.0,
+      "vault_query": 31.0,
+      "rate_evidence": 14281.0,
+      "synthesize": 15953.0,
+      "generate_suggested_actions": 2203.0,
+      "write_to_firestore": 63.0
+    }
+  },
+  {
+    "label": "tier2_broad",
+    "question": "Will the United States enter a recession in 2026?",
+    "tier": "tier_2",
+    "session_id": "lat_tier2_broad_6ff95b6d",
+    "total_s": 34.94,
+    "status": "done",
+    "reached_synthesis": true,
+    "n_evidence": 15,
+    "sufficient_path": true,
+    "path": [
+      "claim_session",
+      "query_understand",
+      "build_embedding",
+      "vault_query",
+      "sufficiency_check",
+      "rate_evidence",
+      "synthesize",
+      "generate_suggested_actions",
+      "write_to_firestore"
+    ],
+    "event_ms": {
+      "claim_session": null,
+      "query_understand": 1327,
+      "build_embedding": 390,
+      "vault_query": 0,
+      "sufficiency_check": 0,
+      "rate_evidence": 12157,
+      "synthesize": 19264,
+      "generate_suggested_actions": 1719,
+      "write_to_firestore": 30
+    },
+    "hist_delta_ms": {
+      "query_understand": 1328.0,
+      "build_embedding": 390.0,
+      "rate_evidence": 12157.0,
+      "synthesize": 19265.0,
+      "generate_suggested_actions": 1719.0,
+      "write_to_firestore": 31.0
+    }
+  }
+]

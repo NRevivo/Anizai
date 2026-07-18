@@ -276,6 +276,12 @@ def test_gate2_clarification_candidates_are_shaped():
         assert "label" in c
         assert c["source"] == "polymarket"
         assert "matchConfidence" in c
+        # KG-B-8 (Sprint 26 T26.2, Gate 2): the strip survives the full
+        # query_understand → write_clarification → Firestore path — ONLY the 5
+        # spec fields reach the write; no hub-internal fields leak.
+        assert set(c.keys()) == {"id", "label", "source", "description", "matchConfidence"}
+        for leaked in ("intent", "domain", "entities", "polymarket_search_terms"):
+            assert leaked not in c
 
 
 def test_gate2_ambiguous_writes_awaiting_clarification_on_both_docs():

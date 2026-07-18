@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from agent.tools._retry import vault_read_retry
 from persistence import mapping_dict
 
 
@@ -44,8 +45,10 @@ def lookup_by_canonical(
         by created_at DESC. Empty list if no linkages exist for this
         canonical_event_id (the common pre-Phase-7 case).
     """
-    return mapping_dict.lookup_by_canonical(
+    return vault_read_retry(
+        mapping_dict.lookup_by_canonical,
         canonical_event_id=canonical_event_id,
         platform=platform,
         limit=limit,
+        op_name="mapping.lookup_by_canonical",
     )

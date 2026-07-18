@@ -74,10 +74,12 @@ def _seed_resume_query(db, orig_session_id: str, fresh_query_doc_id: str,
         sessionId={orig} (Express writes a fresh UUID as the doc id);
       - forecastQueries/{orig} is the ORIGINAL queue doc, which EXISTS in
         production (the first submission's doc, now awaiting_clarification).
-        Seeded so write_to_firestore's update_query_status({orig}) has a doc to
-        update — the exact 'seed the original queue doc' shape KG-B-18 earmarks.
-        Without it this test would hit the KG-B-18 404 + its fail_event 'error'
-        cascade, muddying the findings-#3 event-path assertion.
+        Seeded as realistic production shape. NOTE (Sprint 26 T26.11 closed
+        KG-B-18 via the retarget, NOT the 'seed the original' approach): step 6
+        now marks the FRESH doc 'done', so {orig} correctly stays
+        awaiting_clarification and there is no 404 regardless of this seeding.
+        This test asserts only the event path / session status, not queue-doc
+        status, so it is unaffected either way.
     """
     db.collection("sessions").document(orig_session_id).set({
         "status": "queued",
