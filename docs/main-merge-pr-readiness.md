@@ -1,5 +1,9 @@
 # Main Merge PR Readiness
 
+<!-- archive-banner -->
+> 📁 **Historical process record.** Retained as history of how the work was
+> reviewed. Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §4.
+
 ## 1. Branch State
 - current branch: `shahar`
 - ahead/behind count before merge: `24` ahead, `0` behind `origin/main`

@@ -1,5 +1,10 @@
 # UI Text and Microcopy Optimization - Task 0.8
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §5`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary of Changes
 Updated visible product copy across the dashboard, forecast creation flow, result cards, evidence, follow-up panel, loading/empty/error states, and settings/subscription screens.
 

@@ -1,5 +1,9 @@
 # Task 0.3 Safety Review
 
+<!-- archive-banner -->
+> 📁 **Historical process record.** Retained as history of how the work was
+> reviewed. Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §4.
+
 ## 1. Result
 
 The Task 0.3 changes appear to be UI/layout-only. The reviewed diffs are limited to Tailwind class changes, dashboard spacing/grid adjustments, responsive drawer sizing, card density changes, and one presentational empty-message state in the chat panel.

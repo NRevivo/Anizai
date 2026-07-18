@@ -1,5 +1,10 @@
 # Dashboard Layout Optimization - Task 0.3
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §3, §6.1`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary of Changes
 
 The main dashboard was tightened into a more compact forecasting workspace. The active forecast/result area now gets more horizontal priority on desktop, the dashboard content uses smaller app-style spacing, the forecast creation screen has less hero-like vertical whitespace, and the chat/trending side panels are denser secondary panels.

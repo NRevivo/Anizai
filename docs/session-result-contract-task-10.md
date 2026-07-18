@@ -1,5 +1,10 @@
 # Session Result Contract - Task 10
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_contracts.md`](C_frontend/frontend_contracts.md) §3.4.
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 ## 1. Summary
 
 This task extends the `SessionResult` contract with new hub fields while keeping the result UI backward-compatible.

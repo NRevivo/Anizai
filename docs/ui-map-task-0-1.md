@@ -1,5 +1,10 @@
 # UI Map - Task 0.1
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_ui.md`](C_frontend/frontend_ui.md) §2, §3, §5, §6.
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 ## 1. Summary
 
 The current frontend is a Vite/React single page app. It does not use a route library; `client/src/App.tsx` owns a local `appState` union and conditionally renders each "route" or screen. The dashboard itself is rendered through `client/src/pages/DashboardPage.tsx`, which owns the sidebar/chat drawer state and switches the center panel between the active forecast dashboard and the forecast creation view.

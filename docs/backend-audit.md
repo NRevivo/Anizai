@@ -1,5 +1,10 @@
 # Slice 2.5 — Backend Payload Audit & Display Verification
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_contracts.md`](C_frontend/frontend_contracts.md) §3–§6.
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 Audit of every field reachable from `GET /sessions/:id` (`status === 'done'`)
 and where it lands in the frontend. Read-only; no code changed.
 

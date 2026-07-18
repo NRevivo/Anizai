@@ -1,5 +1,10 @@
 # API Prefix Fix - Task 3
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_api.md §7.3`](C_frontend/frontend_api.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 The frontend now defaults to a relative `/api` base instead of a hardcoded `http://localhost:3000` URL. This makes active client requests follow a single convention:

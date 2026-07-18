@@ -1,5 +1,10 @@
 # Probability Standardization - Task 2
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_contracts.md §3.4`](C_frontend/frontend_contracts.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 The frontend now uses a single probability convention across active product code and demo fallbacks:

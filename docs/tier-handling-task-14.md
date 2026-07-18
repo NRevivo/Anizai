@@ -1,5 +1,10 @@
 # Tier 1 / Tier 2 UI Handling - Task 14
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §7`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 - Hardened result UI handling for `tier_1` and `tier_2` forecasts.
 - Kept normal market comparison behavior for benchmark-backed forecasts.

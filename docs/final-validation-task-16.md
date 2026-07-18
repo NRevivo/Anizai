@@ -1,5 +1,10 @@
 # Final Validation - Task 16
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_sprints.md`](C_frontend/frontend_sprints.md) §5.
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 ## 1. Summary
 - The V1 integration work typechecks on the client and builds/tests on the server.
 - Core UI and contract paths for sessions, statuses, clarification, follow-ups, agent events, plan-limit handling, tier handling, and backward-compatible result/evidence rendering are present in code and aligned with the current backend shape.

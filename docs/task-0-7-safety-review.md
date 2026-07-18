@@ -1,5 +1,9 @@
 # Task 0.7 Safety Review
 
+<!-- archive-banner -->
+> 📁 **Historical process record.** Retained as history of how the work was
+> reviewed. Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §4.
+
 ## 1. Result
 The Task 0.7 changes appear safe and scoped to responsive/mobile/tablet/desktop presentation. No code changes were made during this safety review.
 

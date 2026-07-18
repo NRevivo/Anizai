@@ -1,5 +1,10 @@
 # Session Status Ownership - Task 6
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_contracts.md §2.1`](C_frontend/frontend_contracts.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 This task updates the frontend status model to recognize the real session lifecycle from main:

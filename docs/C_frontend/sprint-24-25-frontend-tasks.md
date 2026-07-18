@@ -1,4 +1,12 @@
 # Anizai · Frontend / BFF Tasks · Sprint 24 + 25 — **AS-BUILT**
+> Domain: C — Frontend / BFF
+> Type: Sprint Record
+> Last updated: 2026-07-15
+> TL;DR: The as-built record of Sprint 24 + 25 (T0–T8) — what was actually changed, the real file paths, and how each item was verified. Open this for the detail behind the Sprint 24+25 row in `frontend_sprints.md §1`.
+
+> **Status: live, not archived.** This is the current as-built record for the most
+> recent sprint. Summary status → `frontend_sprints.md §1`. Specs → `frontend_api.md`,
+> `frontend_contracts.md`, `frontend_ui.md`.
 
 Sources: `sprint24_followups_frontend_contract.md` + `sprint25_frontend_contract.md`
 Owner: Noam (`client/`, `server/`) + shared Firestore project `anizai-ai`

@@ -1,5 +1,10 @@
 # Suggested Actions - Task 12
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §5.3`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 This task connects `SessionResult.suggestedActions` to the existing follow-up UI.

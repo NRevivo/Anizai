@@ -1,5 +1,9 @@
 # Task 0.6 Safety Review
 
+<!-- archive-banner -->
+> 📁 **Historical process record.** Retained as history of how the work was
+> reviewed. Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §4.
+
 ## 1. Result
 
 The Task 0.6 changes appear safe and scoped to presentation of status, loading, empty, warning, and error states. No production code was changed during this safety review.

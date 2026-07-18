@@ -1,5 +1,10 @@
 # Responsive Layout Optimization - Task 0.7
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §6.1, §6.2`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary of Changes
 Improved responsive behavior across the dashboard shell, mobile drawers, forecast creation view, result cards, evidence timeline, chat panel, settings modal, subscription settings, and shared state messages.
 

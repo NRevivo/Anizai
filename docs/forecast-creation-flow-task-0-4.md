@@ -1,5 +1,10 @@
 # Forecast Creation Flow Optimization - Task 0.4
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §5`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary of Changes
 
 The forecast creation form now waits for the real session creation promise instead of only showing a short local delay. While a forecast is being created, the textarea is locked, the submit button shows a spinner with a clear loading label, and the helper copy confirms that the forecast session is being created.

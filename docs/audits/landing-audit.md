@@ -1,5 +1,10 @@
 # Landing Page Audit — Slice 13
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_ui.md`](../C_frontend/frontend_ui.md) §2.
+> Why this doc is wrong: [`frontend_archive.md`](../C_frontend/frontend_archive.md) §2.
+
 Read-only inventory of the public landing page (`appState === 'landing'`) as it
 exists on `main` at the time of audit. No code changes, no design proposals.
 

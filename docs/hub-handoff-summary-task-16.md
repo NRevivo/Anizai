@@ -1,5 +1,10 @@
 # Hub Handoff Summary - Task 16
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_contracts.md`](C_frontend/frontend_contracts.md) §3–§4.
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 ## 1. New Session Statuses
 - Supported session statuses across client and server:
   - `queued`

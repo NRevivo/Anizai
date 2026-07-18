@@ -1,5 +1,10 @@
 # Demo Routes Hardening - Task 4
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_api.md §3.4`](C_frontend/frontend_api.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 Demo routes were found registered in `server/src/server.ts` and previously enabled for every development run. They are now gated behind both:

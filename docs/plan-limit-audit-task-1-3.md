@@ -1,5 +1,10 @@
 # Plan Limit Audit - Task 1.3
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_api.md §6.1`](C_frontend/frontend_api.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 There is already a real backend free-tier forecast limit in place. It is enforced during session creation through usage counting on the user record, with free users blocked after 3 forecasts in the current calendar month. The backend also exposes user plan and usage fields through `/me`, and allows plan changes through `/me/plan`.

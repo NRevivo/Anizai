@@ -1,5 +1,10 @@
 # API Prefix Audit - Task 3.1
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_api.md`](C_frontend/frontend_api.md) §7.3.
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 ## 1. Summary
 
 The current frontend API client uses `VITE_API_BASE_URL` when provided, and otherwise defaults to a hardcoded absolute backend URL: `http://localhost:3000`. The active frontend services call relative route paths like `/sessions`, `/me`, and `/trending`, which are then prefixed with that base URL inside `client/src/lib/api.ts`.

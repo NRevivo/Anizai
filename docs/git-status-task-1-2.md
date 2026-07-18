@@ -1,5 +1,9 @@
 # Git Status - Task 1.2
 
+<!-- archive-banner -->
+> 📁 **Historical process record.** Retained as history of how the work was
+> reviewed. Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §4.
+
 ## 1. Current Branch
 
 - `shahar`

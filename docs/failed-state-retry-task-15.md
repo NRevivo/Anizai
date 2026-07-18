@@ -1,5 +1,10 @@
 # Failed State and Retry - Task 15
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_api.md`](C_frontend/frontend_api.md) §3.3.
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 ## 1. Summary
 - Added a clearer failed-session UI with a dedicated retry action.
 - Reused the existing session-creation flow to retry failed forecasts as fresh requests.

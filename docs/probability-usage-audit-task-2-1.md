@@ -1,5 +1,10 @@
 # Probability Usage Audit - Task 2.1
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_contracts.md §3.4`](C_frontend/frontend_contracts.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 The current product mostly uses `0-1` floats for live session, result, market, trending, and sentiment data coming from the backend. Display formatting is usually handled in the frontend by multiplying by `100` at render time.

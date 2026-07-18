@@ -1,5 +1,10 @@
 # Clarification Flow - Task 8
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_api.md §3.3`](C_frontend/frontend_api.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 This task adds a minimal clarification flow for sessions in `awaiting_clarification`.

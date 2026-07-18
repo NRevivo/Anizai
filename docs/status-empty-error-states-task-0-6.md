@@ -1,5 +1,10 @@
 # Status, Loading, Empty, and Error States - Task 0.6
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §5.2`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary of Changes
 
 Improved the current user-facing loading, empty, warning, and error presentation without changing backend behavior or lifecycle ownership. A small `StateMessage` UI helper now gives dashboard states, empty result sections, chat, trending, forecast form errors, and plan-limit warnings a consistent compact presentation.

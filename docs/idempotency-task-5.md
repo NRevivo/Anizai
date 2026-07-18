@@ -1,5 +1,10 @@
 # Idempotency Task 5
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_contracts.md §2.4`](C_frontend/frontend_contracts.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 We added minimal idempotency support to `POST /sessions` so the frontend sends a unique `idempotencyKey` with each forecast submission attempt, and the backend reuses an existing recent session for duplicate submits with the same key instead of creating another session.

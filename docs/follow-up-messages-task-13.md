@@ -1,5 +1,10 @@
 # Follow-up Messages - Task 13
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_contracts.md §3.6, §4.3`](C_frontend/frontend_contracts.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 - Added a live Firestore listener for `sessions/:sessionId/messages` so follow-up conversations update without reloading the whole session.
 - Kept the existing `POST /sessions/:id/messages` endpoint and tightened backend storage so follow-up messages include the authenticated `userId` alongside role, content, timestamp, and optional metadata.

@@ -1,5 +1,10 @@
 # Plan Limit Handling - Task 7
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_api.md §6.1`](C_frontend/frontend_api.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 This task standardizes plan-limit handling across the backend and frontend.

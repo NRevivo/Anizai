@@ -1,5 +1,9 @@
 # UI Regression Check - Task 0.9
 
+<!-- archive-banner -->
+> 📁 **Historical process record.** Retained as history of how the work was
+> reviewed. Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §4.
+
 ## 1. Checks Performed
 
 - Ran `git status --short` from the repo root to confirm the starting worktree state.

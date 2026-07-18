@@ -1,5 +1,10 @@
 # Forecast Result UI Optimization - Task 0.5
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §3`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary of Changes
 
 The completed forecast result UI now makes the final answer more prominent. The top result card emphasizes the final probability, confidence, and a bottom-line answer derived from the existing probability value, while the detailed explanation remains visible but visually secondary.

@@ -1,5 +1,10 @@
 # UI Consistency Audit - Task 0.2
 
+<!-- archive-banner -->
+> 📁 **Historical change log.** Accurate for the change it describes;
+> superseded as current documentation by [`frontend_ui.md §6, §7`](C_frontend/frontend_ui.md).
+> Index: [`frontend_archive.md`](C_frontend/frontend_archive.md) §3.
+
 ## 1. Summary
 
 The UI has a recognizable visual direction: light gray surfaces, white cards, soft borders, teal/blue/purple accents, compact dashboard typography, and utility-style Tailwind composition. Consistency is moderate but not yet systematized. Shared primitives exist for `Button`, `Input`, and `Card`, but many screens and components bypass or heavily override them with local classes. The dashboard is the most visually cohesive area, while settings, plan/payment flows, public pages, and chat use related but slightly different spacing, radius, button, badge, and state patterns.

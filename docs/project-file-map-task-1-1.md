@@ -1,5 +1,10 @@
 # Project File Map - Task 1.1
 
+<!-- archive-banner -->
+> ⚠️ **SUPERSEDED — contains inaccuracies.** Historical record only; do not
+> cite as current. Corrected content: [`frontend_overview.md`](C_frontend/frontend_overview.md) §2–§3 (and `frontend_api.md` §3).
+> Why this doc is wrong: [`frontend_archive.md`](C_frontend/frontend_archive.md) §2.
+
 ## 1. Summary
 
 The current Anizai app uses a React frontend with a thin `fetch`-based API client and Express backend routes. Session and result contracts are defined separately on the frontend and backend rather than in a shared package. Frontend forecast, result, and chat flows are orchestrated mainly from `client/src/App.tsx`, while backend session reads and writes are centralized in `server/src/repositories/session.repository.ts` and exposed through `server/src/routes/sessions.ts`.
