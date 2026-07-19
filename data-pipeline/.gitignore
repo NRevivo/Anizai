@@ -31,8 +31,8 @@ worker.log
 # /docs/A_pipeline
 /docs/B_hub
 /docs/C_cloud
-/docs/D_calibration
-/docs/old_docs
+#/docs/D_calibration
+#/docs/old_docs
 
 /project_master.md
 
