@@ -386,19 +386,12 @@ SELECT (SELECT count(*) FROM llm_cost_events WHERE run_id = :run_id) AS raw_rows
 
 **Go/no-go:** rejects AND cost events landing within the hour ⇒ GO (window runs).
 Not landing ⇒ STOP, fix, declare a NEW T0. Never "continue and see."
-**Named first-hour check — NewsAPI:** root cause isolated 2026-07-02 by elimination
-to request origin: byte-identical code + key returns articles from a local IP and
-zero from the GCP datacenter IP — a provider-side (newsapi.ai) response difference
-for cloud-origin requests. The producer fix now surfaces this loudly (ERROR on the
-HTTP-200-error envelope, WARNING on 0-article categories). **First Stage-1 action
-(pending Ron's ~1-credit approval): a single getArticles probe (articlesCount=1)
-from the cluster, printing the raw response envelope.** Pre-committed decision
-rule: provider-block confirmed → **the day still runs** — the cost goal is fully
-valid (measure what actually runs) and the calibration corpus leans on ArXiv and
-likely needs the extension rule. NO-GO is reserved for OUR faults, not a
-provider-side block. Ron is separately checking newsapi.ai account settings and
-filing a support ticket (cloud requests are counted in the dashboard yet return
-empty — also a billing question).
+**Named first-hour check — NewsAPI:** the producer surfaces zero-article pulses
+loudly (WARNING per empty category, ERROR on an HTTP-200 error envelope). If a
+category logs the 0-article WARNING, glance at the newsapi.ai dashboard — a signal
+to check, not a NO-GO on its own; a quiet no-news window is normal. The only NO-GO
+here is the instrumentation itself not writing (rejects/costs), not a low-article
+pull.
 
 ### Stage 3 — In-window monitoring
 Light checks every ~3–4 waking hours: S2.2 + Grafana glance. Overnight relies on

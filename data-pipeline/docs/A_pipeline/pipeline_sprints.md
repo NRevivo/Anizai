@@ -1,7 +1,7 @@
 # pipeline_sprints.md
 > Domain: A — Pipeline
 > Type: Sprints
-> Last updated: 2026-07-02
+> Last updated: 2026-07-18
 > TL;DR: Live status of the pipeline — what's closed, the open sprints (Phase 7B.5 calibration + its 7B.5-I instrumentation prerequisite), deferred items, and the Domain A Known Gaps (KG-A-*). Open this to see what pipeline work remains.
 
 ## Navigation
@@ -100,6 +100,7 @@ off there with `sprint-kickoff` + `filter-analysis`.
 | KG-A-8 | global_news builders use `uuid4` signal_id — Flink re-deliveries and duplicate articles accumulate duplicate `knowledge_vectors` rows | Phase 7B.5-I | Medium | Deterministic UUID5 from content_hash (pattern exists in the social path) |
 | KG-A-9 | Gold checkpoint fragility under dense backlog — synchronous ~1–2s enrichment stalls barriers → expiry → restart replay loops (2026-07-02 storm: 3,993 calls for 232 unique items) | Phase 7B.5-I | High | Checkpoint tuning / unaligned checkpoints / async enrichment |
 | KG-A-10 | Local compose Flink leg broken — Beam Python-worker crash on first message (env gap since ~Sprint 17); in-process replay is the current local verification path | Phase 7B.5-I | Low | Rebuild/realign the local PyFlink worker env; not cloud-affecting |
+| KG-A-11 | Phase-7C scraper retirement removed `newspaper4k` from the manifests but did not fully clean the environment. `newspaper4k==0.9.5` lingered as an orphan in the local dev venv (absent from `requirements.txt`/`.lock`, imported by no code), and several of its transitive deps remain in `requirements.lock` as possible co-orphans (`lxml_html_clean`, `requests-file`, `tldextract`, `w3lib` — note `lxml`/`beautifulsoup4` are shared and are NOT co-orphans). The venv orphan was uninstalled during Sprint 26 (Domain B, 26.4, `pip uninstall newspaper4k`); the lock-side co-orphans were deliberately left untouched then to avoid dependency-surface movement before the baseline day-run. | Sprint 26 (surfaced by the 26.4 dependency add) | Low | A scoped Phase-7C venv/lock hygiene pass, post baseline day-run — audit each candidate co-orphan for remaining importers and remove only the truly unused. Do NOT `pip freeze` the dev venv before that audit (it would rewrite the whole lock). |
 
 > KG-A-3, KG-A-4, and KG-A-5 are pipeline-producer concerns that were first **surfaced
 > during Phase 9.5 (cluster robustness)**; they are owned here as Domain A ingestion gaps,
