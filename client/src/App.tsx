@@ -66,9 +66,12 @@ type AppState =
 interface TrendingQuestionView {
   id: string;
   question: string;
-  probability: number;
-  trend: 'up' | 'down' | 'stable';
-  context: string;
+  /** Null for a multi-outcome event — render `outcomes` instead of a single number. */
+  probability: number | null;
+  outcomes: { label: string; probability: number }[];
+  volume24h: number;
+  marketCount: number;
+  url: string;
 }
 
 function mapSessionStatus(status: SessionStatus, confidence: number | null): 'stable' | 'volatile' {
@@ -265,19 +268,14 @@ function toChatMessage(message: SessionMessage): ChatMessage {
 
 function toTrendingView(items: TrendingForecast[]): TrendingQuestionView[] {
   return items.map((item) => {
-    // probability from backend is a 0–1 float; default to 0.5 if missing
-    const probability = item.probability ?? 0.5;
-
-    // Trend thresholds in 0–1 space: >0.6 up, <0.4 down
-    const trend: 'up' | 'down' | 'stable' =
-      probability >= 0.6 ? 'up' : probability <= 0.4 ? 'down' : 'stable';
-
     return {
       id: item.id,
-      question: item.question ?? item.title ?? 'Untitled forecast',
-      probability,
-      trend,
-      context: `Popularity: ${item.popularityScore}`,
+      question: item.title || 'Untitled forecast',
+      probability: item.probability,
+      outcomes: item.outcomes,
+      volume24h: item.volume24h,
+      marketCount: item.marketCount,
+      url: item.url,
     };
   });
 }

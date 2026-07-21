@@ -7,7 +7,7 @@
 ## Navigation
 - §1 — Overview — three contract surfaces, and the duplication between them
 - §2 — Session Lifecycle — the six statuses, the two status vocabularies, who writes each
-- §3 — REST Wire Types — §3.1–§3.9, the `GET /sessions/:id` aggregate
+- §3 — REST Wire Types — §3.1–§3.10, the `GET /sessions/:id` aggregate plus `GET /trending` (§3.9)
 - §4 — Firestore Direct-Read Contracts — what the client listeners read
 - §5 — View-Model Mapping — wire types → `Prediction` / `TimelineEvent` / `ChatMessage`
 - §6 — Known Constraints
@@ -209,7 +209,8 @@ Null until `status === 'done'`.
 > **This is the most breakable cross-cutting convention in the codebase.** It has been
 > violated before — a stale `/ 100` in the trending demo fallback produced 0–0.01
 > values on that path, and one card rendered a raw 0–1 value with a `%` sign. Both
-> were fixed in the Task-2 standardization pass. There is no runtime guard and no type
+> were fixed in the Task-2 standardization pass. (That fallback no longer exists —
+> deleted 2026-07-20 with KG-C-5; don't go looking for it.) There is no runtime guard and no type
 > that distinguishes a ratio from a percentage, so the only protection is this
 > convention. A backend that starts sending `62` instead of `0.62` will render as
 > `6200%` with nothing failing loudly.
@@ -400,7 +401,43 @@ Capped at 100 points. Empty in practice — §6.
 
 Fetched end-to-end but empty in practice, and read by no client mapper — §6.
 
-### §3.9 Composite-index fallbacks
+### §3.9 `TrendingForecast` — `GET /trending`
+
+**Reshaped 2026-07-20 (KG-C-13)** from a Polymarket *market* to a Polymarket *event*.
+This is the only REST type that does not originate in Firestore — it is a live
+passthrough of `gamma-api.polymarket.com/events`, cached 5 minutes in-process.
+
+```ts
+{ id: string;                    // Polymarket event id
+  title: string;                 // was `question`
+  url: string;                   // https://polymarket.com/event/{slug}; rendered as the row link
+  probability: number | null;    // Yes price for a binary event; NULL for multi-outcome
+  outcomes: { label: string; probability: number }[];
+  volume24h: number;             // was `popularityScore` (same value, clearer name)
+  marketCount: number; }         // 1 ⇒ binary; the true field size, not outcomes.length
+```
+
+**`probability: null` is load-bearing.** A candidate field (Ballon d'Or has 89 markets)
+has no single probability, which is why Polymarket's own card shows leading outcomes
+instead. Consumers must branch on it — defaulting it to a number reintroduces the
+fabricated-value class of bug.
+
+`outcomes` carries one `Yes` entry for a binary event, and for a multi-outcome one the
+top 3 legs price-descending, **deduplicated on the rendered percentage**. That dedupe
+exists for strike ladders: "Bitcoin above ___ on July 20?" has six legs at 100%, so a
+plain top-3 rendered three identical rows. `marketCount` still reports the true size of
+the field, so `outcomes.length` and `marketCount` legitimately disagree.
+
+Removed: `question`, `popularityScore`, `tags`, `createdAt`, `updatedAt`, the
+`[key: string]: unknown` index signature (which existed only for the deleted
+Firestore-fallback spread), and `slug` — the latter was a server-side building block for
+`url` and no consumer read it.
+
+> **Duplicated, unenforced.** Declared identically in
+> `server/src/repositories/trending.repository.ts` and
+> `client/src/services/trending.service.ts`. Same hazard as KG-C-1 — edit both together.
+
+### §3.10 Composite-index fallbacks
 
 `listSessions`, `getMessages`, `getPredictionSeries`, and `getSentimentTimeSeries` each
 wrap their ordered query in a `try/catch` on Firestore's `failed-precondition` error
@@ -529,7 +566,7 @@ never see wire types.
 | `toSentimentPoints` | `SessionDetail \| null` | `SentimentDataPoint[]` | `App.tsx:173` |
 | `toTimelineEvents` | `SessionDetail \| null` | `TimelineEvent[]` | `App.tsx:188` |
 | `toChatMessages` / `toChatMessage` | `SessionDetail` / `SessionMessage` | `ChatMessage[]` | `App.tsx:241` |
-| `toTrendingView` | `TrendingForecast[]` | `TrendingQuestionView[]` | `App.tsx:266` |
+| `toTrendingView` | `TrendingForecast[]` (§3.9) | `TrendingQuestionView[]` | `App.tsx:266` |
 
 ### §5.1 `toPrediction` — result-then-session fallback
 

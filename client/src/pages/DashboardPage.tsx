@@ -24,9 +24,11 @@ import type {
 interface TrendingQuestionView {
     id: string;
     question: string;
-    probability: number;
-    trend: 'up' | 'down' | 'stable';
-    context: string;
+    probability: number | null;
+    outcomes: { label: string; probability: number }[];
+    volume24h: number;
+    marketCount: number;
+    url: string;
 }
 
 interface DashboardPageProps {

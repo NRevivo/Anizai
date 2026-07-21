@@ -85,6 +85,16 @@ Every response is wrapped. Defined in `server/src/types/api.ts`.
 to **20**, and any value is clamped to a maximum of **100**
 (`Math.min(requested, 100)`).
 
+> **`limit` is an upper bound, not a promise.** `/trending` is a live passthrough of
+> Polymarket's `/events`, filtered twice before it returns — excluded categories
+> (sport, entertainment, weather) and then a required match against one of the
+> pipeline's 13 forecastable topic domains (KG-C-15). Roughly half the upstream page is
+> dropped. The repository over-fetches 4× to compensate, but Polymarket's own ceiling
+> is 100 events, so a large `limit` can legitimately return fewer rows. Returning fewer
+> on-topic events is deliberate — the filter is never relaxed to fill the list, and an
+> empty result is returned as `[]` with a `warn` rather than backfilled. Shape:
+> `frontend_contracts.md §3.9`.
+
 ### §3.2 User
 
 | Method | Path | Auth | Validation | Success | Handler |

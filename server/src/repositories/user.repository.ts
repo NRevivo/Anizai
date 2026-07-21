@@ -1,6 +1,6 @@
 import type { User } from '../services/users.service.js';
 import { FieldValue } from 'firebase-admin/firestore';
-import { collectionRef, now, toISOString } from '../services/firebase.service.js';
+import { collectionRef, now, runTransaction, toISOString } from '../services/firebase.service.js';
 import { AppError } from '../middleware/error.js';
 function getCurrentUsageMonth(date: Date): string {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -210,46 +210,55 @@ export const userRepository = {
      */
     async incrementUsage(uid: string): Promise<void> {
         const userRef = collectionRef('users').doc(uid);
-        const doc = await userRef.get();
 
-        if (!doc.exists) {
-            throw new AppError('User not found', 404, 'NOT_FOUND');
-        }
+        // The read, the limit check and the write must be one atomic unit.
+        // As a plain read-then-write, two concurrent POST /sessions could both
+        // read the same count and both write n+1, letting a free user exceed
+        // FREE_FORECAST_LIMIT (KG-C-9). Firestore aborts and retries the whole
+        // callback if the document changes underneath it.
+        await runTransaction(async (transaction) => {
+            const doc = await transaction.get(userRef);
 
-        const data = doc.data()!;
-        const currentMonth = getCurrentUsageMonth(new Date());
+            if (!doc.exists) {
+                throw new AppError('User not found', 404, 'NOT_FOUND');
+            }
 
-        let newUsage = typeof data.monthlyForecastsUsed === 'number' ? data.monthlyForecastsUsed : 0;
-        
-        // Lazy reset logic checking literal calendar month transition
-        if (data.usageMonth !== currentMonth) {
-            newUsage = 0;
-        }
+            const data = doc.data()!;
+            const currentMonth = getCurrentUsageMonth(new Date());
 
-        const plan = data.plan || 'free';
+            let newUsage = typeof data.monthlyForecastsUsed === 'number' ? data.monthlyForecastsUsed : 0;
 
-        // Limit completely blocks free tier execution
-        if (plan === 'free' && newUsage >= FREE_FORECAST_LIMIT) {
-            throw new AppError(
-                "You've used your free forecasts this month",
-                403,
-                'PLAN_LIMIT_EXCEEDED',
+            // Lazy reset logic checking literal calendar month transition
+            if (data.usageMonth !== currentMonth) {
+                newUsage = 0;
+            }
+
+            const plan = data.plan || 'free';
+
+            // Limit completely blocks free tier execution
+            if (plan === 'free' && newUsage >= FREE_FORECAST_LIMIT) {
+                throw new AppError(
+                    "You've used your free forecasts this month",
+                    403,
+                    'PLAN_LIMIT_EXCEEDED',
+                    {
+                        used: newUsage,
+                        limit: FREE_FORECAST_LIMIT,
+                        planTier: 'free',
+                        resetAt: getUsageResetAt(new Date()),
+                    }
+                );
+            }
+
+            transaction.set(
+                userRef,
                 {
-                    used: newUsage,
-                    limit: FREE_FORECAST_LIMIT,
-                    planTier: 'free',
-                    resetAt: getUsageResetAt(new Date()),
-                }
+                    usageMonth: currentMonth,
+                    monthlyForecastsUsed: newUsage + 1,
+                    updatedAt: now(),
+                },
+                { merge: true }
             );
-        }
-
-        await userRef.set(
-            {
-                usageMonth: currentMonth,
-                monthlyForecastsUsed: newUsage + 1,
-                updatedAt: now(),
-            },
-            { merge: true }
-        );
+        });
     }
 };
