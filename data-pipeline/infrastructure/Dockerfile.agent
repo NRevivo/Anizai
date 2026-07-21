@@ -115,6 +115,29 @@ COPY config/ /app/config/
 
 
 # ==========================================================
+# LAYER 5.5 — Build identity (git short-SHA stamp)
+# ==========================================================
+# WHY: Sprint 26 T26.5 (sprint26_pretest_hardening.md §5 "Domain C
+# dependency") makes agentVersion resolve to `<base>+<git-short-sha>` so the
+# deployed build is identifiable from /health and every SessionResult /
+# follow-up message. The hub side (agent/config/settings.py §11) already reads
+# AGENT_GIT_COMMIT_SHORT_SHA and degrades to base-only (`0.5.0-sprint26`, no
+# trailing '+') when it is unset; this ARG/ENV is the Domain-C half that
+# injects it at image-build time. Pass it with:
+#   --build-arg AGENT_GIT_COMMIT_SHORT_SHA=$(git rev-parse --short HEAD)
+#
+# Placed AFTER the source COPY (LAYER 5) so re-stamping a new SHA rebuilds only
+# this tiny ENV layer — not the slow deps (LAYER 4) or the source (LAYER 5)
+# layers. The empty default keeps a plain local `docker build` (no build-arg)
+# reproducible and version-stable. This is a deployment-only change (parity,
+# cloud-principles P1): the version string is a cosmetic label — no logic
+# branches on it (Sprint 26 §3, 26.5).
+# ==========================================================
+ARG AGENT_GIT_COMMIT_SHORT_SHA=""
+ENV AGENT_GIT_COMMIT_SHORT_SHA=${AGENT_GIT_COMMIT_SHORT_SHA}
+
+
+# ==========================================================
 # LAYER 6 — Entry point
 # ==========================================================
 # Exec form (JSON array). Critical: shell form would wrap the Python
