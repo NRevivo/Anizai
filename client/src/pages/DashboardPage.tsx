@@ -452,7 +452,7 @@ export function DashboardPage({
 
     const renderCenterPanel = () => {
         if (currentView === 'new-forecast') {
-            return <CreateForecastView onSubmit={handleSubmitForecast} onOpenSubscription={() => openSettingsSection('subscription')} />;
+            return <CreateForecastView onSubmit={handleSubmitForecast} onOpenSubscription={() => openSettingsSection('subscription')} userPlan={userPlan} monthlyForecastsUsed={userProfile?.monthlyForecastsUsed ?? 0} />;
         }
 
         if (isLoading) {

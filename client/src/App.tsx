@@ -629,6 +629,16 @@ function App() {
       const created = await createSession({ question, idempotencyKey });
       const sessionsData = await fetchSessions();
       setSessions(sessionsData);
+      // Usage was just charged server-side, so refresh the profile to keep the
+      // forecast counter in sync. Previously it only updated on the PLAN_LIMIT
+      // error, so the meter read a stale 0/3 until the limit was hit. Non-fatal:
+      // a counter refresh must never break forecast creation.
+      try {
+        const profile = await fetchCurrentUser();
+        setUserProfile(profile);
+      } catch {
+        // Leave the counter as-is; it will reconcile on the next /me read.
+      }
       await loadSession(created.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not create the forecast.';
