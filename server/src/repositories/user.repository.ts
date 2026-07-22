@@ -12,9 +12,74 @@ function getUsageResetAt(date: Date): string {
 
 const FREE_FORECAST_LIMIT = 3;
 
+/** Whether a stored `planExpiresAt` (Timestamp or ISO string) is in the past. */
+function isExpired(planExpiresAt: unknown): boolean {
+    if (!planExpiresAt) {
+        return false;
+    }
+    const expDate =
+        typeof (planExpiresAt as { toDate?: () => Date }).toDate === 'function'
+            ? (planExpiresAt as { toDate: () => Date }).toDate()
+            : new Date(planExpiresAt as string);
+    return Date.now() > expDate.getTime();
+}
+
+/** Resolve the canonical plan, tolerating legacy `membershipTier`/`subscriptionStatus`. */
+function derivePlan(data: FirebaseFirestore.DocumentData): 'free' | 'premium' {
+    return (data.plan ??
+        data.membershipTier ??
+        (data.subscriptionStatus === 'active' ? 'premium' : 'free')) as 'free' | 'premium';
+}
+
+/**
+ * Shape a raw Firestore user document into the `User` type, normalizing legacy
+ * fields and applying expiry-driven downgrade in memory. No writes — the read
+ * path stays pure (KG-C-10c).
+ */
+function normalizeUser(id: string, data: FirebaseFirestore.DocumentData): User {
+    const createdAt = toISOString(data.createdAt) ?? '';
+    const updatedAt = toISOString(data.updatedAt) ?? '';
+    const lastLoginAt = toISOString(data.lastLoginAt) ?? updatedAt ?? createdAt;
+    const usageMonth =
+        typeof data.usageMonth === 'string'
+            ? data.usageMonth
+            : getCurrentUsageMonth(new Date(createdAt || Date.now()));
+    const plan = derivePlan(data);
+    const monthlyForecastsUsed =
+        typeof data.monthlyForecastsUsed === 'number' ? data.monthlyForecastsUsed : 0;
+    const cancelAtPeriodEnd = data.cancelAtPeriodEnd ?? false;
+
+    // Auto-downgrade a cancelled premium plan that has expired.
+    const downgraded = plan === 'premium' && cancelAtPeriodEnd && isExpired(data.planExpiresAt);
+
+    return {
+        uid: id,
+        email: data.email,
+        displayName: data.displayName ?? data.fullName ?? null,
+        admin: data.admin ?? false,
+        plan: downgraded ? 'free' : plan,
+        planExpiresAt:
+            typeof data.planExpiresAt === 'string' ? data.planExpiresAt : toISOString(data.planExpiresAt),
+        cancelAtPeriodEnd: downgraded ? false : cancelAtPeriodEnd,
+        monthlyForecastsUsed,
+        usageMonth,
+        lastLoginAt,
+        createdAt,
+        updatedAt,
+    };
+}
+
 export const userRepository = {
     /**
-     * Get user by UID
+     * Get user by UID.
+     *
+     * Pure read — performs NO Firestore writes, so GET endpoints that read a
+     * profile stay idempotent (KG-C-10c). Legacy documents are normalized in
+     * memory here; the persistence of that normalization (deleting legacy
+     * fields, backfilling canonical ones) rides the write paths — see
+     * `reconcileProfile`, invoked from `syncFromAuth`. Expiry-driven downgrade
+     * is likewise evaluated in memory for the returned snapshot and persisted
+     * on the next write path (`incrementUsage`).
      */
     async findById(uid: string): Promise<User | null> {
         const userRef = collectionRef('users').doc(uid);
@@ -24,19 +89,33 @@ export const userRepository = {
             return null;
         }
 
+        return normalizeUser(doc.id, doc.data()!);
+    },
+
+    /**
+     * Persist the in-memory normalization `findById` computes: delete legacy
+     * fields, backfill canonical ones, and flip an expired cancelled-premium
+     * plan to free. A no-op write is skipped. Call only from write-intent
+     * paths — never from a read (KG-C-10c).
+     */
+    async reconcileProfile(uid: string): Promise<void> {
+        const userRef = collectionRef('users').doc(uid);
+        const doc = await userRef.get();
+        if (!doc.exists) {
+            return;
+        }
+
         const data = doc.data()!;
         const createdAt = toISOString(data.createdAt) ?? '';
-        const updatedAt = toISOString(data.updatedAt) ?? '';
-        const lastLoginAt = toISOString(data.lastLoginAt) ?? updatedAt ?? createdAt;
         const usageMonth =
             typeof data.usageMonth === 'string'
                 ? data.usageMonth
                 : getCurrentUsageMonth(new Date(createdAt || Date.now()));
-        const plan = (data.plan ??
-            data.membershipTier ??
-            (data.subscriptionStatus === 'active' ? 'premium' : 'free')) as 'free' | 'premium';
+        const plan = derivePlan(data);
         const monthlyForecastsUsed =
             typeof data.monthlyForecastsUsed === 'number' ? data.monthlyForecastsUsed : 0;
+        const cancelAtPeriodEnd = data.cancelAtPeriodEnd ?? false;
+
         const hasLegacyFields =
             data.fullName !== undefined ||
             data.subscriptionStatus !== undefined ||
@@ -48,54 +127,29 @@ export const userRepository = {
             data.monthlyForecastsUsed === undefined ||
             data.usageMonth === undefined ||
             data.lastLoginAt === undefined;
+        const expiredPremium =
+            plan === 'premium' && cancelAtPeriodEnd && isExpired(data.planExpiresAt);
 
-        const cancelAtPeriodEnd = data.cancelAtPeriodEnd ?? false;
-
-        if (hasLegacyFields || missingCanonicalFields) {
-            await userRef.set(
-                {
-                    displayName: data.displayName ?? data.fullName ?? null,
-                    plan,
-                    planExpiresAt: data.planExpiresAt ?? null,
-                    cancelAtPeriodEnd,
-                    monthlyForecastsUsed,
-                    usageMonth,
-                    lastLoginAt: data.lastLoginAt ?? data.updatedAt ?? data.createdAt ?? now(),
-                    updatedAt: now(),
-                    fullName: FieldValue.delete(),
-                    subscriptionStatus: FieldValue.delete(),
-                    membershipTier: FieldValue.delete(),
-                },
-                { merge: true }
-            );
+        if (!hasLegacyFields && !missingCanonicalFields && !expiredPremium) {
+            return;
         }
 
-        // Auto-downgrade logic if a cancelled premium plan has expired
-        let currentPlan = plan;
-        let currentCancelFlag = cancelAtPeriodEnd;
-        if (currentPlan === 'premium' && currentCancelFlag && data.planExpiresAt) {
-            const expDate = data.planExpiresAt.toDate ? data.planExpiresAt.toDate() : new Date(data.planExpiresAt);
-            if (Date.now() > expDate.getTime()) {
-                currentPlan = 'free';
-                currentCancelFlag = false;
-                await userRef.set({ plan: 'free', cancelAtPeriodEnd: false, updatedAt: now() }, { merge: true });
-            }
-        }
-
-        return {
-            uid: doc.id,
-            email: data.email,
-            displayName: data.displayName ?? data.fullName ?? null,
-            admin: data.admin ?? false,
-            plan: currentPlan,
-            planExpiresAt: typeof data.planExpiresAt === 'string' ? data.planExpiresAt : toISOString(data.planExpiresAt),
-            cancelAtPeriodEnd: currentCancelFlag,
-            monthlyForecastsUsed,
-            usageMonth,
-            lastLoginAt,
-            createdAt,
-            updatedAt,
-        };
+        await userRef.set(
+            {
+                displayName: data.displayName ?? data.fullName ?? null,
+                plan: expiredPremium ? 'free' : plan,
+                planExpiresAt: data.planExpiresAt ?? null,
+                cancelAtPeriodEnd: expiredPremium ? false : cancelAtPeriodEnd,
+                monthlyForecastsUsed,
+                usageMonth,
+                lastLoginAt: data.lastLoginAt ?? data.updatedAt ?? data.createdAt ?? now(),
+                updatedAt: now(),
+                fullName: FieldValue.delete(),
+                subscriptionStatus: FieldValue.delete(),
+                membershipTier: FieldValue.delete(),
+            },
+            { merge: true }
+        );
     },
 
     /**
@@ -148,6 +202,10 @@ export const userRepository = {
             },
             { merge: true }
         );
+
+        // Login is a genuine write path, so it is the natural moment to persist
+        // the normalization `findById` no longer writes (KG-C-10c).
+        await this.reconcileProfile(uid);
 
         return this.findById(uid);
     },
@@ -233,7 +291,13 @@ export const userRepository = {
                 newUsage = 0;
             }
 
-            const plan = data.plan || 'free';
+            // Evaluate the plan live: an expired cancelled-premium is treated as
+            // free here, so enforcement no longer depends on a prior read having
+            // persisted the downgrade (findById is now a pure read — KG-C-10c).
+            const storedPlan = derivePlan(data);
+            const downgraded =
+                storedPlan === 'premium' && (data.cancelAtPeriodEnd ?? false) && isExpired(data.planExpiresAt);
+            const plan = downgraded ? 'free' : storedPlan;
 
             // Limit completely blocks free tier execution
             if (plan === 'free' && newUsage >= FREE_FORECAST_LIMIT) {
@@ -256,6 +320,8 @@ export const userRepository = {
                     usageMonth: currentMonth,
                     monthlyForecastsUsed: newUsage + 1,
                     updatedAt: now(),
+                    // Persist the downgrade we just evaluated, if any.
+                    ...(downgraded ? { plan: 'free', cancelAtPeriodEnd: false } : {}),
                 },
                 { merge: true }
             );

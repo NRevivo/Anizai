@@ -12,6 +12,19 @@ const envSchema = z.object({
         .optional()
         .transform((value) => value === 'true'),
 
+    // Comma-separated list of allowed CORS origins for the deployed frontend
+    // (e.g. "https://anizai.ai,https://www.anizai.ai"). Required in production —
+    // localhost dev origins are only allowed outside production (KG-C-10b).
+    CORS_ORIGINS: z
+        .string()
+        .optional()
+        .transform((value) =>
+            (value ?? '')
+                .split(',')
+                .map((origin) => origin.trim())
+                .filter(Boolean)
+        ),
+
     // Firebase Project ID (required for ADC initialization)
     FIREBASE_PROJECT_ID: z.string().min(1),
 });

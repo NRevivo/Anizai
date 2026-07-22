@@ -141,6 +141,59 @@ describe('userRepository.incrementUsage', () => {
         expect(mocks.transactionSetMock).not.toHaveBeenCalled();
     });
 
+    // KG-C-10c: findById no longer persists the expiry downgrade on read, so
+    // incrementUsage must evaluate it live. An expired cancelled-premium user is
+    // treated as free here regardless of the stored `plan`.
+    it('enforces the free limit on an expired cancelled-premium user', async () => {
+        mocks.store.data = {
+            plan: 'premium',
+            cancelAtPeriodEnd: true,
+            planExpiresAt: '2026-07-01T00:00:00.000Z', // before the fake system time
+            monthlyForecastsUsed: 3,
+            usageMonth: CURRENT_MONTH,
+        };
+
+        await expect(userRepository.incrementUsage('user-abc-123')).rejects.toMatchObject({
+            code: 'PLAN_LIMIT_EXCEEDED',
+        });
+        expect(mocks.transactionSetMock).not.toHaveBeenCalled();
+    });
+
+    it('persists the downgrade to free when charging an expired premium user', async () => {
+        mocks.store.data = {
+            plan: 'premium',
+            cancelAtPeriodEnd: true,
+            planExpiresAt: '2026-07-01T00:00:00.000Z',
+            monthlyForecastsUsed: 1,
+            usageMonth: CURRENT_MONTH,
+        };
+
+        await userRepository.incrementUsage('user-abc-123');
+
+        expect(mocks.store.data).toMatchObject({
+            plan: 'free',
+            cancelAtPeriodEnd: false,
+            monthlyForecastsUsed: 2,
+        });
+    });
+
+    it('does not downgrade a premium user whose plan has not expired', async () => {
+        mocks.store.data = {
+            plan: 'premium',
+            cancelAtPeriodEnd: true,
+            planExpiresAt: '2026-08-01T00:00:00.000Z', // after the fake system time
+            monthlyForecastsUsed: 50,
+            usageMonth: CURRENT_MONTH,
+        };
+
+        await userRepository.incrementUsage('user-abc-123');
+
+        expect(mocks.store.data).toMatchObject({
+            plan: 'premium',
+            monthlyForecastsUsed: 51,
+        });
+    });
+
     // The regression this fix exists for (KG-C-9). Serialising two calls through
     // the same store is what the transaction guarantees; the pre-fix
     // read-then-write let both callers observe the same starting count.

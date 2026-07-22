@@ -44,6 +44,7 @@ could be identified, the date column says so.
 | Trending `/events` migration — KG-C-13 | Closed | 2026-07-20 | `/markets` → `/events`; `TrendingForecast` reshaped to an event (contract change, §3.9 of `frontend_contracts.md`); binary vs multi-outcome rendering in both consumers; single-fixture noise dropped via the `Games` tag. Server tests 24→28. Closed KG-C-14 incidentally (the rewritten card renders no trend label and formats volume) |
 | Trending topic filter — KG-C-15 | Closed | 2026-07-20 | Trending constrained to the pipeline's 13 forecastable topic domains via an excluded-category check plus a Polymarket tag → topic map; `debug` log for unmapped tags, `warn` + `[]` when nothing is on topic. No contract change. Server tests 28→33 |
 | Trending cleanup — finish the section | Closed | 2026-07-20 | Dead `trend` removed (KG-C-14 residual); `slug` dropped from the contract; `url` wired as the row link on both surfaces; strike-ladder outcomes deduped on rendered percentage; orphaned `trendingForecasts` collection constant removed; **deleted `components/TrendingForecasts.tsx`** — an unimported component holding four inline hardcoded forecasts, which survived the `mockData.ts` deletion because its fixtures were inline rather than imported. Server tests 33→35 |
+| BFF production-hardening — KG-C-10 | Closed | 2026-07-22 | Path-prefix app-level auth (structural, no more per-route opt-in); env-driven CORS via `CORS_ORIGINS` (no hardcoded localhost in prod); `GET /me` made idempotent (`findById` pure read, migration + expiry-downgrade moved to write paths, downgrade enforced live in `incrementUsage`); zod field detail forwarded via a `validationError` helper. Server tests 35→47. See §4 design note |
 
 > Slices 2.5–2.7 are documented in `../archive/backend-audit.md` and referenced by CLAUDE.md,
 > but no commit on `client/`/`server/` could be matched to them by message. Their
@@ -94,8 +95,8 @@ Two items are outstanding but are **not Domain C work**:
 Domain C's own next candidates are the gaps in §4, none of which is currently
 scheduled. KG-C-9, previously the highest-severity gap, was closed on 2026-07-20
 along with KG-C-5, KG-C-11 and KG-C-12. **No High-priority gap remains open.**
-KG-C-13, KG-C-14 and KG-C-15 also closed the same day. The remaining Mediums are
-KG-C-1, KG-C-2, KG-C-3, KG-C-8 and KG-C-10.
+KG-C-13, KG-C-14 and KG-C-15 also closed the same day, and KG-C-10 closed
+2026-07-22. The remaining Mediums are KG-C-1, KG-C-2, KG-C-3 and KG-C-8.
 
 > **Committed to `main` on 2026-07-21.** The 2026-07-20 work closing KG-C-5, KG-C-9,
 > KG-C-11, KG-C-12, KG-C-13, KG-C-14 and KG-C-15 — plus these doc updates — landed in a
@@ -132,7 +133,7 @@ KG-C-1, KG-C-2, KG-C-3, KG-C-8 and KG-C-10.
 | KG-C-7 | `agentEvents` never appear in production. The Domain C read path is complete and verified in-repo (listener, Rule B run scoping, timeline component, 4/4 unit tests); the deployed agent image is a Sprint ~21-era build (`AGENT_VERSION 0.4.0-sprint21-*`) that predates the Sprint 22+ emission mechanism. Rule B additionally requires the hub to write `currentRunId`, ratified in the Domain-B Sprint 25 plan but not yet built. **Relayed from the Domain-B owner — not verifiable from this repo** | Sprint 25 | Medium | Cumulative agent-image rebuild (a separate track from any single sprint), then `currentRunId` emission |
 | KG-C-8 | Orphaned `forecastQueries` document after clarify-then-delete. `POST /sessions` writes its queue doc at `forecastQueries/{sessionId}`, but `POST /sessions/:id/clarify` writes at a Firestore auto-id (`session.repository.ts:462`); `deleteSession` only deletes `forecastQueries/{sessionId}` (`:548`). A clarified session that is later deleted appears to leave its clarify-path queue doc behind. **Reasoned from the code paths; not reproduced against live Firestore** | Doc rewrite 2026-07-18 | Medium | Query queue docs by `sessionId` on delete, or write the clarify doc under a deterministic id |
 | KG-C-9 | ~~**Free-tier usage limit is bypassable under concurrency.** `incrementUsage` was a read-then-write with no `runTransaction`, so two concurrent `POST /sessions` could read the same count and both write `n+1`, letting a free user exceed `FREE_FORECAST_LIMIT = 3`.~~ **CLOSED 2026-07-20.** The read, limit check and write now run inside `firestore.runTransaction` via a new `runTransaction` helper in `firebase.service.ts`; Firestore aborts and retries the callback if the doc changes underneath it. Covered by `tests/user.repository.test.ts` (7 tests) and reproduced-then-verified against the Firestore emulator (see note below) | Doc rewrite 2026-07-18 | ~~High~~ Closed | — |
-| KG-C-10 | **Production-hardening cluster — the BFF is dev-shaped, not deploy-ready.** Four independent findings share one root cause: nothing about the BFF's configuration or defaults assumes a hostile caller. (a) **Auth is opt-in per route** — `authMiddleware` is attached to individual handlers, not to the protected routers, so a route added to `routes/sessions.ts` without it is silently public. (b) **CORS is hardcoded to localhost** — the allowlist is a literal `Set` of the two Vite dev origins (`server.ts:18-21`) with no env-driven production origin. (c) **`GET /me` mutates on read** — `findById` performs a `set(..., {merge:true})` migration write during a GET (`user.repository.ts:39-60`), so a read endpoint is not idempotent. (d) **zod issue detail is discarded** — every `safeParse` failure collapses to `'Invalid request body'`, so 400s are not field-actionable for any client | Doc rewrite 2026-07-18 | Medium | A deliberate production-hardening pass: router-level auth, env-driven CORS, move the migration write out of the read path, forward zod issues into `AppError.details` |
+| KG-C-10 | ~~**Production-hardening cluster — the BFF is dev-shaped, not deploy-ready.** Four independent findings share one root cause: nothing about the BFF's configuration or defaults assumes a hostile caller. (a) **Auth is opt-in per route** — `authMiddleware` is attached to individual handlers, not to the protected routers, so a route added to `routes/sessions.ts` without it is silently public. (b) **CORS is hardcoded to localhost** — the allowlist is a literal `Set` of the two Vite dev origins (`server.ts:18-21`) with no env-driven production origin. (c) **`GET /me` mutates on read** — `findById` performs a `set(..., {merge:true})` migration write during a GET (`user.repository.ts:39-60`), so a read endpoint is not idempotent. (d) **zod issue detail is discarded** — every `safeParse` failure collapses to `'Invalid request body'`, so 400s are not field-actionable for any client.~~ **CLOSED 2026-07-22.** All four fixed — see the design note below | Doc rewrite 2026-07-18 | ~~Medium~~ Closed | — |
 | KG-C-11 | ~~**The BFF had its own fabricated-data fallback.** `trendingRepository.fetchFresh` caught any Polymarket failure and served seeded Firestore documents from `trendingForecasts` — its own comment called them *"mock data"* — so a dead upstream rendered as a healthy feed. The same defect as KG-C-5, one layer down; fixing the client alone left it live.~~ **CLOSED 2026-07-20.** Fallback removed; failures propagate through the route's `next(error)` to a 500, and the client (post-KG-C-5) logs and renders empty. Guarded by two tests asserting a 503 and a network error each reject | KG-C-5 follow-up 2026-07-20 | ~~Medium~~ Closed | — |
 | KG-C-12 | ~~**Trending ranked by lifetime volume, and the sort key was not the displayed field.** `order=volumeNum` ranks by all-time volume, filling the panel with long-dead novelty and candidate-field markets — *"Will Jesus Christ return before 2027?"* ($64M lifetime, ~$4K/day) outranked every live market. Separately, `popularityScore` read `volume24hr` while the query sorted by `volumeNum`, so the list was ordered by one metric and labelled with another, rendering a visibly non-monotonic "Popularity" column. The mapper's OR-fallback from `volume24hr` to `volume` also swapped in lifetime volume whenever 24h volume was zero.~~ **CLOSED 2026-07-20.** Now `order=volume24hr`, with `popularityScore` reading that same field only. Verified against live data: the landing page matches Polymarket's own cards number-for-number | KG-C-5 follow-up 2026-07-20 | ~~Medium~~ Closed | — |
 | KG-C-13 | ~~**Trending queries `/markets`, but Polymarket's UI groups by `/events`.** `/markets` returns individual binary legs, so single candidates and per-match esports markets surfaced as top-level questions (*"Estoril Open: Titouan Droguet vs Camilo Ugo Carabelli"*, *"Will Lionel Messi win the 2026 Ballon d'Or?"*) instead of the event cards a user recognises.~~ **CLOSED 2026-07-20.** Migrated to `/events`; `TrendingForecast` reshaped to an event (**contract change — shape in `frontend_contracts.md §3.9`**); both consumers updated; single-fixture noise dropped by a tag filter. Server tests 24→28 | KG-C-12 follow-up 2026-07-20 | ~~Low~~ Closed | — |
@@ -237,6 +238,39 @@ KG-C-1, KG-C-2, KG-C-3, KG-C-8 and KG-C-10.
 > triggered on demand against a live upstream, so it is pinned by two tests instead —
 > a 503 response and a network-level throw must each reject rather than return
 > substitute data (`tests/trending.repository.test.ts`).
+>
+> **KG-C-10 — the production-hardening close (2026-07-22).** Fixed as four
+> independent changes, each targeting one finding:
+>
+> - **(a) Auth is now structural, gated by path prefix.** `authMiddleware` was
+>   removed from every per-route handler and from the routers; `server.ts` mounts
+>   `app.use(['/me', '/sessions'], authMiddleware)` **before** the two routers, so
+>   every path under those prefixes is protected by construction and a newly added
+>   handler cannot ship public. Router-level `router.use(authMiddleware)` was tried
+>   first and rejected: the routers mount at `/`, so router-level middleware also
+>   intercepted unmatched paths and turned the 404 handler into a 401. Path-scoped
+>   app-level auth protects the prefixes while letting unknown routes fall through
+>   to 404 (asserted in `tests/server.hardening.test.ts`).
+> - **(b) CORS is env-driven.** New `CORS_ORIGINS` env var (comma-separated,
+>   parsed in `config/env.ts`). `server.ts` allows the Vite dev origins **only when
+>   `NODE_ENV !== 'production'`**; production allows exactly what `CORS_ORIGINS`
+>   lists and nothing else. Documented in `.env.example`.
+> - **(c) `GET /me` is idempotent.** `findById` is now a pure read — the legacy
+>   migration write and the expiry-downgrade write were removed from it; both values
+>   are still normalized **in memory** for the returned snapshot. Persistence moved
+>   to write paths: `reconcileProfile` (the extracted migration) runs on the login
+>   path via `syncFromAuth`, and `incrementUsage` evaluates the expiry downgrade
+>   **live inside its transaction** — so free-limit enforcement no longer depends on
+>   a prior read having persisted the flip (the latent hole where an expired premium
+>   who never loaded `/me` got unlimited forecasts). Covered by three new
+>   `user.repository.test.ts` cases.
+> - **(d) zod detail is forwarded.** New `validationError(zodError)` helper in
+>   `middleware/error.ts` wraps `error.flatten()` into `AppError.details`; the error
+>   middleware already surfaces `details`. All four `safeParse` sites (three in
+>   `routes/sessions.ts`, one in `routes/me.ts`, which also stopped hand-rolling its
+>   400) now use it. 400s carry `{ formErrors, fieldErrors }`.
+>
+> Server tests 35 → 47 (9 hardening + 3 downgrade). Both packages still typecheck.
 
 ---
 
@@ -249,7 +283,7 @@ baseline a future change should not regress.
 |---|---|---|
 | Server typecheck | `npx tsc --noEmit` in `server/` | ✅ pass |
 | Client typecheck | `npx tsc -b` in `client/` | ✅ pass |
-| Server tests | `npx vitest run` in `server/` | ✅ **35/35 across 5 files** (11/11 across 3 files before the 07-20 work; 24 after the gap pass, 28 after the `/events` migration, 33 after the topic filter, 35 after the cleanup) |
+| Server tests | `npx vitest run` in `server/` | ✅ **47/47 across 6 files** (11/11 across 3 files before the 07-20 work; 24 after the gap pass, 28 after the `/events` migration, 33 after the topic filter, 35 after the cleanup; 47 after the KG-C-10 hardening on 07-22) |
 | Client tests | `npx vitest run` in `client/` | ✅ 31/31 across 3 files — unchanged, no regression |
 | Client lint | `npx eslint .` in `client/` | ❌ fails — KG-C-2 |
 | App boot | Vite dev server + browser load | ✅ no console errors |
@@ -260,8 +294,10 @@ Client test files: `src/lib/agentEvents.test.ts` (4), `…/predictionOverview/li
 `…/predictionOverview/lib/deriveVerdict.test.ts` (16).
 
 Server test files: `tests/health.test.ts` (3), `tests/sessions.repository.test.ts` (5),
-`tests/sessions.service.test.ts` (3), `tests/user.repository.test.ts` (7 — KG-C-9),
-`tests/trending.repository.test.ts` (18 — KG-C-11/12/13/15 plus the outcome-dedupe rules).
+`tests/sessions.service.test.ts` (3), `tests/user.repository.test.ts` (10 — KG-C-9 plus
+the KG-C-10c expiry-downgrade cases), `tests/trending.repository.test.ts` (17 —
+KG-C-11/12/13/15 plus the outcome-dedupe rules), `tests/server.hardening.test.ts`
+(9 — KG-C-10 a/b/d).
 
 > **Two stale claims corrected here.** `hub-handoff-summary-task-16.md §13` and
 > `../archive/final-validation-task-16.md` both state that *"no client test runner is currently

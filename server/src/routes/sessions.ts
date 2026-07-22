@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { authMiddleware } from '../middleware/auth.js';
-import { AppError } from '../middleware/error.js';
+import { validationError } from '../middleware/error.js';
 import * as sessionsService from '../services/sessions.service.js';
 import type { ApiSuccessResponse, AuthUser } from '../types/api.js';
 
+// Auth is enforced at the app level for the whole `/sessions` path prefix
+// (see server.ts), so every route on this router is protected by construction
+// — a new handler added below cannot accidentally ship public (KG-C-10a).
 const router = Router();
 
 // ─────────────────────────────────────────────────────────────
@@ -42,7 +44,7 @@ const clarifySessionSchema = z.object({
  * GET /sessions
  * List all sessions for the authenticated user
  */
-router.get('/sessions', authMiddleware, async (req, res, next) => {
+router.get('/sessions', async (req, res, next) => {
     try {
         const user = req.user as AuthUser;
         const sessions = await sessionsService.listSessions(user.uid);
@@ -61,7 +63,7 @@ router.get('/sessions', authMiddleware, async (req, res, next) => {
  * GET /sessions/:id
  * Get session details with messages, predictions, and evidence
  */
-router.get('/sessions/:id', authMiddleware, async (req, res, next) => {
+router.get('/sessions/:id', async (req, res, next) => {
     try {
         const user = req.user as AuthUser;
         const sessionId = req.params.id as string;
@@ -82,13 +84,13 @@ router.get('/sessions/:id', authMiddleware, async (req, res, next) => {
  * POST /sessions
  * Create a new session
  */
-router.post('/sessions', authMiddleware, async (req, res, next) => {
+router.post('/sessions', async (req, res, next) => {
     try {
         const user = req.user as AuthUser;
 
         const parsed = createSessionSchema.safeParse(req.body);
         if (!parsed.success) {
-            throw new AppError('Invalid request body', 400, 'VALIDATION_ERROR');
+            throw validationError(parsed.error);
         }
 
         const session = await sessionsService.createSession(user.uid, parsed.data);
@@ -107,14 +109,14 @@ router.post('/sessions', authMiddleware, async (req, res, next) => {
  * POST /sessions/:id/messages
  * Add a message to a session
  */
-router.post('/sessions/:id/messages', authMiddleware, async (req, res, next) => {
+router.post('/sessions/:id/messages', async (req, res, next) => {
     try {
         const user = req.user as AuthUser;
         const sessionId = req.params.id as string;
 
         const parsed = createMessageSchema.safeParse(req.body);
         if (!parsed.success) {
-            throw new AppError('Invalid request body', 400, 'VALIDATION_ERROR');
+            throw validationError(parsed.error);
         }
 
         const message = await sessionsService.addMessage(sessionId, user.uid, parsed.data);
@@ -133,14 +135,14 @@ router.post('/sessions/:id/messages', authMiddleware, async (req, res, next) => 
  * POST /sessions/:id/clarify
  * Submit a clarification choice for a queued follow-up request
  */
-router.post('/sessions/:id/clarify', authMiddleware, async (req, res, next) => {
+router.post('/sessions/:id/clarify', async (req, res, next) => {
     try {
         const user = req.user as AuthUser;
         const sessionId = req.params.id as string;
 
         const parsed = clarifySessionSchema.safeParse(req.body);
         if (!parsed.success) {
-            throw new AppError('Invalid request body', 400, 'VALIDATION_ERROR');
+            throw validationError(parsed.error);
         }
 
         const session = await sessionsService.clarifySession(sessionId, user.uid, parsed.data);
@@ -162,7 +164,7 @@ router.post('/sessions/:id/clarify', authMiddleware, async (req, res, next) => {
  * forecastQueries) and a fresh session is enqueued for the agent. Only valid
  * when the session's status is `failed`.
  */
-router.post('/sessions/:id/retry', authMiddleware, async (req, res, next) => {
+router.post('/sessions/:id/retry', async (req, res, next) => {
     try {
         const user = req.user as AuthUser;
         const sessionId = req.params.id as string;
@@ -183,7 +185,7 @@ router.post('/sessions/:id/retry', authMiddleware, async (req, res, next) => {
  * DELETE /sessions/:id
  * Delete a session and all related records
  */
-router.delete('/sessions/:id', authMiddleware, async (req, res, next) => {
+router.delete('/sessions/:id', async (req, res, next) => {
     try {
         const user = req.user as AuthUser;
         const sessionId = req.params.id as string;
