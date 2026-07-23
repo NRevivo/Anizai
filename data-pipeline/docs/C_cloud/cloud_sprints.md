@@ -1,7 +1,7 @@
 # cloud_sprints.md
 > Domain: C — Cloud
 > Type: Sprints
-> Last updated: 2026-06-15
+> Last updated: 2026-07-23 (§2 backlog — Stage 1 landed; §1 / Rationale / §3 / §4 as of 2026-06-15)
 > TL;DR: Phase 9/9.5 are closed — there are no open cloud implementation sprints. What is
 > open is *deployment work*: what must reach GKE as hub Sprints 24–27 close, plus deferred
 > items and cloud Known Gaps. Open this to see the cloud deployment backlog.
@@ -77,16 +77,24 @@ the chosen agent scope closes (the Track-2 options — see the Rationale section
 items add new manifests, DDL, or Firestore-side work. The backlog *items* below are
 unchanged by the decoupling model — only *when/why* they deploy is (Rationale).
 
+> **✅ Stage 1 landed 2026-07-23 (B-deploy, Track-2 full through-26).** The cumulative
+> `anizai-agent` rebuild + redeploy, the `agentVersion` build-stamp, and the
+> `reactive_triggers_log` DDL are **done**; the partner-side Firestore index + rules are
+> **deployed** on `anizai-ai`. What remains is **Stage 2** (post-A-window): the
+> `anizai-airflow` rebuild + scaling the agent from `replicas:0` to 1 to begin the B test.
+> Per-row status below. *(Status record only — the KG-C-\* gap entries in §4 are unchanged;
+> Ron maintains the gap counts.)*
+
 | Cloud action | Triggered by (hub) | What it is |
 |---|---|---|
-| **`anizai-agent` image rebuild + redeploy** | Sprints 22, 23, 24, 25, 26 (cumulative) | The single biggest item. Carries Sprint 22 BI-card wiring, Sprint 23 `trigger_reactive_ingestion` node, Sprint 24 `agent/followup/` subgraph + second Firestore listener, Sprint 25 `generate_suggested_actions` + `agentEvents`, Sprint 26 hardening. Landing scope is a Track-2 choice (see Rationale): a minimal **22 + 23.5** rebuild for opportunistic observation, or the full bundle **through Sprint 26** at B-track readiness. |
-| **`anizai-airflow` image rebuild** | Sprint 23 (T23.1) | NewsAPI `run_reactive()` lives in the producer/DAG path baked into the airflow image; the reactive trigger cycle needs it on the cluster, not just in the agent. |
-| **Apply `reactive_triggers_log` DDL to cloud Postgres** | Sprint 23 | Manual one-time DDL (§7 of `infrastructure/sql/init.sql`) — `init.sql` does not re-run on an existing PVC. Must precede any initial-test run that exercises Sprint 23. |
-| **Prometheus alert rules + scrape (real agent metrics)** | Sprint 26 (T26.4) | The `agent-worker:8000/metrics` scrape job already exists, but today it scrapes a Sprint-18 stub (zero `agent_*` metrics). When Sprint 26 emits real node-duration / LLM-cost / queue metrics, add corresponding alert rules to `prometheus-rules-configmap.yaml`. |
-| **`agentVersion` build-stamp** | Sprint 26 (T26.5) | `agentVersion` gains the git short-hash — a build-process change baked into the agent image at rebuild time. |
+| **`anizai-agent` image rebuild + redeploy** | Sprints 22, 23, 24, 25, 26 (cumulative) | ✅ **LANDED (B-deploy Stage-1 T1.2, 2026-07-23): `anizai-agent:0.5.0-sprint26` (+55e8093) at `replicas:0`.** The single biggest item. Carries Sprint 22 BI-card wiring, Sprint 23 `trigger_reactive_ingestion` node, Sprint 24 `agent/followup/` subgraph + second Firestore listener, Sprint 25 `generate_suggested_actions` + `agentEvents`, Sprint 26 hardening. Landing scope is a Track-2 choice (see Rationale): a minimal **22 + 23.5** rebuild for opportunistic observation, or the full bundle **through Sprint 26** at B-track readiness. |
+| **`anizai-airflow` image rebuild** | Sprint 23 (T23.1) | ⏳ **PENDING — Stage 2 T2.1 (post-A-window).** NewsAPI `run_reactive()` lives in the producer/DAG path baked into the airflow image; the reactive trigger cycle needs it on the cluster, not just in the agent. |
+| **Apply `reactive_triggers_log` DDL to cloud Postgres** | Sprint 23 | ✅ **DONE / VERIFIED PRESENT (B-deploy T1.3, 2026-07-23)** — table exists in cloud Postgres (applied bundled with 7B.5-I T7); no re-apply needed. Manual one-time DDL (§7 of `infrastructure/sql/init.sql`) — `init.sql` does not re-run on an existing PVC. Must precede any initial-test run that exercises Sprint 23. |
+| **Prometheus alert rules + scrape (real agent metrics)** | Sprint 26 (T26.4) | ⏳ **Image now emits real `agent_*` metrics (0.5.0-sprint26), but the agent is at `replicas:0` so nothing is scraped yet; alert rules still to add.** The `agent-worker:8000/metrics` scrape job already exists, but today it scrapes a Sprint-18 stub (zero `agent_*` metrics). When Sprint 26 emits real node-duration / LLM-cost / queue metrics, add corresponding alert rules to `prometheus-rules-configmap.yaml`. |
+| **`agentVersion` build-stamp** | Sprint 26 (T26.5) | ✅ **DONE (B-deploy Stage-1 T1.1, 2026-07-23):** `Dockerfile.agent` gained `ARG`/`ENV AGENT_GIT_COMMIT_SHORT_SHA` (commit `55e8093`); the deployed image stamps `AGENT_VERSION=0.5.0-sprint26+55e8093`. |
 | **Resume Cloud Scheduler** | Initial test (~2 days) | The 2-day cloud run needs the daily scale cycle live. Both jobs are PAUSED; **Ron resumes manually** (readiness checklist: `cluster_operations_guide.md` §4). |
-| **Firestore security rules for new subcollections** | Sprints 24–25 | `messages` (follow-up flow) and `agentEvents` (chain-of-thought stream) writes may need rule changes on `anizai-ai`. **Partner-side / Firestore project** — flagged here as a cross-boundary dependency, not a GKE manifest change. See `frontend-integration` skill. |
-| **Deploy collection-group index for the follow-up `messages` listener** | Sprint 24 (24.1) | The follow-up listener runs a **collection-group** query on `messages` filtered by `role`/`status`. It needs a collection-group index / field-scope config on the `anizai-ai` Firestore project — implicit on the emulator (so it passes locally), but it **must be explicitly deployed to production before any initial-test run that exercises follow-ups**, or the query silently returns nothing. Distinct from the security-rules row above and coordinated alongside it: rules govern *access*, this governs *query execution*. **Partner-side / Firestore project** (`anizai-ai`). |
+| **Firestore security rules for new subcollections** | Sprints 24–25 | ✅ **DEPLOYED to `anizai-ai` (partner-confirmed 2026-07-23, B-deploy T1.4).** `messages` (follow-up flow) and `agentEvents` (chain-of-thought stream) writes may need rule changes on `anizai-ai`. **Partner-side / Firestore project** — flagged here as a cross-boundary dependency, not a GKE manifest change. See `frontend-integration` skill. |
+| **Deploy collection-group index for the follow-up `messages` listener** | Sprint 24 (24.1) | ✅ **DEPLOYED to `anizai-ai` (partner-confirmed 2026-07-23, B-deploy T1.4).** The follow-up listener runs a **collection-group** query on `messages` filtered by `role`/`status`. It needs a collection-group index / field-scope config on the `anizai-ai` Firestore project — implicit on the emulator (so it passes locally), but it **must be explicitly deployed to production before any initial-test run that exercises follow-ups**, or the query silently returns nothing. Distinct from the security-rules row above and coordinated alongside it: rules govern *access*, this governs *query execution*. **Partner-side / Firestore project** (`anizai-ai`). |
 
 **Sequencing (two decoupled tracks — see the Rationale section).** There is **no**
 single "nothing deploys until Sprint 26 / everything at once" gate. **Track 1** — the

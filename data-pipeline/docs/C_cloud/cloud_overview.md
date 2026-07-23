@@ -1,7 +1,7 @@
 # cloud_overview.md
 > Domain: C — Cloud
 > Type: Overview
-> Last updated: 2026-06-15
+> Last updated: 2026-07-23 (agent + pipeline image-tag rows refreshed to live; monitoring/storage rows as of 2026-06-15, unverified against live)
 > TL;DR: The macro view of the Anizai GKE deployment — cluster topology, what is
 > deployed vs. local-only, and which phases closed when. Open this first to orient
 > before the detailed Domain C files.
@@ -42,11 +42,13 @@ Alertmanager, exporters), and the **deployed-vs-local-only boundary**.
 and cloud are documented as deployment decisions (e.g. `publishNotReadyAddresses` for
 KRaft self-bootstrap, the Secret Manager CSI shell-wrapper pattern), not feature changes.
 
-Phase 9 and Phase 9.5 are both **fully closed**; the cluster is running (Cloud Scheduler
-PAUSED, scaled to 0 between windows). Domain C has **no open implementation sprints**,
-but it does have open *deployment work*: Sprint 22–23 hub code is local-only and not yet
-on any cloud image, and there are known cluster gaps. See `cloud_state.md` and
-`cloud_sprints.md`.
+Phase 9 and Phase 9.5 are both **fully closed**; the cluster runs (Cloud Scheduler PAUSED,
+scaled to 0 between windows). Domain C has **no open implementation sprints**, but it does
+have open *deployment work*. As of **2026-07-23**, hub Sprint 22→26 has **landed** on the
+deployed image (`anizai-agent:0.5.0-sprint26` at `replicas:0`, B-deploy Stage 1); the
+remaining deployment work is **Stage 2** — the `anizai-airflow` rebuild (Sprint 23 producer
+path) + scaling the agent to 1 to begin the B test — plus known cluster gaps. See
+`cloud_state.md` and `cloud_sprints.md`.
 
 ---
 
@@ -107,23 +109,26 @@ cross-project via Workload Identity — the only multi-project hop in the system
 
 ## §3 — Deployed Workloads
 
-State as of the last cloud deployment touch — **Phase 9.5 closeout, 2026-05-20**. Nothing
-newer has been deployed (Sprint 22/23 are local-only — see `cloud_state.md` §4).
+Most rows are as of the Phase 9.5 closeout (2026-05-20), but the stack is **no longer
+uniformly 9.5-era**: the **pipeline** (flink + airflow) was rolled to `-7b5i` in **Phase
+7B.5-I T7** (the day-run image), and **`agent-worker`** to `anizai-agent:0.5.0-sprint26` at
+`replicas:0` on **2026-07-23** (B-deploy Stage 1). Each row below carries its own image tag;
+the monitoring/storage rows remain at the 9.5 baseline (not re-verified this session).
 
 | Workload | Kind | Image / version | Status |
 |---|---|---|---|
 | kafka | StatefulSet | `apache/kafka:3.7.0` (KRaft) | Running — 19 topics, durable on PVC subdir `kafka-logs/` (9.5-A fix) |
-| postgres | StatefulSet | `timescale/timescaledb-ha:pg16` | Running — 7 tables, pgvector + timescaledb + pg_trgm |
+| postgres | StatefulSet | `timescale/timescaledb-ha:pg16` | Running — vault + audit tables incl. `reactive_triggers_log` (verified present 2026-07-23); pgvector + timescaledb + pg_trgm |
 | airflow-postgres | StatefulSet | `postgres:16` | Running — Airflow metadata DB |
-| flink-jobmanager | Deployment | `anizai-flink:1.19.1-p95` | Running — K8s HA enabled (Phase 9 follow-up) |
-| flink-taskmanager | Deployment | `anizai-flink:1.19.1-p95` | Running — Silver + Gold jobs RUNNING |
-| airflow-scheduler | Deployment | `anizai-airflow:2.9.3-p95` | Running — liveness probe on :8974 (9.5-A fix); hosts the 7 scheduled producer DAGs |
-| airflow-webserver | Deployment | `anizai-airflow:2.9.3-p95` | Running |
+| flink-jobmanager | Deployment | `anizai-flink:1.19.1-7b5i` (7B.5-I T7) | Running — K8s HA enabled (Phase 9 follow-up) |
+| flink-taskmanager | Deployment | `anizai-flink:1.19.1-7b5i` (7B.5-I T7) | Running — Silver + Gold jobs RUNNING |
+| airflow-scheduler | Deployment | `anizai-airflow:2.9.3-7b5i` (7B.5-I T7) | Running — liveness probe on :8974 (9.5-A fix); hosts the 7 producer DAGs (**now manually paused — see `cloud_state.md` §6**) |
+| airflow-webserver | Deployment | `anizai-airflow:2.9.3-7b5i` (7B.5-I T7) | Running |
 | kafka-ui | Deployment | `provectuslabs/kafka-ui:v0.7.2` | Running |
 | polymarket | Deployment | `anizai-polymarket:0.2.0-p95` | Running on main-pool — comments path feature-flagged off (KG-A / KG-PHASE-9.5-4) |
 | telegram | Deployment | `anizai-telegram:0.1.0` | Running — session file via Secret Manager CSI |
 | trigger-consumer | Deployment | `anizai-trigger-consumer:0.1.0` | Running — consumes `ingestion_triggers` (closed KG-PHASE8-3, 9D) |
-| agent-worker | Deployment | `anizai-agent:0.2.0-p95` (`AGENT_VERSION 0.4.0-sprint21-clarification-tier2`) | Running — cross-project Firestore on `anizai-ai`. **Sprint 22/23 NOT in this image** |
+| agent-worker | Deployment | `anizai-agent:0.5.0-sprint26` (digest `sha256:7fce4e8b…c316ef4`; `AGENT_VERSION 0.5.0-sprint26+55e8093`) | **Deployed at `replicas:0` — Stage-1 hard-off (2026-07-23)**; cross-project Firestore on `anizai-ai`. **Sprint 22→26 in this image; idle until Stage 2 scales it to 1** |
 | prometheus | Deployment | `prom/prometheus:v2.51.2` | Running — 2Gi + 7d retention (9.5-A); 5 scrape targets |
 | grafana | Deployment | `grafana/grafana:10.4.2` | Running — 2 dashboards (detailed + `Anizai Pipeline Health`, 9.5-C) |
 | alertmanager | Deployment | `prom/alertmanager:v0.27.0` | Running — Gmail SMTP → `ron.mintz21@gmail.com` (9.5-C) |
