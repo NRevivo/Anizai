@@ -36,7 +36,13 @@ metadata:
     app: agent-worker
     tier: agent
 spec:
-  replicas: 1
+  # Stage-1 hard-off (b_cloud_deploy_two_stage.md §2 T1.2). The cumulative
+  # Sprint 22→26 image is deployed but runs ZERO pods — "on the cloud" yet
+  # unable to pick up a forecast or call OpenAI (holds off the KG-C-1 RPD/cost
+  # exposure until the B test is deliberately started). With strategy:Recreate
+  # + replicas:0, no pod is ever created. Restored to replicas:1 at Stage 2
+  # T2.2 — the first real health proof of the Sprint-26 agent in cloud.
+  replicas: 0
   strategy:
     type: Recreate
   selector:
@@ -52,7 +58,13 @@ spec:
       restartPolicy: Always
       containers:
         - name: agent-worker
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-agent:0.2.0-p95
+          # Cumulative hub Sprints 22→26: BI-card wiring (22), reactive-trigger
+          # node (23), follow-up subgraph + 2nd Firestore listener (24),
+          # suggested-actions + agentEvents (25), pre-test hardening (26).
+          # agentVersion 0.5.0-sprint26+55e8093. Built + pushed in Stage-1 T1.1
+          # (b_cloud_deploy_two_stage.md §2); index digest
+          # sha256:7fce4e8b0b13700fed2ff05071d9ebd277e9b27fab2f70a46d6ba5917c316ef4.
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-agent:0.5.0-sprint26
           imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
