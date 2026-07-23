@@ -1,0 +1,8 @@
+source,rejects_rows,rejects_distinct,archived,enriched_distinct
+arxiv,490,468,108,1400
+fred,0,0,174,0
+hackernews,0,0,127,732
+newsapi,1406,518,644,2766
+openweather,0,0,1440,0
+polymarket,0,0,26166,0
+telegram,268,268,327,595

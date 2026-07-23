@@ -1,0 +1,4 @@
+source_name,rejects_rows,rejects_distinct,avg_cos,max_cos
+newsapi,1406,518,0.1988,0.345
+arxiv,490,468,0.2238,0.343
+telegram,268,268,0.2317,0.349

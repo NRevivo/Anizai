@@ -1,0 +1,12 @@
+source_name,site,calls,usd,tokens
+arxiv,gold_embed,910,0.000916,50129
+arxiv,gold_enrich,910,0.358292,1752512
+arxiv,rescue_embed,490,0.003457,173420
+hackernews,gold_consensus,732,0.304144,1510738
+hackernews,gold_embed,732,0.000734,36294
+newsapi,gold_embed,1360,0.001368,72934
+newsapi,gold_enrich,1360,0.573796,2829312
+newsapi,rescue_embed,1408,0.002997,151775
+telegram,gold_embed,327,0.000323,14045
+telegram,gold_enrich,327,0.103657,491535
+telegram,rescue_embed,279,0.001451,72073
