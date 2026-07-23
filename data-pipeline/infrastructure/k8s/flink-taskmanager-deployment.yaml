@@ -123,9 +123,9 @@ spec:
             # the Gold Python workers actually run, so these are the copies that
             # matter at runtime; the JM pair keeps the manifests symmetric.
             - name: REJECT_CAPTURE_ENABLED
-              value: "true"
+              value: "false"
             - name: RUN_ID
-              value: "t7-smoke-2026-07-02"
+              value: "dayrun-20260722"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are read from
             # CSI-mounted files and exported by the shell wrapper above.
           volumeMounts:

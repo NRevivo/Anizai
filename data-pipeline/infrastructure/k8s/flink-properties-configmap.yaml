@@ -65,7 +65,21 @@ data:
     execution.checkpointing.mode: EXACTLY_ONCE
     execution.checkpointing.interval: 60000
     execution.checkpointing.min-pause: 10000
-    execution.checkpointing.timeout: 120000
+    # Phase 7B.5-I day-run (2026-07-20): checkpoint-storm mitigation. Synchronous
+    # Gold enrichment (~2-3s/record, gpt-4o-mini) keeps the operator 100% CPU-busy
+    # while draining any backlog; a CPU-busy operator cannot service the checkpoint
+    # barrier, so checkpoints EXPIRE. With the old tolerable=0 that failed the job
+    # -> restart -> replay from earliest() -> duplicate enrichment burn (same storm
+    # as T7 2026-07-02). unaligned does NOT help here (it rescues network-backpressure
+    # stalls, not CPU-busy-UDF stalls). The operative lever is a very high failure
+    # tolerance: the job never restart-loops on checkpoint expiry, drains backlogs
+    # forward, and checkpoints normally once caught up. Exactly-once tradeoff is
+    # harmless: all measured data is written by fail-open Postgres INSERTs (not the
+    # checkpoint sink) and analysis dedupes by DISTINCT original_url. Root fix
+    # (async I/O enrichment + env-overridable offset) is deferred to the post-test cycle.
+    execution.checkpointing.timeout: 600000
+    execution.checkpointing.unaligned.enabled: true
+    execution.checkpointing.tolerable-failed-checkpoints: 1000
     state.backend: hashmap
     state.checkpoints.dir: file:///opt/flink/checkpoints
     state.savepoints.dir: file:///opt/flink/savepoints

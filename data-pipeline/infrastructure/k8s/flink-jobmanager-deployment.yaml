@@ -147,15 +147,16 @@ spec:
             # Both are plain (non-secret) values, read by config/settings.py in
             # the Python workers at startup — toggling either needs only a pod
             # restart (env-only change), never a rebuild or job resubmit.
-            # REJECT_CAPTURE_ENABLED is ON for the T7 smoke check + T8 day-run;
-            # set back to "false" at day's end (T8 checklist).
+            # REJECT_CAPTURE_ENABLED gates filter_rejects capture — ON only during
+            # explicit collection runs. Set to "false" post-run (T8 day-run
+            # dayrun-20260722 closed 2026-07-23; capture off).
             - name: REJECT_CAPTURE_ENABLED
-              value: "true"
+              value: "false"
             # RUN_ID stamps filter_rejects/llm_cost_events rows (D4 logical
             # isolation). T7 verification tag; T8 replaces it with the real
             # dayrun-YYYY-MM-DD tag before the day-run starts.
             - name: RUN_ID
-              value: "t7-smoke-2026-07-02"
+              value: "dayrun-20260722"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are NOT set here.
             # They are read from the CSI-mounted files at /var/secrets/flink/
             # and exported by the shell wrapper command above. The GKE-native
