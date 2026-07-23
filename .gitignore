@@ -22,3 +22,6 @@
 
 
 .DS_Store
+
+# Local dev tooling state — per-machine (SQLite DB, agent/job scratch dirs).
+/dev/

@@ -2,14 +2,19 @@ import { useEffect, useState } from 'react';
 import { fetchTrendingForecasts, type TrendingForecast } from '../../services/trending.service';
 
 const DISPLAY_COUNT = 6;
-// Fetch a wide candidate pool from /trending — Polymarket's top-volume
-// feed is dominated by long-shot novelty bets (sub-2% "will X win 2028",
-// "will Jesus return", etc.) that read as crude on a landing page. We
-// filter those out below, so we need plenty of candidates to choose from.
-const FETCH_COUNT = 60;
-// Show only questions whose market is genuinely in play — skip near-certain
-// resolutions on either side of the dial. This is what keeps "Will LeBron
-// win the 2028 presidency" (≈0.6%) out of the feed.
+// Modest over-fetch: /trending now returns event cards ranked by 24h volume and
+// already excludes single-fixture noise server-side, so nearly every row is
+// usable — we no longer need to sift a wide pool.
+const FETCH_COUNT = 12;
+// Show only binary questions whose market is genuinely in play — skip near-certain
+// resolutions on either side of the dial.
+//
+// This filter used to be load-bearing: /markets returned individual candidate legs,
+// so without it the section filled with sub-2% long shots ("Will LeBron win the 2028
+// presidency"). Those legs no longer arrive — /events collapses them into their
+// parent card (KG-C-13) — but the band still earns its place, because a market
+// sitting at 99% is a resolved question and makes a poor advert for a forecasting
+// tool.
 const MIN_PROBABILITY = 0.05;
 const MAX_PROBABILITY = 0.95;
 
@@ -18,7 +23,7 @@ type LoadState =
     | { kind: 'ready'; rows: TrendingForecast[] }
     | { kind: 'empty' };
 
-function formatProbability(probability: number | undefined): string | null {
+function formatProbability(probability: number | null | undefined): string | null {
     if (probability === undefined || probability === null || Number.isNaN(probability)) {
         return null;
     }
@@ -30,15 +35,23 @@ function formatProbability(probability: number | undefined): string | null {
     return `${Math.round(value * 100)}%`;
 }
 
+/**
+ * The headline number for a row: the Yes price of a binary event, or the leading
+ * outcome of a multi-outcome field ("Ballon d'Or Winner 2026" → its favourite).
+ */
+function headlineProbability(row: TrendingForecast): number | null {
+    if (row.probability !== null) return row.probability;
+    return row.outcomes[0]?.probability ?? null;
+}
+
 function isUsable(row: TrendingForecast): boolean {
-    const text = row.question ?? row.title;
-    if (!text || !text.trim()) {
+    if (!row.title || !row.title.trim()) {
         return false;
     }
-    if (formatProbability(row.probability) === null) {
+    const p = headlineProbability(row);
+    if (p === null || formatProbability(p) === null) {
         return false;
     }
-    const p = row.probability!;
     const value = p > 1 ? p / 100 : p;
     return value >= MIN_PROBABILITY && value <= MAX_PROBABILITY;
 }
@@ -109,18 +122,28 @@ export function QuestionsWeTrack() {
 }
 
 function QuestionRow({ row }: { row: TrendingForecast }) {
-    const text = (row.question ?? row.title ?? '').trim();
-    const pct = formatProbability(row.probability);
+    const text = row.title.trim();
+    const pct = formatProbability(headlineProbability(row));
+    // For a candidate field the headline number belongs to the front-runner, so
+    // name them — an unattributed 38% under "Ballon d'Or Winner 2026" is meaningless.
+    const leader = row.probability === null ? row.outcomes[0]?.label : null;
 
     return (
         <li className="px-6 sm:px-8 py-6 hover:bg-white/70 transition-colors">
             <div className="flex items-start gap-6">
                 <div className="min-w-0 flex-1">
-                    <p className="text-[15px] sm:text-base font-medium leading-snug text-slate-800 line-clamp-2">
-                        {text}
+                    <p className="text-[15px] sm:text-base font-medium leading-snug line-clamp-2">
+                        <a
+                            href={row.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-slate-800 transition-colors hover:text-anizai-purple-600 hover:underline"
+                        >
+                            {text}
+                        </a>
                     </p>
                     <p className="mt-2 text-[12px] text-slate-500">
-                        Tracked on Polymarket
+                        {leader ? `${leader} leading · Tracked on Polymarket` : 'Tracked on Polymarket'}
                     </p>
                 </div>
                 <div className="shrink-0 text-right pt-0.5">

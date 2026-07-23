@@ -5,7 +5,11 @@ export const collections = {
     users: 'users',
     sessions: 'sessions',
     sessionResults: 'sessionResults',
-    trendingForecasts: 'trendingForecasts',
+    // `trendingForecasts` was removed here on 2026-07-20: /trending is a live
+    // Polymarket passthrough and nothing reads the collection since the seeded
+    // fallback was deleted (KG-C-11). The Firestore documents, the read rule in
+    // firestore.rules and the writer in scripts/seed.ts still exist — removing the
+    // rule needs a deploy, so it was left alone deliberately.
     forecastQueries: 'forecastQueries',
 } as const;
 
@@ -23,4 +27,10 @@ export function now(): FirebaseFirestore.Timestamp {
 
 export function batch() {
     return firestore.batch();
+}
+
+export function runTransaction<T>(
+    updateFunction: (transaction: FirebaseFirestore.Transaction) => Promise<T>
+): Promise<T> {
+    return firestore.runTransaction(updateFunction);
 }

@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import type { ZodError } from 'zod';
 import { logger } from '../lib/logger.js';
 import { isProd } from '../config/env.js';
 import type { ApiErrorResponse } from '../types/api.js';
@@ -16,6 +17,16 @@ export class AppError extends Error {
         super(message);
         this.name = 'AppError';
     }
+}
+
+/**
+ * Build a 400 AppError from a failed zod parse, forwarding the field-level
+ * issues into `details` so clients get an actionable error instead of a bare
+ * "Invalid request body" (KG-C-10d). `flatten()` yields `{ formErrors,
+ * fieldErrors }`, which the error middleware surfaces under `error.details`.
+ */
+export function validationError(error: ZodError): AppError {
+    return new AppError('Invalid request body', 400, 'VALIDATION_ERROR', error.flatten());
 }
 
 /**

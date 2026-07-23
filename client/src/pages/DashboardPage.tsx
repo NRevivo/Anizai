@@ -24,9 +24,11 @@ import type {
 interface TrendingQuestionView {
     id: string;
     question: string;
-    probability: number;
-    trend: 'up' | 'down' | 'stable';
-    context: string;
+    probability: number | null;
+    outcomes: { label: string; probability: number }[];
+    volume24h: number;
+    marketCount: number;
+    url: string;
 }
 
 interface DashboardPageProps {
@@ -450,7 +452,7 @@ export function DashboardPage({
 
     const renderCenterPanel = () => {
         if (currentView === 'new-forecast') {
-            return <CreateForecastView onSubmit={handleSubmitForecast} onOpenSubscription={() => openSettingsSection('subscription')} />;
+            return <CreateForecastView onSubmit={handleSubmitForecast} onOpenSubscription={() => openSettingsSection('subscription')} userPlan={userPlan} monthlyForecastsUsed={userProfile?.monthlyForecastsUsed ?? 0} />;
         }
 
         if (isLoading) {

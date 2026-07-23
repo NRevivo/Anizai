@@ -6,7 +6,13 @@ import { ApiError } from '../lib/api';
 interface CreateForecastViewProps {
     onSubmit: (question: string, idempotencyKey: string) => Promise<void>;
     onOpenSubscription?: () => void;
+    userPlan?: 'free' | 'premium';
+    monthlyForecastsUsed?: number;
 }
+
+// Mirrors FREE_FORECAST_LIMIT in server/src/repositories/user.repository.ts.
+// The server is the source of truth for the limit; this is display-only.
+const FREE_FORECAST_LIMIT = 3;
 
 interface PlanLimitDetails {
     used?: number;
@@ -44,7 +50,13 @@ function formatResetDate(resetAt?: string): string | null {
     });
 }
 
-export function CreateForecastView({ onSubmit, onOpenSubscription }: CreateForecastViewProps) {
+export function CreateForecastView({ onSubmit, onOpenSubscription, userPlan = 'free', monthlyForecastsUsed = 0 }: CreateForecastViewProps) {
+    const isPremium = userPlan === 'premium';
+    const forecastsRemaining = Math.max(0, FREE_FORECAST_LIMIT - monthlyForecastsUsed);
+    const freeUsageLabel =
+        forecastsRemaining === 0
+            ? 'No free forecasts left this month'
+            : `${forecastsRemaining} of ${FREE_FORECAST_LIMIT} free forecasts left this month`;
     const [question, setQuestion] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
@@ -236,7 +248,7 @@ export function CreateForecastView({ onSubmit, onOpenSubscription }: CreateForec
                     <Button
                         onClick={handleSubmit}
                         disabled={isSubmitting}
-                        className="h-12 w-full sm:w-auto px-6 sm:px-8 bg-gradient-to-r from-anizai-teal-500 via-anizai-blue-500 to-anizai-purple-500 hover:opacity-90 text-white text-base font-semibold rounded-lg transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed border-0"
+                        className="h-12 w-full sm:w-auto px-6 sm:px-8 bg-gray-900 hover:bg-gray-800 text-white text-base font-semibold rounded-lg transition-colors shadow-[0_1px_2px_rgba(15,23,42,0.08)] hover:shadow disabled:opacity-50 disabled:cursor-not-allowed border-0"
                     >
                         {isSubmitting ? (
                             <span className="inline-flex items-center gap-2">
@@ -250,7 +262,11 @@ export function CreateForecastView({ onSubmit, onOpenSubscription }: CreateForec
                     </Button>
 
                     <span className="text-sm text-gray-400 font-medium">
-                        {isSubmitting ? 'Creating the forecast workspace...' : 'Uses 1 free forecast'}
+                        {isSubmitting
+                            ? 'Creating the forecast workspace...'
+                            : isPremium
+                                ? 'Unlimited forecasts on your plan'
+                                : freeUsageLabel}
                     </span>
                 </div>
 

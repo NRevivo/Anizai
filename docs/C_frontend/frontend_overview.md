@@ -1,7 +1,7 @@
 # frontend_overview.md
 > Domain: C — Frontend / BFF
 > Type: Overview
-> Last updated: 2026-07-18
+> Last updated: 2026-07-20
 > TL;DR: The macro view of the Anizai client and BFF — what the React SPA renders, what the Express server mediates, and the two independent read paths (REST and direct Firestore) that feed the dashboard. Open this first to orient before the detailed spec files.
 
 ## Navigation
@@ -75,12 +75,18 @@ this repo describes only the first and asserts the second does not exist. Both a
   │     agentEvents/{id}                   ← agent writes, client reads live
   │   sessionResults/{id}                  ← agent writes
   │   forecastQueries/{id}                 ← BFF writes, agent claims  (server-only)
-  │   users/{uid}  trendingForecasts/{id}  canonicalForecasts/{key}
+  │   users/{uid}  trendingForecasts/{id}*  canonicalForecasts/{key}
   └──────────────────────────────────────────────────────────────────────
                                   ▲
                                   │  claims queue docs, writes results
                         Agentic Hub worker (Domain B)
 ```
+
+> \* `trendingForecasts` is **orphaned as of 2026-07-20.** It was only ever read by the
+> BFF's fallback path, which KG-C-11 deleted; `/trending` now serves the live Polymarket
+> fetch or fails. The collection name, the `scripts/seed.ts` writer and the
+> `firestore.rules` read block all still exist and are harmless, but nothing reads the
+> data. Left in place deliberately — removing the rule needs a Firestore deploy.
 
 **Forecast request lifecycle.** `POST /sessions` validates the body (zod, requires a
 UUID `idempotencyKey`), short-circuits on a recent duplicate key, charges monthly usage,
@@ -143,7 +149,7 @@ Node >= 20, ESM (`"type": "module"`, `.js` import specifiers throughout).
 | Firebase service | `collectionRef`, `batch`, `now`, collection names | `src/services/firebase.service.ts` | Active |
 | Session repository | All session Firestore I/O; the highest-risk file | `src/repositories/session.repository.ts` | Active |
 | User repository | Usage counting; raises `PLAN_LIMIT_EXCEEDED` | `src/repositories/user.repository.ts` | Active |
-| Trending repository | Trending reads | `src/repositories/trending.repository.ts` | Active |
+| Trending repository | Live Polymarket Gamma `/events` fetch + 5-min in-memory cache; event mapping, noise filtering, topic filtering | `src/repositories/trending.repository.ts` | Active — as of 2026-07-20: Firestore fallback removed (KG-C-11), ranks by `volume24hr` (KG-C-12), queries `/events` and returns event cards (KG-C-13), constrained to the pipeline's 13 forecastable topic domains (KG-C-15). Holds a **mirror** of those domain names — canonical source is `data-pipeline/processing/keyword_sniper.py` |
 | API types | `ApiSuccessResponse`, `ApiErrorResponse`, `AuthUser` | `src/types/api.ts` | Active |
 | Firestore rules | Client read/write gating; server-only collections | `firebase/firestore.rules` | Active |
 | Tests | 3 suites (health, repository, service) | `tests/*.test.ts` | Active |
@@ -162,7 +168,7 @@ react-markdown 9, lucide-react, Vitest 2.1.
 | Session service | REST wrappers **and** the 3 Firestore listeners; wire types | `src/services/session.service.ts` | Active |
 | Auth service | Google/email sign-in, `subscribeToAuthState` | `src/services/auth.service.ts` | Active |
 | User service | `/me`, `/me/plan` | `src/services/user.service.ts` | Active |
-| Trending service | `/trending` | `src/services/trending.service.ts` | Active — retains a silent demo fallback (KG-C-5) |
+| Trending service | `/trending` + the `TrendingForecast` type mirror | `src/services/trending.service.ts` | Active — demo fallback removed 2026-07-20 (KG-C-5); logs and returns `[]` on failure. Type mirrors the BFF declaration, unenforced (KG-C-1) |
 | UI types | `Prediction`, `TimelineEvent`, `AgentEvent`, `KeyFactor`, … | `src/types/index.ts` | Active |
 | Dashboard shell | Panel orchestration, drawers, modals, create/select/chat | `src/pages/DashboardPage.tsx` | Active (744 lines) |
 | Forecast view | Card container; factor→evidence highlight coordination | `src/components/Dashboard.tsx` | Active |
@@ -176,7 +182,8 @@ react-markdown 9, lucide-react, Vitest 2.1.
 | Page shells | `PageShell`, `AuthShell` | `src/components/site/` | Active |
 | UI primitives | shadcn-style `card`, `button`, `badge`, `input` + `StateMessage`, `ConfirmDialog` | `src/components/ui/` | Active |
 | Settings | Modal + 6 sections | `src/components/SettingsModal.tsx`, `src/components/settings/` | Active |
-| Mock data | Demo fixtures | `src/data/mockData.ts` | Residual — one importer left (KG-C-5) |
+| ~~Mock data~~ | ~~Demo fixtures~~ | ~~`src/data/mockData.ts`~~ | **Deleted 2026-07-20** (KG-C-5). `src/data/` no longer exists |
+| ~~Trending forecasts card~~ | ~~Trending list w/ inline fixtures~~ | ~~`src/components/TrendingForecasts.tsx`~~ | **Deleted 2026-07-20.** Unimported and never rendered; held four hardcoded forecasts inline, so it survived the `mockData.ts` sweep. The client now ships no fixtures at all |
 
 ---
 
