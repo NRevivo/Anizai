@@ -1,0 +1,10 @@
+source,pulled,silver,dlq,malformed,unattributed,note
+polymarket,26136,26136,0,0,0,structured_metrics; deterministic momentum (no gate)
+hackernews,3600,3600,0,0,0,social_pulse; rejects never captured (KG-A-12)
+newsapi,2766,2766,0,0,0,global_news; silver windowed by kafka-append ts (no in-payload ingestion ts)
+arxiv,1400,1400,0,0,0,global_news; silver windowed by kafka-append ts
+telegram,595,595,0,0,0,global_news; silver windowed by kafka-append ts
+openweather,1440,1440,0,0,0,structured_metrics; deterministic (no gate)
+fred,174,174,0,0,0,silver directly measured 0 via data_point.timestamp_utc (observation-date artifact); 174 = Bronze/append-time evidence (no gate)
+googletrends,0,0,0,0,0,dead source (KG-A-3)
+opensky,0,0,0,0,0,dead source (KG-A-5)
