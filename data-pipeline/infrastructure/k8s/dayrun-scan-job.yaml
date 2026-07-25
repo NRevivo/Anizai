@@ -1,0 +1,88 @@
+# dayrun-scan-job.yaml — ephemeral, read-only Kafka funnel extractor for
+# dayrun-20260722 (plans/dayrun20260722_extraction.md, tasks E1/E2).
+#
+# This is NOT a pipeline component. It is a throwaway diagnostic Job, deleted at
+# E5. It changes no pipeline behaviour: the scanner commits no consumer offsets
+# (group_id=None, enable_auto_commit=False) and only reads.
+#
+# Image is PINNED to the tag the LIVE flink-taskmanager Deployment reports
+# (anizai-flink:1.19.1-7b5i, AR-verified 2026-07-25) — NOT the -p95 in the stale
+# cluster_operations_guide §1. That image already carries kafka-python-ng
+# (requirements.lock) so nothing is pip-installed at runtime (cluster egress may
+# forbid it — extraction §C2).
+#
+# The scanner script is mounted from a ConfigMap created imperatively so the image
+# is never rebuilt:
+#   kubectl create configmap dayrun-scan-script -n anizai \
+#     --from-file=dayrun_kafka_funnel_scan.py=scripts/dayrun_kafka_funnel_scan.py
+#
+# Output: the script prints CSV between ===CSV-BEGIN===/===CSV-END=== on stdout;
+# capture with `kubectl logs job/<name> -n anizai`. Diagnostics go to stderr.
+#
+# Phase switching — edit ONLY these three fields per run, then re-apply:
+#   metadata.name            (unique per run, e.g. dayrun-scan-e1-offsets)
+#   env SCAN_MODE            offsets | scan
+#   env SCAN_LAYER           all (offsets) | silver | bronze | dlq
+# Run order (Ron directive 2026-07-25): E1 offsets(all) -> E2 scan silver ->
+#   scan bronze -> scan dlq. Silver first: it is the perishable half.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dayrun-scan-e1-offsets
+  namespace: anizai
+  labels:
+    app: dayrun-scan
+    run-id: dayrun-20260722
+spec:
+  backoffLimit: 0              # do NOT retry — a failure must surface immediately, not silently re-run
+  activeDeadlineSeconds: 1500  # extraction §C2: >~20 min means the method was wrong; kill, don't wait it out
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: dayrun-scan
+        run-id: dayrun-20260722
+    spec:
+      serviceAccountName: pipeline-runtime
+      restartPolicy: Never
+      containers:
+        - name: scan
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7b5i
+          imagePullPolicy: IfNotPresent   # image is cached on the node from the flink pods -> fast start
+          command: ["python"]
+          args:
+            - /opt/scan/dayrun_kafka_funnel_scan.py
+            - --mode
+            - $(SCAN_MODE)
+            - --layer
+            - $(SCAN_LAYER)
+            - --t0
+            - "2026-07-22T09:25:26Z"
+            - --t0-end
+            - "2026-07-23T09:25:26Z"
+            - --sample-gap
+            - "60"
+          env:
+            - name: SCAN_MODE
+              value: "offsets"
+            - name: SCAN_LAYER
+              value: "all"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:29092"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: scan-script
+              mountPath: /opt/scan
+              readOnly: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+      volumes:
+        - name: scan-script
+          configMap:
+            name: dayrun-scan-script

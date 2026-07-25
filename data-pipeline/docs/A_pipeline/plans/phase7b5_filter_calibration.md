@@ -1,8 +1,15 @@
 # phase7b5_filter_calibration.md
 > Domain: A — Pipeline
 > Type: Sprint Plan
-> Last updated: 2026-06-28
-> TL;DR: The one open unit of Domain-A work — empirically calibrate the Phase 7B filter thresholds (`DEFAULT_THRESHOLD`, `GOLD_SEMANTIC_RESCUE_THRESHOLD`) and confirm the 10 A1 keyword removals against real production vault data. Self-contained: every concrete value is inline; you do not need to open old_docs to execute this sprint.
+> Last updated: 2026-07-23
+> TL;DR: The one open unit of Domain-A work — empirically calibrate the Phase 7B filter thresholds (`DEFAULT_THRESHOLD`, `GOLD_SEMANTIC_RESCUE_THRESHOLD`) and confirm the 10 A1 keyword removals against real production data. **The dataset now exists** (7B.5-I day-run `dayrun-20260722`): 1,254 distinct rejected articles with full text and cosine scores, plus the survivor side with `relevance_score` and `rescue_cosine`. Runs offline against the exported dumps — no cluster needed. Self-contained: every concrete value is inline.
+
+> **Assumptions refinable after E1.** The data-source and sampling sections below
+> were written before the extraction session's offsets probe ran
+> (`plans/dayrun20260722_extraction.md`, E1). If E1 reveals a partially-eaten Silver
+> window, materially different volumes, or field behaviour differing from what is
+> documented, the sampling strategy and denominators here are open to revision.
+> Anticipated and pre-approved — not a deviation.
 
 ## Navigation
 - §0 — Why this sprint exists — the theoretical-vs-empirical gap Phase 7B left open
@@ -40,10 +47,39 @@ operationally closed.
 **Goal.** Validate empirically the filter thresholds Phase 7B set theoretically,
 using real production vault data instead of pre-production estimates.
 
-**Entry gate.** ≥200 post-7A `knowledge_vault` rows in cloud Postgres — **satisfied
-(616+ rows available)**. The calibration sample must be drawn from **post-7A rows
-only** (full-body shape); mixing in pre-7A snippet-era rows would reproduce the
-stale-threshold problem 7B.5 exists to avoid.
+**Entry gate.** — **SATISFIED, and superseded by a better dataset.** The original
+gate (≥200 post-7A `knowledge_vault` rows) was written when the survivor side was
+all that existed. The 7B.5-I day-run (`dayrun-20260722`, 2026-07-22 → 07-23) has
+since produced **both sides of the cut**:
+
+| Dataset | Where | Size | What it gives |
+|---|---|---|---|
+| Rejected articles | `filter_rejects` → `filter_rejects_full.csv` | **1,254 distinct** (2,164 raw rows, 1.7× dup) | `original_url`, untruncated `full_text_raw`, `relevance_score`, `rescue_cosine` — T7B.1's FN corpus and T7B.9's score sweep |
+| Survivors | `knowledge_vault` → `knowledge_vault_full.csv` | 1,079 in-window (1,066 passed / 13 rescued) | `relevance_score`, `rescue_cosine` — the other half of the T7B.2 distribution |
+
+Both arrive as CSV dumps from the extraction session
+(`plans/dayrun20260722_extraction.md`, task E4). **This sprint therefore runs
+entirely offline** — no cluster, no live Postgres. That decoupling is deliberate:
+7B.5 must not be gated on cluster availability.
+
+**Source coverage — hackernews is OUT (KG-A-12).** The social path runs the sniper
+but has no semantic rescue and no reject capture, so hackernews rejects leave no
+trace at all. It cannot be calibrated from this or any existing dataset. Record
+this as an explicit scope exclusion in the deliverable; do NOT read
+`funnel.csv`'s `rejects=0` for hackernews as evidence that nothing was rejected.
+Calibration covers **newsapi, arxiv, telegram** only.
+
+**Prior observation from 7B.5-I T6 (small, biased — a prior, not a finding):** 9
+real sniper-failed articles all failed rescue at cosines 0.14–0.29 against the 0.35
+threshold. Suggestive that the threshold is tight. The day-run corpus is the
+evidence that decides; this only sets the expectation.
+
+**Day-run signal worth noting before T7B.9 starts:** per `rejects_overview.csv`,
+max `rescue_cosine` was 0.345 / 0.343 / 0.349 across the three sources — nothing
+approached 0.35 from above — and only 13 of 1,079 archived rows (1.2%) entered via
+rescue. Two readings are possible and they lead opposite ways: the threshold is
+well-placed, or the whole distribution sits below it and the rescue stage is
+near-inert. T7B.9 must distinguish them, not assume either.
 
 **The concrete values under validation (inline — self-contained):**
 
@@ -83,10 +119,12 @@ must keep in view:
 
 | Task | Description |
 |---|---|
-| [ ] **T7B.1** | Run the `filter-analysis` skill against ≥200 **post-7A** full-body `knowledge_vault` rows. Classify TP/TN/FP/FN for each of the 10 A1 candidate terms (`strike, attack, odds, token, inference, default, revenue, vote, energy, defense`); confirm or trim the removal list. Also evaluate trimming the political `GENERAL_KEYWORDS` (`nato`, `sanctions`, `interest rates`, `central bank`, `ai regulation`) now that `news/Politics` is its own ingestion category (so political content no longer relies on those keywords for capture). |
-| [ ] **T7B.2** | Threshold calibration. Pull the `relevance_score` distribution from the post-7A `knowledge_vault` rows; compute the percentile `0.15` corresponds to under the full-body distribution; confirm `DEFAULT_THRESHOLD = 0.15` does not drop legitimate high-signal articles, or pick the empirical replacement. |
-| [ ] **T7B.9** | Semantic-rescue calibration. Run the rescue logic against ~100 known-low-signal (sniper-rejected) post-7A articles; manually classify rescued vs. dropped; pick the `GOLD_SEMANTIC_RESCUE_THRESHOLD` (within 0.30–0.40) that yields ≥80% precision on rescued items. Default currently `0.35`. |
-| [ ] **Deliverable** | Produce `docs/phase7_filter_analysis.md` — the deferred Phase-7 Definition-of-Done item. Record the A1 confirm/trim outcome, the `relevance_score` distribution + chosen `DEFAULT_THRESHOLD`, and the rescue-precision analysis + chosen `GOLD_SEMANTIC_RESCUE_THRESHOLD`. |
+| [ ] **T7B.0** | **Sampling frame (do this first).** The corpus is 1,254 distinct rejects — nobody is reading 1,254 articles. Draw a **stratified sample of ~120**: ~40 per source (newsapi / arxiv / telegram), stratified within source by `rescue_cosine` decile, **over-weighting the top decile (≈0.28–0.35)**. That band is where the false negatives and the threshold decision both live; the bottom deciles are almost certainly true negatives and reading them buys little. Draw a matched ~60-article sample of SURVIVORS from `knowledge_vault_full.csv` the same way (by `relevance_score` band) — without it there is no false-positive measurement, only false-negative. Record the sampling seed and the frame so the T7B.6 re-run in §3 is reproducible against the identical sample. |
+| [ ] **T7B.1** | Run the `filter-analysis` skill over the T7B.0 sample. Classify TP/TN/FP/FN for each of the 10 A1 candidate terms (`strike, attack, odds, token, inference, default, revenue, vote, energy, defense`); confirm or trim the removal list. Also evaluate trimming the political `GENERAL_KEYWORDS` (`nato`, `sanctions`, `interest rates`, `central bank`, `ai regulation`) now that `news/Politics` is its own ingestion category (so political content no longer relies on those keywords for capture). Source: `filter_rejects_full.csv` (`full_text_raw` is untruncated by design, precisely so the article can be read) + `knowledge_vault_full.csv`. Report precision/recall **per source**, never pooled — the three sources have materially different baselines (see the telegram note below). |
+| [ ] **T7B.2** | Threshold calibration — **now genuinely possible for the first time**, because both sides of the cut carry `relevance_score`. Build the full distribution from `knowledge_vault_full.csv` (survivors) UNIONed with `filter_rejects_full.csv` (rejects), in-window, deduped by `original_url`. Locate where 0.15 falls in it; sweep candidate thresholds and report, for each, how many sampled TP/FN/FP items change side. Confirm `DEFAULT_THRESHOLD = 0.15` or pick the empirical replacement. Note: `survivors_split.csv` (1,066 passed / 13 rescued, score-cut and marker agreeing exactly) validates instrumentation consistency — it is **not** a calibration result and must not be cited as one. |
+| [ ] **T7B.9** | Semantic-rescue calibration. Two parts, in order. **(a) Cheap and decisive, no human judgement:** histogram `rescue_cosine` over all 1,254 distinct rejects, then count how many would be rescued at 0.30 / 0.32 / 0.34. If that count is trivial, the rescue stage is near-inert and the real question becomes whether to keep it at all (it costs $0.0079/day — nothing — but it is a code path and a latency cost). If the count is large, there is a real threshold decision. **(b) Only then**, manually classify the rescued-at-candidate-threshold items from the T7B.0 sample and pick the value in 0.30–0.40 yielding ≥80% precision on rescued items. Default currently `0.35`. |
+| [ ] **T7B.10** | **Per-source threshold question (raised by the day-run).** telegram showed the highest average reject cosine (0.2317) and **zero duplication** (268 rows / 268 distinct) — consistent with the `filter-analysis` skill's own note that telegram arrives pre-filtered at the channel level. Decide explicitly: does telegram warrant a different threshold from newsapi? Answer from the T7B.1 per-source metrics. A decision either way is acceptable; leaving it implicit is not. |
+| [ ] **Deliverable** | Produce `docs/A_pipeline/reports/phase7_filter_analysis.md` — the deferred Phase-7 Definition-of-Done item. Record: the A1 confirm/trim outcome; the `relevance_score` distribution + chosen `DEFAULT_THRESHOLD`; the rescue histogram, the (a)/(b) outcome and the chosen `GOLD_SEMANTIC_RESCUE_THRESHOLD`; the T7B.10 decision; the sampling frame and seed; and an explicit statement that **hackernews is excluded (KG-A-12)** and why. |
 
 ---
 
