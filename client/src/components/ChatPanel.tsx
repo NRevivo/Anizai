@@ -16,6 +16,10 @@ interface ChatPanelProps {
     // Blocks sending a new message; the input stays editable so the user can
     // draft while they wait.
     isSendLocked?: boolean;
+    // False until the session has a completed forecast result. There is nothing
+    // to ask about before then, so the composer and the suggested-action chips
+    // are not rendered at all. Message history is never gated on this.
+    isComposerVisible?: boolean;
     isAwaitingAssistantResponse?: boolean;
     currentQuestion?: string;
     currentAnswer?: string;
@@ -30,6 +34,7 @@ export function ChatPanel({
     isLoading = false,
     isSendingMessage = false,
     isSendLocked = false,
+    isComposerVisible = false,
     isAwaitingAssistantResponse = false,
     onSendMessage,
     onActionClick
@@ -37,8 +42,10 @@ export function ChatPanel({
     const [inputValue, setInputValue] = useState('');
 
     // The send path is closed while a message is mid-flight (isSendingMessage)
-    // or while the session is still answering (isSendLocked).
-    const isSendDisabled = isSendingMessage || isSendLocked;
+    // or while the session is still answering (isSendLocked). When the composer
+    // is not rendered at all there is no send path to speak of, but the guard
+    // stays defensive so a stray handler can never fire without a result.
+    const isSendDisabled = isSendingMessage || isSendLocked || !isComposerVisible;
 
     const handleSend = () => {
         if (isSendDisabled) {
@@ -55,7 +62,11 @@ export function ChatPanel({
         <div className="w-full h-full max-w-full bg-white border-l border-gray-200 flex flex-col overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 bg-white">
                 <h2 className="text-sm font-semibold text-gray-900">Follow-up</h2>
-                <p className="mt-0.5 text-xs text-gray-500">Ask about drivers, assumptions, or evidence.</p>
+                <p className="mt-0.5 text-xs text-gray-500">
+                    {isComposerVisible
+                        ? 'Ask about drivers, assumptions, or evidence.'
+                        : 'Available once the forecast has a result.'}
+                </p>
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
@@ -70,7 +81,9 @@ export function ChatPanel({
                     <StateMessage
                         compact
                         title="No follow-ups yet"
-                        description="Ask a question about the forecast, evidence, or key assumptions."
+                        description={isComposerVisible
+                            ? 'Ask a question about the forecast, evidence, or key assumptions.'
+                            : 'Follow-up questions open up once this forecast returns a result.'}
                     />
                 ) : (
                     messages.map((message) => (
@@ -107,7 +120,7 @@ export function ChatPanel({
                 ) : null}
             </div>
 
-            {suggestedActions.length > 0 && (
+            {isComposerVisible && suggestedActions.length > 0 && (
                 <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/50 flex-shrink-0">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
                         Suggested follow-ups
@@ -132,34 +145,39 @@ export function ChatPanel({
                 </div>
             )}
 
-            <div className="p-3 border-t border-gray-100 flex-shrink-0 bg-white">
-                <div className="flex min-w-0 gap-2">
-                    <Input
-                        placeholder="Ask a follow-up about the forecast or evidence"
-                        value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        disabled={isSendingMessage}
-                        className="min-w-0 bg-gray-50 border-gray-200 focus:bg-white focus:border-anizai-teal-500 focus:ring-1 focus:ring-anizai-teal-500 transition-all text-sm"
-                    />
-                    <Button
-                        onClick={handleSend}
-                        disabled={!inputValue.trim() || isSendDisabled}
-                        className="h-10 w-10 shrink-0 bg-anizai-teal-600 hover:bg-anizai-teal-700 text-white border-0 shadow-sm"
-                    >
-                        {isSendingMessage ? (
-                            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" className="opacity-30" />
-                                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                            </svg>
-                        ) : (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                            </svg>
-                        )}
-                    </Button>
+            {/* The composer is withheld until a forecast result exists — there is
+                nothing to ask about while the run is still in flight, and nothing
+                to ask about at all on a failed run. */}
+            {isComposerVisible ? (
+                <div className="p-3 border-t border-gray-100 flex-shrink-0 bg-white">
+                    <div className="flex min-w-0 gap-2">
+                        <Input
+                            placeholder="Ask a follow-up about the forecast or evidence"
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                            disabled={isSendingMessage}
+                            className="min-w-0 bg-gray-50 border-gray-200 focus:bg-white focus:border-anizai-teal-500 focus:ring-1 focus:ring-anizai-teal-500 transition-all text-sm"
+                        />
+                        <Button
+                            onClick={handleSend}
+                            disabled={!inputValue.trim() || isSendDisabled}
+                            className="h-10 w-10 shrink-0 bg-anizai-teal-600 hover:bg-anizai-teal-700 text-white border-0 shadow-sm"
+                        >
+                            {isSendingMessage ? (
+                                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" className="opacity-30" />
+                                    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                                </svg>
+                            ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                </svg>
+                            )}
+                        </Button>
+                    </div>
                 </div>
-            </div>
+            ) : null}
         </div>
     );
 }

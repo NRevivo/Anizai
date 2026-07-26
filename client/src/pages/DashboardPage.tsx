@@ -8,6 +8,7 @@ import { StateMessage } from '../components/ui/StateMessage';
 import { CreateForecastView } from '../components/CreateForecastView';
 import { TrendingContext } from '../components/CreateForecastContext';
 import { SettingsModal, type SettingsSection } from '../components/SettingsModal';
+import { shouldShowFollowUpComposer } from '../lib/followUpComposer';
 import type { UserProfile } from '../services/user.service';
 import type {
     ChatMessage,
@@ -43,6 +44,9 @@ interface DashboardPageProps {
         clarificationCandidates: ClarificationCandidate[] | null;
     } | null;
     prediction: Prediction | null;
+    /** True only when the session's sessionResults doc exists. Not derivable
+     *  from `prediction`, which is non-null for any loaded session. */
+    hasForecastResult: boolean;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
     agentEvents: AgentEvent[];
@@ -102,6 +106,7 @@ export function DashboardPage({
     activeSessionId,
     activeSessionState,
     prediction,
+    hasForecastResult,
     sentimentData,
     timelineEvents,
     agentEvents,
@@ -155,6 +160,14 @@ export function DashboardPage({
         activeSessionState?.status === 'claimed' ||
         activeSessionState?.status === 'running';
     const isSendLocked = isSessionProcessing || isAwaitingAssistantResponse;
+
+    // There is nothing to ask a follow-up about until a forecast result exists,
+    // so the composer is not rendered at all before then. Extracted into a pure,
+    // unit-tested helper (lib/followUpComposer.ts) because the dashboard sits
+    // behind auth — the helper is the piece of this gate provable without a
+    // signed-in session. This gates the composer only; the message history
+    // stays visible always.
+    const isComposerVisible = shouldShowFollowUpComposer(activeSessionState?.status, hasForecastResult);
 
     useEffect(() => {
         setSelectedClarificationId('none');
@@ -548,6 +561,7 @@ export function DashboardPage({
                 isSendingMessage={isSendingMessage}
                 isSendLocked={isSendLocked}
                 isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                isComposerVisible={isComposerVisible}
                 onSendMessage={handleSendMessage}
                 suggestedActions={suggestedActions}
                 currentQuestion={prediction?.question}
@@ -648,6 +662,7 @@ export function DashboardPage({
                             isSendingMessage={isSendingMessage}
                             isSendLocked={isSendLocked}
                             isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                            isComposerVisible={isComposerVisible}
                             suggestedActions={suggestedActions}
                             currentQuestion={prediction?.question}
                             currentAnswer={prediction?.explanation}
@@ -695,6 +710,7 @@ export function DashboardPage({
                         isSendingMessage={isSendingMessage}
                         isSendLocked={isSendLocked}
                         isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                        isComposerVisible={isComposerVisible}
                         suggestedActions={suggestedActions}
                         currentQuestion={prediction?.question}
                         currentAnswer={prediction?.explanation}

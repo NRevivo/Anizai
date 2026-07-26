@@ -789,6 +789,12 @@ function App() {
   );
   const activeSessionState = useMemo(() => toActiveSessionState(activeSessionDetail), [activeSessionDetail]);
   const prediction = useMemo(() => toPrediction(activeSessionDetail), [activeSessionDetail]);
+  // Authoritative "a forecast result exists" signal. `prediction` cannot stand
+  // in for this: toPrediction returns a non-null Prediction for any non-null
+  // detail, filling probability/confidence with 0 while the run is still in
+  // flight. `detail.result` is null whenever sessionResults/{id} is absent
+  // (server getSessionResult), independent of session status.
+  const hasForecastResult = activeSessionDetail?.result != null;
   const sentimentData = useMemo(() => toSentimentPoints(activeSessionDetail), [activeSessionDetail]);
   const timelineEvents = useMemo(() => toTimelineEvents(activeSessionDetail), [activeSessionDetail]);
   const messages = useMemo(() => {
@@ -938,6 +944,7 @@ function App() {
         activeSessionId={activeSessionId}
         activeSessionState={activeSessionState}
         prediction={prediction}
+        hasForecastResult={hasForecastResult}
         sentimentData={sentimentData}
         timelineEvents={timelineEvents}
         agentEvents={filteredAgentEvents}

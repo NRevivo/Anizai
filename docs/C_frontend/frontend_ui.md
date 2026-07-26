@@ -252,9 +252,10 @@ spinner. It is used across the dashboard, chat, evidence, trending, and settings
 | Session selected, none active | ✅ | "Select a forecast" |
 | No search results | ✅ | `Sidebar` — "Try a different search term." |
 | No evidence / no filter match | ✅ | `EvidenceTimeline:355-360` |
-| No chat messages | ✅ | `ChatPanel:63` |
-| Awaiting assistant reply | ✅ | `ChatPanel:98`, `isAwaitingAssistantResponse` |
-| Send lock while busy | ✅ | `isSendDisabled` gates composer, send button, and suggested-action chips |
+| No chat messages | ✅ | `ChatPanel:81` |
+| Awaiting assistant reply | ✅ | `ChatPanel:111`, `isAwaitingAssistantResponse` |
+| Send lock while busy | ✅ | `isSendDisabled` gates the send button and the suggested-action chips |
+| Composer withheld until a result exists | ✅ | `shouldShowFollowUpComposer` (`lib/followUpComposer.ts`) → `DashboardPage:170`, consumed at `ChatPanel:151` |
 | Failed session | ✅ | Status panel + retry |
 | Clarification | ✅ | Candidate picker |
 | Plan limit | ✅ | Structured `PLAN_LIMIT_EXCEEDED` surfaced from the API (`frontend_api.md §6.1`) |
@@ -266,8 +267,45 @@ per-status dot with label for all six statuses (`:47-61`). It displays probabili
 (`—` when null) but **not confidence** — see §7.
 
 **ChatPanel** renders assistant content through `react-markdown`, shows up to the
-provided `suggestedActions` as chips, and disables the composer, the send button, and
-the chips together while a send is in flight or the session is busy.
+provided `suggestedActions` as chips, and disables the send button and the chips
+together while a send is in flight or the session is busy.
+
+**Composer visibility gate.** The composer and the suggested-action chips are not
+rendered at all until the session has a completed forecast result — there is nothing
+to ask a follow-up about before then. The gate is `isComposerVisible`, derived in
+`DashboardPage.tsx:170` via the pure helper `shouldShowFollowUpComposer`
+(`src/lib/followUpComposer.ts`, 14 unit tests) as `status === 'done' &&
+hasForecastResult`, and passed to all three `ChatPanel` instances. The logic lives in a
+helper for the same reason Rule B's does: the dashboard sits behind auth, so the helper
+is the part of the gate provable without a signed-in session.
+
+Both halves are required, and neither substitutes for the other:
+
+- `hasForecastResult` comes from `App.tsx` as `activeSessionDetail?.result != null`.
+  It cannot be derived from `prediction` — `toPrediction` (`App.tsx:108-121`) returns
+  a **non-null** `Prediction` for any loaded session, defaulting probability and
+  confidence to `0` while the run is still in flight. `SessionDetail.result` is
+  `SessionResult | null` and the BFF returns `null` whenever `sessionResults/{id}` is
+  absent (`server/src/repositories/session.repository.ts:203-207`), independent of
+  session status.
+- `status === 'done'` is still needed because a result can outlive a re-queued run
+  (the clarification path re-queues an existing session).
+
+Per-state behaviour:
+
+| Session state | Message history | Composer + chips |
+|---|---|---|
+| New session, no result yet | visible (empty state) | hidden |
+| `queued` / `claimed` / `running` | visible | hidden |
+| `awaiting_clarification` | visible | hidden |
+| `failed` | visible | hidden — the session has no result to discuss; the recovery path is the **Retry forecast** button in the centre status panel, not a follow-up |
+| `done` with a result | visible | **visible** |
+| `done` but result doc missing | visible | hidden |
+| Reopened session with a prior thread | visible | visible (given `done` + result) |
+
+The history is never gated on `isComposerVisible` — only the input surface is.
+`isSendDisabled` also folds in `!isComposerVisible` defensively, so no stray handler
+can send without a result even if the markup gate is bypassed.
 
 ---
 
