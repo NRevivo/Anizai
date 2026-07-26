@@ -1,7 +1,7 @@
 # cloud_overview.md
 > Domain: C — Cloud
 > Type: Overview
-> Last updated: 2026-07-23 (agent + pipeline image-tag rows refreshed to live; monitoring/storage rows as of 2026-06-15, unverified against live)
+> Last updated: 2026-07-26 (§1 deployment-work paragraph + §5 navigation paths corrected; agent + pipeline image-tag rows refreshed 2026-07-23; monitoring/storage rows as of 2026-06-15, unverified against live)
 > TL;DR: The macro view of the Anizai GKE deployment — cluster topology, what is
 > deployed vs. local-only, and which phases closed when. Open this first to orient
 > before the detailed Domain C files.
@@ -45,10 +45,14 @@ KRaft self-bootstrap, the Secret Manager CSI shell-wrapper pattern), not feature
 Phase 9 and Phase 9.5 are both **fully closed**; the cluster runs (Cloud Scheduler PAUSED,
 scaled to 0 between windows). Domain C has **no open implementation sprints**, but it does
 have open *deployment work*. As of **2026-07-23**, hub Sprint 22→26 has **landed** on the
-deployed image (`anizai-agent:0.5.0-sprint26` at `replicas:0`, B-deploy Stage 1); the
-remaining deployment work is **Stage 2** — the `anizai-airflow` rebuild (Sprint 23 producer
-path) + scaling the agent to 1 to begin the B test — plus known cluster gaps. See
-`cloud_state.md` and `cloud_sprints.md`.
+deployed image (`anizai-agent:0.5.0-sprint26` at `replicas:0`, B-deploy Stage 1). **Stage 2
+T2.2 was executed 2026-07-25/26** — the agent was scaled to 1, passed its health gate, served
+7 real forecasts, and was returned to 0 (`B_hub/agent_cloud_run_20260726.md`). What remains
+is the `anizai-airflow` rebuild (T2.1) — note it does **not** enable the reactive producer
+path, which needs a `trigger-consumer` rebuild plus a NewsAPI secret on its
+SecretProviderClass — plus the known cluster gaps. Four workloads are currently held at
+`replicas: 0` live against manifests that say 1 (KG-C-10). See `cloud_state.md`,
+`cloud_sprints.md`, and `../guides/bringup_profiles.md` for bring-up.
 
 ---
 
@@ -168,6 +172,7 @@ Open this file first to orient, then route to the precise file/section below.
 | **Phase 9 / 9.5 status + rationale** (why the cloud work is sequenced as it is) | `cloud_sprints.md` (§1 Status, §Rationale) |
 | **What's actually deployed now + the local-only boundary** | `cloud_state.md` (§3 Running Workloads, §4 Local-Only) |
 | **Cluster topology / architecture** | this file — `cloud_overview.md §2` / §3 |
+| **How to bring the cluster up or down** (agents-only / pipeline-only / full) | `data-pipeline/docs/guides/bringup_profiles.md` |
 | **Known Gaps (KG-C-\*)** — the canonical table | `cloud_sprints.md §4` |
 | **Future deployment plans** (written on demand) / **closed work** | `plans/` (when activated) / `cloud_archive.md` (+ `archive_plans/`) |
 
@@ -177,12 +182,15 @@ Open this file first to orient, then route to the precise file/section below.
 - `cloud_archive.md` — append-only record of Phase 9 (9A–9E) + Phase 9.5 (A/B/C) closed work.
 - `plans/` + `archive_plans/` — on-demand / retired cloud-deployment plan files (empty today).
 
-**Source / operational docs (Domain C consumes or supersedes these):**
-- `deployment_state.md` — prior runtime-state doc (2026-06-13); primary source for current state, superseded by `cloud_state.md`.
-- `guides/cluster_operations_guide.md` — operational runbook (start/stop, backlog-drop, restore drill, per-finding diagnostics; Phase 9.5-C).
-- `guides/CLOUD_CONNECTION_GUIDE.md` / `guides/LOCAL_CONNECTION.md` — operator connection ergonomics (port-forward recipes, env vars). CLOUD_CONNECTION_GUIDE has known secret-name/schedule drift (KG-C-6 / KG-PHASE-9.5-3).
-- `archive/cloud_deployment_implementation.md` — Phase 9 (C1–C5) implementation plan + gate records.
-- `phase95_cluster_robustness_implementation.md` — Phase 9.5 plan, fix packages, and stage closeouts.
+**Source / operational docs (Domain C consumes or supersedes these).** Paths below are
+full repo-relative paths — the `guides/` folder sits at `data-pipeline/docs/guides/`,
+**not** inside `C_cloud/`:
+- `data-pipeline/docs/old_docs/deployment_state.md` — prior runtime-state doc (2026-06-13); primary source for current state, superseded by `cloud_state.md`.
+- `data-pipeline/docs/guides/bringup_profiles.md` — **bring-up / teardown by profile** (AGENTS / PIPELINE / FULL): the procedure, its gates, and the traps. Start here for any scale-up.
+- `data-pipeline/docs/guides/cluster_operations_guide.md` — operational runbook (triage, backlog-drop, restore drill, per-finding diagnostics, dashboards, Cloud Logging; Phase 9.5-C).
+- `data-pipeline/docs/guides/CLOUD_CONNECTION_GUIDE.md` / `LOCAL_CONNECTION.md` — operator connection ergonomics (port-forward recipes, credentials, GCP Console navigation). Fully swept for accuracy 2026-07-26; KG-C-6 closed.
+- `data-pipeline/docs/old_docs/cloud_deployment_implementation.md` — Phase 9 (C1–C5) implementation plan + gate records.
+- `data-pipeline/docs/old_docs/phase95_cluster_robustness_implementation.md` — Phase 9.5 plan, fix packages, and stage closeouts.
 
 **Cross-domain:**
 - `A_pipeline/pipeline_overview.md` — the pipeline whose workloads this cluster runs; owner of producer-code KGs (OpenSky, GoogleTrends, Polymarket comments).

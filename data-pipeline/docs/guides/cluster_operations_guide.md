@@ -10,9 +10,16 @@ and `data-pipeline/docs/phase95_cluster_robustness_implementation.md`
 (Phase 9.5).
 
 For day-to-day port-forward commands see
-`data-pipeline/docs/guides/CLOUD_CONNECTION_GUIDE.md`. (Note: that
-guide has known stale entries for some secret names and the Cloud
-Scheduler schedule — KG-PHASE-9.5-3.)
+`data-pipeline/docs/guides/CLOUD_CONNECTION_GUIDE.md` (fully swept for accuracy
+2026-07-26 — KG-C-6 closed).
+
+**For bringing the cluster up or down — whole system, pipeline-only, or
+agents-only — use `data-pipeline/docs/guides/bringup_profiles.md`.** That file
+owns the start/stop procedure and its gates; this file owns triage, runbooks,
+dashboards and log queries once the cluster is running. Live state (images,
+replica counts, what is actually deployed) belongs to
+`data-pipeline/docs/C_cloud/cloud_state.md` and, above it, the cluster itself —
+which always wins over anything written here.
 
 ---
 
@@ -26,7 +33,10 @@ Scheduler schedule — KG-PHASE-9.5-3.)
   (KG-PHASE-9.5 carry: Polymarket now runs on main-pool with everything else).
 - Namespace: `anizai`.
 - Cloud Scheduler jobs `scale-up-main-pool` / `scale-down-main-pool` exist
-  but are currently **PAUSED**. Ron resumes them manually.
+  but are currently **PAUSED** (verified live 2026-07-26). Ron resumes them
+  manually. The one-shot auto-close job created for the Domain-A day-run fired
+  on 2026-07-23 and has since been deleted — only the two recurring jobs remain,
+  so nothing will scale the pool on its own.
 
 ### Per-pod purpose
 
@@ -35,15 +45,15 @@ Scheduler schedule — KG-PHASE-9.5-3.)
 | `postgres-0` | timescale/timescaledb-ha:pg16 | Vault tables (knowledge_vault, momentum_vault, social_vault, knowledge_vectors, social_vectors, mapping_dict, divergence_alerts). pgvector + TimescaleDB hypertable. | Gold cannot persist. Backed by 20Gi PVC + daily `pg_dump` to GCS. |
 | `kafka-0` | apache/kafka:3.7.0 | KRaft single-broker. 19 topics. **Data dir is `/var/lib/kafka/data/kafka-logs` subdir of the 10Gi PVC** — must explicitly set `KAFKA_LOG_DIRS` (Phase 9.5 F1; default would be `/tmp` and ephemeral). | All producers + Flink consumers stuck. |
 | `kafka-ui` | provectuslabs/kafka-ui:v0.7.2 | Topic + message inspection UI on port-forward. | Operator UX only. |
-| `flink-jobmanager` | anizai-flink:1.19.1-p95 | Submits + supervises Flink jobs. K8s HA via ConfigMap leader election (Phase 9 follow-up). | Job graph survives via HA ConfigMaps; running tasks stop. |
-| `flink-taskmanager` | anizai-flink:1.19.1-p95 | Runs Silver + Gold PyFlink tasks (4 slots). Mounts checkpoint PVC. | Jobs RESTARTING until TM recovers; messages back up in Kafka. |
-| `agent-worker` | anizai-agent:0.2.0-p95 | LangGraph forecast agent. Subscribed to Firestore `forecastQueries`. OpenAI calls via `utils/openai_client.py` factory (max_retries=5). | No forecasts processed; queries pile up in Firestore. |
+| `flink-jobmanager` | anizai-flink:1.19.1-7b5i | Submits + supervises Flink jobs. K8s HA via ConfigMap leader election (Phase 9 follow-up). | Job graph survives via HA ConfigMaps; running tasks stop. |
+| `flink-taskmanager` | anizai-flink:1.19.1-7b5i | Runs Silver + Gold PyFlink tasks (4 slots). Mounts checkpoint PVC. | Jobs RESTARTING until TM recovers; messages back up in Kafka. |
+| `agent-worker` | anizai-agent:0.5.0-sprint26 | LangGraph forecast agent. Attaches **two** Firestore listeners on startup: `forecastQueries` where `status=='pending'`, and (since Sprint 24) a **collection-group** listener on `messages` where `role=='user'` and `status=='sent'`. Each delivers its full current match set on first attach — see `bringup_profiles.md` §5 trap 2. OpenAI calls via `utils/openai_client.py` factory (max_retries=5). Held at `replicas: 0` declaratively since the 2026-07-23 Stage-1 deploy; brought up with `kubectl scale`, not by editing the manifest. | No forecasts processed; queries pile up in Firestore. |
 | `airflow-postgres-0` | postgres:16 | Airflow metadata DB (DAG run state, task instances). 5Gi PVC. Not backed up (KG-PHASE-9.5-* candidate). | Scheduler can't run DAGs; webserver UI shows blank state. |
-| `airflow-scheduler` | anizai-airflow:2.9.3-p95 | Fires the 7 producer DAGs (arxiv, fred, googletrends, hackernews, newsapi, opensky, openweather). Liveness probe on port **8974** (NOT 8793 — Phase 9.5 F2). | Scheduled producer runs miss their windows. |
-| `airflow-webserver` | anizai-airflow:2.9.3-p95 | Airflow UI on port-forward. | Operator UX only. |
+| `airflow-scheduler` | anizai-airflow:2.9.3-7b5i | Fires the 7 producer DAGs (arxiv, fred, googletrends, hackernews, newsapi, opensky, openweather). Liveness probe on port **8974** (NOT 8793 — Phase 9.5 F2). | Scheduled producer runs miss their windows. |
+| `airflow-webserver` | anizai-airflow:2.9.3-7b5i | Airflow UI on port-forward. | Operator UX only. |
 | `polymarket` | anizai-polymarket:0.2.0-p95 | Always-on WebSocket producer (CLOB ticks + REST market refresh). Comment-fetch loop disabled by feature flag (Phase 9.5 Item 3). | Polymarket data goes silent during downtime; price gaps not backfillable. |
 | `telegram` | anizai-telegram:0.1.0 | MTProto continuous channel listener. Session file from Secret Manager. | Telegram data goes silent during downtime. |
-| `trigger-consumer` | anizai-trigger-consumer:0.1.0 | Consumes `ingestion_triggers` topic from the agent for reactive ingestion. | Agent-triggered ingest doesn't fire. |
+| `trigger-consumer` | anizai-trigger-consumer:0.1.0 | Consumes `ingestion_triggers` topic from the agent for reactive ingestion. **The deployed `0.1.0` image predates Sprint 23 and its SecretProviderClass mounts no NewsAPI key**, so the newsapi reactive dispatch cannot run today even though the repo code supports it — a trigger emitted by the agent is dispatched and fails on the consumer side. Fixing this needs an image rebuild **and** a secret added to the SPC (it is not fixed by rebuilding `anizai-airflow`, a common misreading). | Agent-triggered ingest doesn't fire. |
 | `prometheus` | prom/prometheus:v2.51.2 | Scrapes 5 targets (Flink JM/TM, agent /metrics, kafka-exporter, postgres-exporter). 10Gi PVC, 7-day TSDB retention (Phase 9.5 F2). | No metrics scraped; dashboards blank. Alerts stop firing. |
 | `kafka-exporter` | danielqsj/kafka-exporter:v1.7.0 | Kafka topic + partition + broker → Prometheus metrics. | DLQ-depth + topic-staleness alerts go silent. |
 | `postgres-exporter` | prometheuscommunity/postgres-exporter:v0.15.0 | Postgres internals + Anizai-specific vault freshness queries. | Vault-freshness alerts + dashboard panels go silent. |
@@ -114,6 +124,21 @@ network calls + Flink checkpoint windows, not the pipeline itself.
 The cluster is normally scaled-to-0 between collection windows to control
 cost. Currently this is **manual** (Ron runs `gcloud container clusters
 resize`); Cloud Scheduler jobs exist but are PAUSED.
+
+> **Use `bringup_profiles.md` instead of this section for anything other than a
+> full-system start.** What follows is the FULL profile only — it assumes every
+> workload should come up. It has no profile selector and no pre-flight gates, so
+> following it for an agent-only or pipeline-only session will start workloads you
+> did not want and skip the checks that matter (stale Firestore documents claimed
+> on agent startup; Kafka backlog replayed through Gold enrichment the moment Flink
+> schedules). Kept here for the full-start command detail and the expected-pod
+> reference below.
+>
+> Two expectations below are also out of date: `agent-worker` no longer comes up
+> with everything else (it is held at `replicas: 0` and scaled up deliberately),
+> and `polymarket` / `telegram` have been sitting at 0 live while their committed
+> manifests still declare `replicas: 1` — read desired replicas from the cluster,
+> never from the repo.
 
 ### Start (scale 0 → 1)
 
@@ -392,6 +417,14 @@ node raises `AgentProcessingError`, the runner catches and writes
 ```powershell
 kubectl logs -n anizai -l app=agent-worker --tail=200 | grep -E "ERROR|Traceback"
 ```
+
+> **The agent's INFO logs are 1 %-sampled — do not read their absence as evidence.**
+> ERROR and WARNING are emitted at 100 %, so the grep above is reliable for
+> failures. Everything at INFO (including the per-forecast `llm_usage` cost lines)
+> passes at `LOG_INFO_SAMPLE_RATE`, default `0.01`. A forecast that ran perfectly
+> will usually leave no INFO trace at all. Cost and per-node latency come from
+> Prometheus (`agent_llm_cost_usd_total`, `agent_node_duration_seconds`), not from
+> logs. See `bringup_profiles.md` §5 trap 3 and KG-B-4.
 
 Common log patterns:
 - `RateLimitError` from `openai` → OpenAI RPD hit. See 5.5.
@@ -716,6 +749,17 @@ to ≥2/h.
 All container stdout/stderr flows to Cloud Logging via `fluentbit-gke`
 (kube-system DaemonSet, GKE-managed). Common useful filters:
 
+> **Two things that will make you think logging is broken when it is not.**
+> (1) **INFO is sampled at 1 %** for any process that ran `setup_logging()` — which
+> includes the agent and the Flink jobs. WARNING and above are at 100 %. A ~20-hour
+> agent session on 2026-07-25/26 produced **7 entries in total**. Absence of INFO is
+> not absence of activity; raise `LOG_INFO_SAMPLE_RATE` to `1.0` on the workload if
+> a session needs full INFO (read at module import — requires a fresh pod).
+> (2) **Structured logs land in `jsonPayload.message`, not `textPayload`.** The
+> JSON formatter is the default for anything using `setup_logging()`, so a
+> `textPayload=~"..."` filter silently returns nothing. Several filters below are
+> written against `textPayload` and will miss JSON-formatted lines — query both.
+
 ```
 # All ERROR-level logs from the anizai namespace, last 1h:
 resource.type="k8s_container"
@@ -752,15 +796,16 @@ Access via Cloud Console → Logging → Logs Explorer with the above filters.
 
 Some producers are intentionally silent under current configuration. The
 "Anizai Pipeline Health" Grafana dashboard has a panel listing these so an
-operator doesn't alarm. Cross-reference to `task_plan.md` Known Gaps.
+operator doesn't alarm. Known Gaps now live per domain in each
+`docs/<domain>/<x>_sprints.md` (KG-A-*, KG-B-*, KG-C-*), not in `task_plan.md`.
 
 | Component | State | What re-evaluates this |
 |---|---|---|
-| `newsapi_high_frequency` DAG | `is_paused=True` since Sprint C4 (deliberate). | When NewsAPI cost-benefit is re-justified or when news coverage is desired in production again. |
+| **All 7 producer DAGs** | `is_paused=True` since the Domain-A day-run closed (2026-07-23) — deliberate, so Domain-A producers stay off during Domain-B work. Supersedes the newsapi-only row this table used to carry. **Pausing the DAGs does not stop ingestion on its own:** `telegram` and `polymarket` are always-on Deployments, not DAGs. | Unpause per profile when a pipeline or full run is intended — see `bringup_profiles.md` §2. |
 | `opensky_high_frequency` | Cluster cannot reach `opensky-network.org` (KG-PHASE-C-6). Producer raises on 100% box-failure → Airflow shows `failed`. | When GCP firewall is configured to allow opensky-network.org (separate infra coordination work). |
 | `googletrends_daily` | pytrends 4.9.2 returns 404 on Google's unofficial Trends endpoint (KG-PHASE-9.5-5; no pytrends version fixes this). Producer raises on 100% geo-failure. | When (a) pytrends upstream ships a fix, OR (b) we switch to Google's official Trends API (cost + OAuth required), OR (c) we retire googletrends from the producer set. |
 | Polymarket comments | `POLYMARKET_COMMENTS_ENABLED=false` (KG-PHASE-9.5-4). Gamma `/comments` endpoint had a breaking change (now requires `parent_entity_id` + `entity_entity_type`; correct enum value unknown). | When upstream API contract is reverse-engineered OR a Polymarket developer support contact resolves it. |
-| `agent-worker:8000/metrics` | Sprint 18 stub — endpoint up + scrapes OK, exposes 0 metrics. Planned counters listed in the file as comments. | Sprint 26 when the instrumentation lands. |
+| ~~`agent-worker:8000/metrics`~~ | **No longer broken — resolved by Sprint 26 (26.4), verified live 2026-07-26.** Three real metric families are exposed and scraped: `agent_node_duration_seconds{node_name}` (Histogram), `agent_llm_cost_usd_total{model}` (Counter), and `agent_session_total{tier,status}` (Counter). Verified against `agent/metrics.py`. These are the **authoritative** source for agent cost and per-node latency, since INFO logs are 1 %-sampled (§5.6, §11). Retention is 7 days on `prometheus-pvc`, and the retention clock is evaluated at Prometheus startup — so numbers that survive a teardown can still be purged minutes into the next bring-up. Copy anything worth keeping into a doc during the session. | Row retained one cycle, then delete. |
 
 ---
 
@@ -782,16 +827,28 @@ markdown (in `grafana-configmap.yaml`) and Section 12 here together.
 
 ## Section 14 — What's NOT covered here
 
+> **Paths corrected 2026-07-26.** The docs were reorganised into per-domain folders
+> (`docs/A_pipeline`, `docs/B_hub`, `docs/C_cloud`, `docs/D_calibration`) with
+> `data-pipeline/project_master.md` as the entry point; the old flat files moved to
+> `docs/old_docs/`. Start at `project_master.md` §2 if a link below ever drifts again.
+
+- **Bring-up / teardown procedure**: `data-pipeline/docs/guides/bringup_profiles.md`
+  (AGENTS / PIPELINE / FULL profiles, gates, traps).
+- **Live cluster state**: `data-pipeline/docs/C_cloud/cloud_state.md` — images,
+  replica counts, scheduler state. This guide deliberately does not duplicate it.
 - **One-time deployment history**: see
-  `data-pipeline/docs/archive/cloud_deployment_implementation.md` (Phase 9)
-  and `data-pipeline/docs/phase95_cluster_robustness_implementation.md`
+  `data-pipeline/docs/old_docs/cloud_deployment_implementation.md` (Phase 9)
+  and `data-pipeline/docs/old_docs/phase95_cluster_robustness_implementation.md`
   (Phase 9.5).
-- **Agent internals**: see `data-pipeline/docs/agentic_hub_spec.md` (the
-  full §8 architecture spec). For specific node behaviour, see
-  `data-pipeline/docs/agentic_hub_implementation.md`.
-- **Data contracts**: see `data-pipeline/docs/data_contracts_and_sources.md`.
+- **Agent internals**: `data-pipeline/docs/B_hub/hub_agents.md` is the current
+  description of how the hub actually works (graph, nodes, the Firestore
+  contract). The historical §8 architecture spec is
+  `data-pipeline/docs/old_docs/agentic_hub_spec.md`, and Sprints 18–21 are in
+  `data-pipeline/docs/old_docs/agentic_hub_implementation.md`.
+- **Data contracts**: see `data-pipeline/docs/old_docs/data_contracts_and_sources.md`.
 - **Sprint history**: `data-pipeline/task_plan_archive.md` has the full
-  closed-sprint records (Sprints 1-21 + Phase 9 C1-C5).
+  closed-sprint records (Sprints 1-21 + Phase 9 C1-C5). Current per-domain sprint
+  status and the Known Gaps tables live in each domain's `<x>_sprints.md`.
 
 ---
 

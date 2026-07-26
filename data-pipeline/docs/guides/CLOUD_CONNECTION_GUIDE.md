@@ -1,6 +1,24 @@
 # Anizai Data Pipeline — Cloud Connection Guide
 ## GKE Cluster: anizai-cluster | Project: anizai-pipeline
 
+> **Scope — read this first.** This guide is about **connecting** to a cluster that is
+> already running: port-forwards, credentials, UIs, and where things live in the GCP
+> Console. It is **not** the bring-up procedure. To start or stop the cluster — whole
+> system, pipeline-only, or agents-only — use
+> `data-pipeline/docs/guides/bringup_profiles.md`, which carries the profile table and
+> the pre-flight gates. The bare `clusters resize` commands below will start every
+> workload whose desired replicas are ≥ 1, with no gate in front of them.
+>
+> For triage once you are connected, see `guides/cluster_operations_guide.md`.
+> For what is actually deployed right now, see `docs/C_cloud/cloud_state.md` — the
+> live cluster always wins over any value written into a guide.
+>
+> **Full accuracy sweep 2026-07-26** (closes KG-C-6). The two defects KG-C-6 named —
+> lowercase secret names and an outdated Scheduler schedule — were already gone; the
+> sweep instead corrected the node-pool count, the Flink re-submit instruction, the
+> Artifact Registry paths, the agent metric names, topic and job names, and the
+> Firestore collection layout.
+
 ---
 
 ## QUICK-START CHEAT SHEET
@@ -205,8 +223,9 @@ Open http://localhost:8080 in a browser. No credentials required.
 
 ### What You Can Do Here
 
-- **Browse topics** — Left sidebar → **Topics**. You should see all 15 topics:
+- **Browse topics** — Left sidebar → **Topics**. You should see all 19 topics:
   `ingest.bronze.*`, `process.silver.*`, `serve.gold.*`, `ingestion_triggers`, `dead-letter-queue`.
+  (The `kafka-init` CronJob re-asserts all 19 hourly with `--if-not-exists`.)
 - **Inspect messages** — Click a topic → **Messages** tab → browse by offset or time.
 - **Check message counts** — The topic list shows total message count and partition lag.
 - **Monitor the dead-letter queue** — Click `dead-letter-queue` → **Messages** to see any schema-validation failures.
@@ -248,8 +267,9 @@ Open http://localhost:8081 in a browser. No credentials required.
 ### What You Can Do Here
 
 - **Check running jobs** — Left sidebar → **Jobs** → **Running Jobs**. You should see:
-  - `anizai-silver-polymarket` (Bronze → Silver transformation)
-  - `anizai-gold-polymarket` (Silver → Gold enrichment + persistence)
+  - `anizai-silver-polymarket` (Bronze → Silver — the name is historical; this job
+    handles **all** sources, not just Polymarket)
+  - `anizai-gold-all-sources` (Silver → Gold enrichment + persistence)
 - **Inspect job details** — Click a job name → **Subtasks** tab → watch `numRecordsIn` incrementing.
 - **View checkpoint history** — Click a job → **Checkpoints** tab → confirm checkpoints complete in < 10 seconds.
 - **Check TaskManager resources** — Left sidebar → **Task Managers** → confirm 1 TaskManager with 4 task slots.
@@ -460,20 +480,25 @@ kubectl port-forward -n anizai svc/agent-worker 8000:8000
 
 ```powershell
 curl http://localhost:8000/health
-# Expected: {"status": "ok", "worker_id": "worker-1", "agent_version": "0.4.0-sprint21-..."}
+# Expected: {"status": "ok", "worker_id": "worker-1", "agent_version": "0.5.0-sprint26+<git-sha>"}
 ```
 
 ### Metrics (Prometheus exposition format)
 
 ```powershell
 curl http://localhost:8000/metrics
-# Sample output keys:
-#   agent_node_duration_ms{node_name=...}
-#   agent_session_total{outcome=done|failed|clarification_needed}
-#   agent_llm_cost_usd_total{model=...}
-#   agent_queue_depth
-#   agent_active_sessions
+# Three real metric families since Sprint 26 (verified against agent/metrics.py):
+#   agent_node_duration_seconds{node_name=...}   Histogram — per-node wall clock
+#   agent_llm_cost_usd_total{model=...}          Counter   — cumulative USD by model
+#   agent_session_total{tier=...,status=...}     Counter   — terminal outcomes
 ```
+
+**These are the authoritative source for agent cost and latency** — the agent's INFO
+logs (including `llm_usage`) are 1 %-sampled in cloud, so do not expect to reconstruct
+cost from `kubectl logs`. See `cluster_operations_guide.md` §5.6 / §11 and KG-B-4.
+
+`agent_queue_depth` and `agent_active_sessions` appear in older drafts of this guide
+and do **not** exist — the queue-depth gauge is Sprint 27 task 27.13, unbuilt.
 
 These metrics are also scraped automatically by the Prometheus pod (Section 1.5).
 
@@ -484,8 +509,17 @@ These metrics are also scraped automatically by the Prometheus pod (Section 1.5)
 kubectl logs -f -n anizai deploy/agent-worker --tail=100
 ```
 
-Expected log sequence per session:
-`claim_session → query_understand → build_embedding → vault_query → rate_evidence → synthesize → write_to_firestore`
+Expected log sequence per main-graph session:
+`claim_session → query_understand → build_embedding → vault_query → sufficiency_check
+→ rate_evidence → synthesize → generate_suggested_actions → write_to_firestore`
+
+Branches: an ambiguous question routes to clarification and the session pauses at
+`awaiting_clarification`; an insufficient vault routes through
+`trigger_reactive_ingestion` (fire-and-forget) and rejoins at `rate_evidence`.
+Follow-up messages run a **separate, much shorter** subgraph and emit no agentEvents.
+
+**Remember the 1 % INFO sampling** — a healthy session will usually show only a
+fraction of this sequence in the logs, or none of it. Absence is not failure.
 
 ### Pod Status
 
@@ -522,7 +556,9 @@ VITE_FIREBASE_AUTH_DOMAIN=anizai-ai.firebaseapp.com
    kubectl logs -f -n anizai deploy/agent-worker
    ```
 5. Expect the log sequence shown in Section 1.7 above.
-6. Frontend renders the four BI cards when Firestore `sessionResults` is written.
+6. Frontend renders the BI cards when Firestore `sessionResults` is written (five since
+   Sprint 22: prediction series, sentiment time series, evidence, market probability on a
+   Tier-1 match, and suggested actions from Sprint 25).
 
 ---
 
@@ -550,15 +586,21 @@ Lifecycle: backups older than 30 days are auto-deleted from the bucket.
 
 ## Section 1.10 — Scaling the Cluster (Start / Stop Data Collection)
 
-The cluster has two node pools:
+> **Prefer `guides/bringup_profiles.md`.** It wraps the commands below in a profile
+> selector and two gates. Use this section only for the raw command syntax.
+
+The cluster has **one** node pool:
 
 | Pool | Purpose | Cost when running |
 |------|---------|------------------|
-| `main-pool` | Airflow, Kafka, Flink, Grafana, Prometheus, PostgreSQL | ~$0.15/hr |
-| `polymarket-pool` | Polymarket WebSocket producer (always-on) | ~$0.05/hr |
+| `main-pool` | Everything — Airflow, Kafka, Flink, PostgreSQL, the producers, the agent, and monitoring | ~$0.15/hr |
 
-Scale `main-pool` down to 0 to pause data collection and stop billing for heavy services.
-`polymarket-pool` continues running independently.
+`polymarket-pool` was **deleted in Phase 9.5 Stage A**; Polymarket now runs on
+`main-pool` with everything else. There is no second pool, and nothing keeps running
+when `main-pool` is at 0.
+
+Scaling `main-pool` to 0 stops all billing for compute. PVCs (Postgres, Kafka, Flink
+checkpoints, Prometheus, Airflow metadata) persist and are billed separately.
 
 ### Start Data Collection (main-pool on)
 
@@ -576,18 +618,20 @@ After scaling up, wait 3–5 minutes for all pods to reach `Running` state:
 kubectl get pods -n anizai --watch
 ```
 
-Flink jobs must be re-submitted after a scale-up (they do not auto-restart):
+**Flink jobs recover on their own — do NOT re-submit them.** K8s HA (ConfigMap leader
+election) preserves the compiled job graph across pod restarts, so the Silver and Gold
+jobs come back by themselves. Submitting again produces duplicate jobs consuming the
+same topics. Verify recovery instead:
 
 ```powershell
-# Find the JobManager pod name:
-$JM_POD = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'
-
-# Submit Silver and Gold jobs:
-kubectl exec -n anizai $JM_POD -- `
-  flink run -py /opt/flink/usrlib/processing/silver_job.py
-kubectl exec -n anizai $JM_POD -- `
-  flink run -py /opt/flink/usrlib/processing/gold_job.py
+$JM = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'
+kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview
+# Expected: anizai-silver-polymarket + anizai-gold-all-sources, both state=RUNNING
 ```
+
+The one case that **does** require cancel + re-submit is a **new `anizai-flink` image**:
+HA restores the previously compiled code, not the new image's code. Full procedure in
+`cluster_operations_guide.md` §6 (KG-C-4).
 
 ### Stop Data Collection (main-pool off)
 
@@ -622,7 +666,17 @@ kubectl get pods -n anizai
 # kafka-ui-xxx                          1/1     Running
 # postgres-0                            1/1     Running
 # prometheus-xxx                        1/1     Running
-# polymarket-producer-xxx               1/1     Running   <- polymarket-pool, always on
+# polymarket-xxx                        1/1     Running
+# telegram-xxx                          1/1     Running
+# trigger-consumer-xxx                  1/1     Running
+#
+# Expectations that depend on desired replicas, NOT on the pool being up:
+#   agent-worker      — declared replicas: 0. No pod unless deliberately scaled up.
+#   flink-jm/tm, polymarket, telegram
+#                     — currently held at 0 live while their manifests say 1 (KG-C-10).
+#                       No pod will appear for them until someone scales them.
+# Check desired replicas against the cluster, never against the repo:
+#   kubectl get deploy -n anizai -o custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas
 
 # Describe a pod for detailed status / recent events:
 kubectl describe pod -n anizai <pod-name>
@@ -702,8 +756,9 @@ If a disk is accidentally deleted, vault data is lost. Do not delete disks named
 **Path:** Hamburger menu → **Artifact Registry** → **Repositories**
 
 What you can find here:
-- The `anizai` repository holds all custom Docker images built by CI.
-- Key images: `anizai-flink`, `airflow-anizai`, `polymarket-producer`, `kafka-init`.
+- The `anizai-images` repository holds all custom Docker images.
+- Key images: `anizai-flink`, `anizai-airflow`, `anizai-agent`, `anizai-polymarket`,
+  `anizai-telegram`, `anizai-trigger-consumer`.
 - Click an image name to see all tags and their push timestamps.
 - Digest hashes here match the image digests in `kubectl describe pod`.
 
@@ -711,8 +766,12 @@ What you can find here:
 
 ```powershell
 gcloud auth configure-docker us-central1-docker.pkg.dev
-docker pull us-central1-docker.pkg.dev/anizai-pipeline/anizai/<IMAGE>:<TAG>
+docker pull us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/<IMAGE>:<TAG>
 ```
+
+**Tags are mutable and pods use `imagePullPolicy: Always` (KG-C-3)** — re-pushing a tag
+silently changes what runs. When identity matters, compare the `@sha256:` digest from
+`kubectl describe pod` against `cloud_state.md` §3, not the tag.
 
 ---
 
@@ -742,7 +801,7 @@ gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipe
 | `AIRFLOW_FERNET_KEY` | Airflow connection encryption |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana web login (username is plain env var `admin`) |
 | `OPENAI_API_KEY` | Gold enrichment + agent synthesis (GPT-4o / GPT-4o-mini) |
-| `NEWSAI_API_KEY` | NewsAPI ingestion (TheNewsAPI provider since Sprint 21.5) |
+| `NEWSAI_API_KEY` | NewsAPI ingestion (TheNewsAPI provider since Sprint 21.5). **The name is misleading — it holds a thenewsapi.com key, not a newsapi.ai one. Rename to `THE_NEWS_API_KEY` is pending (KG-C-5); do not rotate a newsapi.ai key into it.** |
 | `FRED_API_KEY` | FRED economic data |
 | `OPENWEATHER_API_KEY` | OpenWeather source |
 | `OPENSKY_CLIENT_ID` | OpenSky OAuth2 |
@@ -794,12 +853,23 @@ task logs are only visible via the Airflow UI (Section 1.1) or via `kubectl logs
 **Path:** Hamburger menu → **Firestore**
 
 What you can find here:
-- `forecastQueries` collection — active and completed forecast sessions from the Agentic Hub frontend.
-- `agentEvents` subcollection — streaming events written by the agent worker for each session.
+- `forecastQueries` — the worker's **queue** collection. The agent's main listener watches
+  `status=='pending'`; documents also rest at `claimed`, `awaiting_clarification`, `done`,
+  and `failed`. Nothing scans `claimed`, so orphans there sit forever (KG-B-21).
+- `sessions/{sessionId}` — the session document, with subcollections:
+  - `agentEvents` — reasoning events streamed by the main graph (follow-ups emit none)
+  - `messages` — follow-up conversation turns; the agent's **second** listener is a
+    collection-group query over these (`role=='user'` and `status=='sent'`)
+  - plus the result subcollections written at the end of a forecast
+- `sessionResults` — written top-level (see KG-B-2 for the spec/implementation drift).
 - Click a document ID to inspect all fields and their current values.
 
-**Note:** This data is written by the Agentic Hub (`data-pipeline/` is not involved).
-If you are debugging a pipeline issue, you do not need to access Firestore.
+**Note:** This data is written by the Agentic Hub. If you are debugging a pipeline
+(Domain A) issue, you do not need to access Firestore.
+
+**Before scaling the agent up**, check `forecastQueries` for `pending` documents and the
+`messages` collection group for unanswered `sent` documents — both listeners claim their
+full match set the instant they attach. See `bringup_profiles.md` §3 Step 4.
 
 ---
 

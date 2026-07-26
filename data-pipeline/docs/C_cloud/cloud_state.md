@@ -1,7 +1,7 @@
 # cloud_state.md
 > Domain: C — Cloud
 > Type: State
-> Last updated: 2026-07-23 (agent, pipeline image tags, and §6 Scheduler/Airflow refreshed to live; monitoring/storage + non-flink/airflow producer rows as of 2026-06-15, unverified against live)
+> Last updated: 2026-07-26 (§1 + §3 replica-hold rows refreshed to live after the agent-only cloud run; agent, pipeline image tags, and §6 Scheduler/Airflow verified 2026-07-23–26; monitoring/storage rows as of 2026-06-15, unverified against live)
 > TL;DR: Current GKE runtime state — what is deployed, what runs only locally, the known
 > cluster gaps (KG-C-*), and the Scheduler/Airflow state. Open this to answer "what is
 > actually running in cloud right now, and what isn't?"
@@ -26,11 +26,23 @@ topology and the deployed-workload macro view; read this file for the precise
 Two workloads have rolled since the 9.5 closeout: the **pipeline** (flink + airflow) to
 `-7b5i` in **Phase 7B.5-I T7** (the day-run image), and the **agent** to
 **`anizai-agent:0.5.0-sprint26` at `replicas:0`** (hard-off) on **2026-07-23** (B-deploy
-Stage 1 — the cumulative hub Sprint 22→26 image). The agent is deployed but **idle**: it
-cannot pick up a forecast or call OpenAI until Stage 2 scales it to 1. Sprint 27 remains
+Stage 1 — the cumulative hub Sprint 22–26 image). Sprint 27 remains
 open hub work (not built). Primary source for the refreshed rows: the live cluster + the
 B-deploy Stage-1 evidence; the monitoring/storage rows below are still as of
 `deployment_state.md` (2026-06-13) and were not re-verified this session.
+
+**The second fact that matters (2026-07-26):** the cluster is at **0 nodes**, and four
+workloads are additionally held at **`replicas: 0` live** — `flink-jobmanager`,
+`flink-taskmanager`, `telegram`, `polymarket`. They were found already at 0 before the
+2026-07-26 agent-only run and were deliberately **not** restored at its teardown. Their
+committed manifests still declare `replicas: 1`, so `kubectl apply` on any of them would
+silently restart Flink and continuous ingestion — **KG-C-10**. Consequence for reading
+this file: §3 below lists what is *deployed*, not what is *scheduled*. Nothing runs at
+all until the pool is resized; and when it is, those four stay dark unless someone scales
+them. Bring-up is proceduralised per profile in `guides/bringup_profiles.md`.
+
+The agent itself passed its first real cloud health proof on 2026-07-25/26 and served 7
+real forecasts before being returned to 0 — see `B_hub/agent_cloud_run_20260726.md`.
 
 ---
 
@@ -64,14 +76,14 @@ for the full image/version table; this lists kind + the most recent change per w
 | kafka | StatefulSet | KRaft; `KAFKA_LOG_DIRS=/var/lib/kafka/data/kafka-logs` (durable PVC subdir, 9.5-A); 19 topics | 9.5-A |
 | postgres | StatefulSet | `timescale/timescaledb-ha:pg16`; `publishNotReadyAddresses: true` (9.5-B) | 9.5-B |
 | airflow-postgres | StatefulSet | `postgres:16`, metadata DB | Phase 9 (9D) |
-| flink-jobmanager / -taskmanager | Deployment | `anizai-flink:1.19.1-7b5i` (7B.5-I T7 deploy); K8s HA enabled (Phase 9 follow-up, 2026-05-19) | 7B.5-I T7 (day-run) |
+| flink-jobmanager / -taskmanager | Deployment | `anizai-flink:1.19.1-7b5i` (7B.5-I T7 deploy); K8s HA enabled (Phase 9 follow-up, 2026-05-19). **Held at `replicas: 0` live (manifest says 1 — KG-C-10)** | 7B.5-I T7 (day-run); hold verified 2026-07-26 |
 | airflow-scheduler | Deployment | `anizai-airflow:2.9.3-7b5i` (7B.5-I T7 deploy); liveness probe :8974 (9.5-A); hosts 7 producer DAGs (**now manually paused — see §6**) | 7B.5-I T7 (day-run) |
 | airflow-webserver | Deployment | `anizai-airflow:2.9.3-7b5i` (7B.5-I T7 deploy) | 7B.5-I T7 (day-run) |
 | kafka-ui | Deployment | `provectuslabs/kafka-ui:v0.7.2` | Phase 9 (9B) |
-| polymarket | Deployment | `anizai-polymarket:0.2.0-p95`; on main-pool; comments feature-flagged off | 9.5-B |
-| telegram | Deployment | `anizai-telegram:0.1.0`; session file via CSI | Phase 9 (9D) |
+| polymarket | Deployment | `anizai-polymarket:0.2.0-p95`; on main-pool; comments feature-flagged off. **Held at `replicas: 0` live (manifest says 1 — KG-C-10)** | 9.5-B; hold verified 2026-07-26 |
+| telegram | Deployment | `anizai-telegram:0.1.0`; session file via CSI. Continuous MTProto listener — **not** an Airflow DAG, so pausing the DAGs does not stop it. **Held at `replicas: 0` live (manifest says 1 — KG-C-10)** | Phase 9 (9D); hold verified 2026-07-26 |
 | trigger-consumer | Deployment | `anizai-trigger-consumer:0.1.0`; on `ingestion_triggers` | Phase 9 (9D) |
-| agent-worker | Deployment | `anizai-agent:0.5.0-sprint26` (digest `sha256:7fce4e8b…c316ef4`); `AGENT_VERSION 0.5.0-sprint26+55e8093`; **`replicas:0` — Stage-1 hard-off**; Sprint 22→26 in this image; cross-project Firestore | 2026-07-23 (B-deploy Stage-1 T1.2) |
+| agent-worker | Deployment | `anizai-agent:0.5.0-sprint26` (digest `sha256:7fce4e8b…c316ef4`); `AGENT_VERSION 0.5.0-sprint26+55e8093`; **`replicas:0` — declared 0 in the manifest, deliberate; brought up with `kubectl scale`**; Sprint 22→26 in this image; cross-project Firestore. Health-verified in cloud 2026-07-26 (7 real forecasts, then returned to 0) | 2026-07-23 (B-deploy Stage-1 T1.2); run 2026-07-26 |
 | prometheus | Deployment | `prom/prometheus:v2.51.2`; 2Gi + 7d retention (9.5-A); 5 scrape targets (9.5-C added kafka/postgres exporters) | 9.5-C |
 | grafana | Deployment | `grafana/grafana:10.4.2`; 2 dashboards (9.5-C added `Anizai Pipeline Health`) | 9.5-C |
 | alertmanager | Deployment | `prom/alertmanager:v0.27.0`; Gmail SMTP → `ron.mintz21@gmail.com` (9.5-C) | 9.5-C |
