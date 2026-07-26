@@ -808,9 +808,17 @@ function App() {
       ));
     });
 
-    return [...persistedMessages, ...unreconciledPending].sort(
+    // Persisted messages all carry Firestore's clock, so sorting them against
+    // each other is sound. Optimistic pending messages carry the *browser's*
+    // clock (handleSendMessage stamps `new Date()`), which is a different clock
+    // again — sorting the two together let a browser running even slightly
+    // behind place a just-typed message above older history. They are the
+    // newest messages by construction, so append them instead of sorting them in.
+    const sortedPersisted = [...persistedMessages].sort(
       (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
     );
+
+    return [...sortedPersisted, ...unreconciledPending];
   }, [activeSessionDetail, pendingMessages, sessionMessages]);
   // The trailing user message still waiting on the hub, if any. Extracted into
   // lib/followUpPending.ts so the scan is unit-tested; the timestamp is exposed

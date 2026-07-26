@@ -4,7 +4,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // vi.hoisted runs before imports and is the supported way to share mocks
 // between the factory and the test body.
 const mocks = vi.hoisted(() => {
-    const mockMessagesDocRef = { id: 'message-doc-123' };
+    // Firestore resolves FieldValue.serverTimestamp() to the commit time, so the
+    // sentinel that goes into the write is NOT the value that comes back out —
+    // the repository re-reads the doc. `get()` models that resolved read.
+    const serverTimestampSentinel = { __sentinel: 'serverTimestamp' };
+    const resolvedCreatedAt = {
+        toDate: () => new Date('2026-04-27T12:34:56.000Z'),
+    };
+    const messageGetMock = vi.fn(async () => ({
+        get: (field: string) => (field === 'createdAt' ? resolvedCreatedAt : undefined),
+    }));
+    const mockMessagesDocRef = { id: 'message-doc-123', get: messageGetMock };
     const mockMessagesCollection = {
         doc: vi.fn(() => mockMessagesDocRef),
     };
@@ -67,6 +77,9 @@ const mocks = vi.hoisted(() => {
         batchMock,
         collectionRefMock,
         fixedTimestamp,
+        serverTimestampSentinel,
+        resolvedCreatedAt,
+        messageGetMock,
     };
 });
 
@@ -74,6 +87,7 @@ vi.mock('../src/services/firebase.service.js', () => ({
     batch: mocks.batchMock,
     collectionRef: mocks.collectionRefMock,
     now: vi.fn(() => mocks.fixedTimestamp),
+    serverTimestamp: vi.fn(() => mocks.serverTimestampSentinel),
     toISOString: vi.fn(
         (ts: { toDate?: () => Date } | null | undefined) =>
             ts?.toDate?.()?.toISOString() ?? null
@@ -93,6 +107,7 @@ describe('sessionRepository.createSession', () => {
         mocks.mockSessionsCollection.doc.mockClear();
         mocks.mockForecastQueriesCollection.doc.mockClear();
         mocks.mockMessagesCollection.doc.mockClear();
+        mocks.messageGetMock.mockClear();
         mocks.collectionRefMock.mockClear();
         mocks.mockSessionRef.collection.mockClear();
     });
@@ -234,9 +249,50 @@ describe('sessionRepository.createSession', () => {
         });
 
         expect(mocks.updateMock).toHaveBeenCalledWith(mocks.mockSessionRef, expect.objectContaining({
-            lastActivityAt: mocks.fixedTimestamp,
-            updatedAt: mocks.fixedTimestamp,
+            lastActivityAt: mocks.serverTimestampSentinel,
+            updatedAt: mocks.serverTimestampSentinel,
         }));
         expect(mocks.commitMock).toHaveBeenCalledTimes(1);
+    });
+
+    // The messages subcollection has two writers ordered by the same field:
+    // this BFF and the data-pipeline agent (which uses SERVER_TIMESTAMP). If the
+    // BFF stamps its own host clock, a reply can sort above the question it
+    // answers whenever the two clocks disagree.
+    it('stamps message createdAt with the Firestore server clock, not the host clock', async () => {
+        await sessionRepository.addMessage('session-abc-123', 'user-99', {
+            role: 'user',
+            content: 'Why is the confidence moderate?',
+        });
+
+        const writtenMessage = mocks.setMock.mock.calls[0][1];
+        expect(writtenMessage.createdAt).toBe(mocks.serverTimestampSentinel);
+        expect(writtenMessage.createdAt).not.toBe(mocks.fixedTimestamp);
+    });
+
+    it('returns the resolved commit timestamp, never the unresolved sentinel', async () => {
+        // The client sorts its optimistic message by this value, so it has to be
+        // a real ISO string read back after the commit.
+        const created = await sessionRepository.addMessage('session-abc-123', 'user-99', {
+            role: 'user',
+            content: 'Why is the confidence moderate?',
+        });
+
+        expect(mocks.messageGetMock).toHaveBeenCalledTimes(1);
+        expect(created.createdAt).toBe('2026-04-27T12:34:56.000Z');
+        expect(created.id).toBe('message-doc-123');
+        expect(created.status).toBe('sent');
+    });
+
+    it('reads the committed timestamp only after the batch commits', async () => {
+        await sessionRepository.addMessage('session-abc-123', 'user-99', {
+            role: 'user',
+            content: 'Why is the confidence moderate?',
+        });
+
+        // Reading before the commit would resolve the sentinel to null.
+        const commitOrder = mocks.commitMock.mock.invocationCallOrder[0];
+        const readOrder = mocks.messageGetMock.mock.invocationCallOrder[0];
+        expect(commitOrder).toBeLessThan(readOrder);
     });
 });
