@@ -9,6 +9,7 @@ import { CreateForecastView } from '../components/CreateForecastView';
 import { TrendingContext } from '../components/CreateForecastContext';
 import { SettingsModal, type SettingsSection } from '../components/SettingsModal';
 import { shouldShowFollowUpComposer } from '../lib/followUpComposer';
+import { resolveFollowUpPendingState } from '../lib/followUpPending';
 import type { UserProfile } from '../services/user.service';
 import type {
     ChatMessage,
@@ -54,6 +55,9 @@ interface DashboardPageProps {
     isMessagesLoading?: boolean;
     isSendingMessage?: boolean;
     isAwaitingAssistantResponse?: boolean;
+    /** Epoch ms of the follow-up currently awaiting an answer, or null. Drives
+     *  the switch from an animated indicator to a stalled notice. */
+    awaitingSinceMs?: number | null;
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
     onCreateSession: (question: string, idempotencyKey: string) => Promise<void>;
@@ -114,6 +118,7 @@ export function DashboardPage({
     isMessagesLoading = false,
     isSendingMessage = false,
     isAwaitingAssistantResponse = false,
+    awaitingSinceMs = null,
     trendingForecasts,
     onSessionSelect,
     onCreateSession,
@@ -168,6 +173,25 @@ export function DashboardPage({
     // signed-in session. This gates the composer only; the message history
     // stays visible always.
     const isComposerVisible = shouldShowFollowUpComposer(activeSessionState?.status, hasForecastResult);
+
+    // Advance a coarse clock only while a follow-up is actually pending, so the
+    // indicator can age out of 'thinking' into 'stalled' without a timer running
+    // for the whole session. Cleared as soon as the pending message resolves —
+    // by an answer, by a failure, or by the optimistic message being rolled back.
+    const [nowMs, setNowMs] = useState(() => Date.now());
+
+    useEffect(() => {
+        if (awaitingSinceMs === null) {
+            return;
+        }
+
+        setNowMs(Date.now());
+        const interval = window.setInterval(() => setNowMs(Date.now()), 5000);
+
+        return () => window.clearInterval(interval);
+    }, [awaitingSinceMs]);
+
+    const followUpPendingState = resolveFollowUpPendingState(awaitingSinceMs, nowMs);
 
     useEffect(() => {
         setSelectedClarificationId('none');
@@ -560,7 +584,7 @@ export function DashboardPage({
                 isLoading={isMessagesLoading}
                 isSendingMessage={isSendingMessage}
                 isSendLocked={isSendLocked}
-                isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                followUpPendingState={followUpPendingState}
                 isComposerVisible={isComposerVisible}
                 onSendMessage={handleSendMessage}
                 suggestedActions={suggestedActions}
@@ -661,7 +685,7 @@ export function DashboardPage({
                             isLoading={isMessagesLoading}
                             isSendingMessage={isSendingMessage}
                             isSendLocked={isSendLocked}
-                            isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                            followUpPendingState={followUpPendingState}
                             isComposerVisible={isComposerVisible}
                             suggestedActions={suggestedActions}
                             currentQuestion={prediction?.question}
@@ -709,7 +733,7 @@ export function DashboardPage({
                         isLoading={isMessagesLoading}
                         isSendingMessage={isSendingMessage}
                         isSendLocked={isSendLocked}
-                        isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                        followUpPendingState={followUpPendingState}
                         isComposerVisible={isComposerVisible}
                         suggestedActions={suggestedActions}
                         currentQuestion={prediction?.question}

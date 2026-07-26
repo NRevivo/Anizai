@@ -15,6 +15,7 @@ import { CookiesPage } from './pages/CookiesPage';
 import { StateMessage } from './components/ui/StateMessage';
 import { ApiError } from './lib/api';
 import { selectCurrentRunEvents } from './lib/agentEvents';
+import { findPendingFollowUp } from './lib/followUpPending';
 import {
   describeAuthError,
   signInWithEmail,
@@ -811,19 +812,13 @@ function App() {
       (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
     );
   }, [activeSessionDetail, pendingMessages, sessionMessages]);
-  const isAwaitingAssistantResponse = useMemo(() => {
-    // The hub flips the triggering user message sent -> answered in the same
-    // batch as the assistant reply, so a trailing user message still in
-    // 'sent' (or an optimistic 'pending') means the hub is still working.
-    // 'answered' / 'failed' means it's done.
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      if (message.role === 'user') {
-        return message.status === 'pending' || message.status === 'sent';
-      }
-    }
-    return false;
-  }, [messages]);
+  // The trailing user message still waiting on the hub, if any. Extracted into
+  // lib/followUpPending.ts so the scan is unit-tested; the timestamp is exposed
+  // alongside the boolean because the chat panel needs the message's age to
+  // decide between an animated indicator and a stalled notice.
+  const pendingFollowUp = useMemo(() => findPendingFollowUp(messages), [messages]);
+  const isAwaitingAssistantResponse = pendingFollowUp !== null;
+  const awaitingSinceMs = pendingFollowUp?.timestamp.getTime() ?? null;
   const trendingItems = useMemo(() => toTrendingView(trending), [trending]);
 
   if (isHydratingAuth) {
@@ -952,6 +947,7 @@ function App() {
         isMessagesLoading={isMessagesLoading}
         isSendingMessage={isSendingMessage}
         isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+        awaitingSinceMs={awaitingSinceMs}
         trendingForecasts={trendingItems}
         userDisplayName={userProfile?.displayName}
         userPlan={userProfile?.plan}

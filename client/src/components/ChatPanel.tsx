@@ -4,7 +4,49 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { StateMessage } from './ui/StateMessage';
 import { formatRelativeTime } from '../lib/utils';
+import type { FollowUpPendingState } from '../lib/followUpPending';
 import ReactMarkdown from 'react-markdown';
+
+// Staggered delays for the three dots. Kept out of the class list because
+// Tailwind has no arbitrary animation-delay utility configured here.
+const DOT_DELAYS_MS = [0, 160, 320];
+
+/**
+ * Animated "the assistant is composing a reply" indicator, styled as an
+ * assistant chat bubble so it sits in the thread where the answer will land.
+ *
+ * Motion: each dot runs the `thinking-dot` keyframes (tailwind.config.js) with a
+ * staggered delay. Both the opacity and the offset live in the keyframes, so the
+ * un-animated base state is three solid, fully visible dots — that is the
+ * fallback the global `prefers-reduced-motion` rule in index.css produces, and
+ * `motion-reduce:animate-none` states the same intent locally.
+ *
+ * Accessibility: the dots are decorative and hidden from assistive tech; the
+ * `role="status"` container carries a screen-reader-only sentence instead, so
+ * the pending state is announced politely rather than as a row of bullets.
+ */
+function ThinkingIndicator() {
+    return (
+        <div className="flex justify-start">
+            <div
+                role="status"
+                aria-live="polite"
+                className="min-w-0 rounded-lg border border-gray-100 bg-white px-3.5 py-3 shadow-sm"
+            >
+                <span className="sr-only">Thinking about your follow-up. The answer will appear here.</span>
+                <span aria-hidden="true" className="flex items-center gap-1.5">
+                    {DOT_DELAYS_MS.map((delay) => (
+                        <span
+                            key={delay}
+                            style={{ animationDelay: `${delay}ms` }}
+                            className="h-1.5 w-1.5 rounded-full bg-anizai-teal-500 animate-thinking-dot motion-reduce:animate-none"
+                        />
+                    ))}
+                </span>
+            </div>
+        </div>
+    );
+}
 
 interface ChatPanelProps {
     messages: ChatMessage[];
@@ -20,7 +62,10 @@ interface ChatPanelProps {
     // to ask about before then, so the composer and the suggested-action chips
     // are not rendered at all. Message history is never gated on this.
     isComposerVisible?: boolean;
-    isAwaitingAssistantResponse?: boolean;
+    // 'thinking' animates the dot indicator; 'stalled' replaces it with a static
+    // notice once the answer is overdue, so the animation can never spin forever
+    // when the hub goes silent. 'idle' renders nothing.
+    followUpPendingState?: FollowUpPendingState;
     currentQuestion?: string;
     currentAnswer?: string;
     onSendMessage: (message: string) => void;
@@ -35,7 +80,7 @@ export function ChatPanel({
     isSendingMessage = false,
     isSendLocked = false,
     isComposerVisible = false,
-    isAwaitingAssistantResponse = false,
+    followUpPendingState = 'idle',
     onSendMessage,
     onActionClick
 }: ChatPanelProps) {
@@ -108,15 +153,15 @@ export function ChatPanel({
                     ))
                 )}
 
-                {isAwaitingAssistantResponse ? (
-                    <div className="flex justify-start">
-                        <div className="max-w-[92%] min-w-0 rounded-lg border border-dashed border-anizai-teal-200 bg-anizai-teal-50/60 px-3.5 py-2.5 text-sm text-anizai-teal-900">
-                            <p className="font-medium">Waiting for response</p>
-                            <p className="mt-1 text-xs text-anizai-teal-700">
-                                The follow-up was sent and the assistant reply will appear here when it is ready.
-                            </p>
-                        </div>
-                    </div>
+                {followUpPendingState === 'thinking' ? <ThinkingIndicator /> : null}
+
+                {followUpPendingState === 'stalled' ? (
+                    <StateMessage
+                        compact
+                        variant="warning"
+                        title="Still no answer"
+                        description="This follow-up has not been answered yet. It may still arrive — if it does it will appear here. Otherwise the forecast itself is unaffected."
+                    />
                 ) : null}
             </div>
 

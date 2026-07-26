@@ -253,7 +253,8 @@ spinner. It is used across the dashboard, chat, evidence, trending, and settings
 | No search results | ✅ | `Sidebar` — "Try a different search term." |
 | No evidence / no filter match | ✅ | `EvidenceTimeline:355-360` |
 | No chat messages | ✅ | `ChatPanel:81` |
-| Awaiting assistant reply | ✅ | `ChatPanel:111`, `isAwaitingAssistantResponse` |
+| Awaiting assistant reply | ✅ | `ChatPanel` `ThinkingIndicator`, driven by `followUpPendingState === 'thinking'` |
+| Pending follow-up overdue | ✅ | `followUpPendingState === 'stalled'` → static `StateMessage` warning |
 | Send lock while busy | ✅ | `isSendDisabled` gates the send button and the suggested-action chips |
 | Composer withheld until a result exists | ✅ | `shouldShowFollowUpComposer` (`lib/followUpComposer.ts`) → `DashboardPage:170`, consumed at `ChatPanel:151` |
 | Failed session | ✅ | Status panel + retry |
@@ -306,6 +307,47 @@ Per-state behaviour:
 The history is never gated on `isComposerVisible` — only the input surface is.
 `isSendDisabled` also folds in `!isComposerVisible` defensively, so no stray handler
 can send without a result even if the markup gate is bypassed.
+
+**Pending follow-up indicator.** A follow-up awaiting its answer renders
+`ThinkingIndicator` (local to `ChatPanel.tsx`): three staggered dots in an
+assistant-side bubble, so it sits where the answer will land. It replaced a static
+"Waiting for response" notice.
+
+- **Motion** — the `thinking-dot` keyframes and `animate-thinking-dot` utility are
+  defined in `tailwind.config.js` (the repo's only custom animation). Delays are
+  `0 / 160 / 320 ms` via inline `animationDelay`, since no arbitrary
+  animation-delay utility is configured. Both opacity and offset live entirely in
+  the keyframes, so the un-animated base state is three solid, fully visible dots.
+- **Reduced motion** — `motion-reduce:animate-none` on each dot, backed by the
+  global `prefers-reduced-motion` rule in `index.css`. Verified in the built CSS:
+  the `motion-reduce` block follows the base utility, so `animation: none` wins and
+  the fallback is three static dots at full opacity.
+- **Accessibility** — the dot row is `aria-hidden`; the wrapper is
+  `role="status" aria-live="polite"` carrying an `sr-only` sentence, so the state is
+  announced as prose rather than as decorative bullets.
+
+**How the indicator clears.** `followUpPendingState` is derived from the trailing
+user message via `lib/followUpPending.ts` (`findPendingFollowUp` +
+`resolveFollowUpPendingState`, 15 unit tests). All exit paths were traced in source:
+
+| Path | Mechanism | Clears? |
+|---|---|---|
+| Success | Hub writes the reply and flips the user message `sent → answered` in one batch; `subscribeToSessionMessages` pushes both | ✅ |
+| Hub gives up | Hub marks the user message `failed`; preserved through `toChatMessage` | ✅ |
+| `POST /messages` rejects | `App.tsx` rolls the optimistic `pending` message out of `pendingMessages` | ✅ |
+| Hub never answers | Message stays `sent` in Firestore forever — the documented deployed-image gap | ⚠️ Ages out to `stalled` after `FOLLOW_UP_STALL_MS` (90 s) |
+
+The last row is why `stalled` exists: without it the animation would spin forever,
+and would keep spinning across a reload because the unanswered `sent` status is
+persisted. Age is measured from the **message timestamp**, not from mount, so
+reopening a session with a long-abandoned follow-up reports `stalled` immediately
+instead of animating for another full grace period. `DashboardPage` ticks a 5 s
+interval only while something is pending.
+
+Note that `stalled` changes the **indicator only**. `isSendLocked` still derives from
+`isAwaitingAssistantResponse`, so the composer's send button stays locked for that
+session — the permanent-send-lock caveat in `sprint-24-25-frontend-tasks.md` is
+unchanged and remains a separate contract decision.
 
 ---
 
