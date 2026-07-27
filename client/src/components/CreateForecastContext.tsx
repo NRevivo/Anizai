@@ -1,4 +1,7 @@
+import { useState } from 'react';
 import { StateMessage } from './ui/StateMessage';
+import { MarketPicker } from './MarketPicker';
+import type { TrendingMarket } from '../services/trending.service';
 
 interface TrendingOutcome {
     label: string;
@@ -11,8 +14,15 @@ interface TrendingQuestion {
     /** Null for a multi-outcome event — show `outcomes` instead of one number. */
     probability: number | null;
     outcomes: TrendingOutcome[];
+    /**
+     * Populated inline for binary events only; `[]` for multi-outcome ones, which
+     * the picker fetches on demand. Empty means "not loaded here", never "none
+     * exist" — see `TrendingForecast.markets`.
+     */
+    markets: TrendingMarket[];
     volume24h: number;
     marketCount: number;
+    mutuallyExclusive: boolean;
     url: string;
 }
 
@@ -25,11 +35,36 @@ function formatVolume(value: number): string {
 }
 
 interface TrendingContextProps {
-    onAnalyze: (question: string) => void;
+    /**
+     * Receives a real market `question` (never the event title) and its
+     * `conditionId`, or `null` for a self-written question with no market behind it.
+     */
+    onAnalyze: (question: string, conditionId: string | null) => void;
     forecasts?: TrendingQuestion[];
 }
 
 export function TrendingContext({ onAnalyze, forecasts = [] }: TrendingContextProps) {
+    const [pickerFor, setPickerFor] = useState<TrendingQuestion | null>(null);
+
+    /**
+     * A card click resolves to a market, not to the event title.
+     *
+     * Binary events submit immediately from their inline market — that path has no
+     * picker and must not pay a round-trip. Everything else opens the picker.
+     *
+     * Deliberately keyed on `markets[0]` existing rather than on `marketCount === 1`:
+     * a binary event whose only leg is inactive reports `marketCount: 1` with
+     * `markets: []`, and trusting the count there would submit `undefined`.
+     */
+    const handleUse = (item: TrendingQuestion) => {
+        const inlineMarket = item.markets[0];
+        if (item.marketCount === 1 && inlineMarket) {
+            onAnalyze(inlineMarket.question, inlineMarket.conditionId);
+            return;
+        }
+        setPickerFor(item);
+    };
+
     return (
         <div className="h-full max-w-full bg-white border-l border-gray-200 flex flex-col overflow-hidden">
             <div className="p-4 border-b border-gray-100">
@@ -59,8 +94,8 @@ export function TrendingContext({ onAnalyze, forecasts = [] }: TrendingContextPr
                                     </a>
                                 </h3>
                                 <button
-                                    onClick={() => onAnalyze(item.question)}
-                                    className="min-h-8 shrink-0 rounded-md px-2 text-xs font-medium text-anizai-teal-600 opacity-100 transition-opacity hover:bg-anizai-teal-50 hover:text-anizai-teal-700 sm:opacity-0 sm:group-hover:opacity-100"
+                                    onClick={() => handleUse(item)}
+                                    className="min-h-8 shrink-0 cursor-pointer rounded-md px-2 text-xs font-medium text-anizai-teal-600 opacity-100 transition-opacity hover:bg-anizai-teal-50 hover:text-anizai-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anizai-blue-500 sm:opacity-0 sm:group-hover:opacity-100"
                                 >
                                     Use
                                 </button>
@@ -107,6 +142,19 @@ export function TrendingContext({ onAnalyze, forecasts = [] }: TrendingContextPr
                     Benchmarks are drawn from available prediction-market data
                 </p>
             </div>
+
+            {pickerFor ? (
+                <MarketPicker
+                    eventId={pickerFor.id}
+                    eventTitle={pickerFor.question}
+                    mutuallyExclusive={pickerFor.mutuallyExclusive}
+                    onSelect={(question, conditionId) => {
+                        setPickerFor(null);
+                        onAnalyze(question, conditionId);
+                    }}
+                    onClose={() => setPickerFor(null)}
+                />
+            ) : null}
         </div>
     );
 }

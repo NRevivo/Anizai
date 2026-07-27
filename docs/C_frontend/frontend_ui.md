@@ -85,12 +85,57 @@ DashboardPage.tsx                       ← shell: layout, drawers, modals, stat
 │   └── cards/EvidenceTimeline.tsx      ← §3.3
 ├── (right) ChatPanel.tsx               ← follow-up conversation
 ├── (right) CreateForecastContext.tsx   ← trending suggestions during creation
+│   └── MarketPicker.tsx                ← §3.1a market selection step
 ├── SettingsModal.tsx → settings/*      ← 6 sections
 └── ui/ConfirmDialog.tsx                ← delete confirmation
 ```
 
 `DashboardPage` holds 14 `useState` hooks covering drawers, modals, deletion,
 clarification submit, retry submit, and `currentView` (`'dashboard' | 'new-forecast'`).
+
+`TrendingContext` is rendered **twice** — once in the `hidden xl:grid` desktop shell
+(`DashboardPage.tsx:688`) and once in the `xl:hidden` mobile one (`:723`) — with
+identical props. Both mount; CSS decides which is visible, so picker state is
+per-instance and only the visible one can be opened.
+
+### §3.1a Market selection — `MarketPicker.tsx`
+
+A trending card no longer submits on click. It resolves to **one market's real
+question**, because the event title is a display label: submitting "Fed Decision in
+July?" gives the pipeline nothing to match, while "Will there be no change in Fed
+interest rates after the July 2026 meeting?" is a market with a price behind it.
+Measured on the live feed, 15 of the top 20 visible titles could never text-match any
+market question. **Display the short label; submit the full question.**
+
+| Event shape | Behaviour |
+|---|---|
+| Binary, inline market present | **Submits immediately, no picker, no round-trip** — the market ships inline on the list payload |
+| 2–8 selectable markets | Lists every market: short label, full question, current % |
+| > 8 selectable markets | Lists the 8 most likely, plus a separated free-text input |
+
+Branching is on **`markets[0]` existing**, not on `marketCount === 1`
+(`CreateForecastContext.tsx`, `handleUse`): a binary event whose only leg is inactive
+reports `marketCount: 1` with `markets: []`, and trusting the count there would submit
+`undefined`. That case falls through to the picker, which fetches and reports honestly.
+
+**Free text carries no benchmark.** A self-written question has no `conditionId` and
+therefore no market to compare against. The picker says so in one line at the point of
+entry, and passes `conditionId: null`. Nothing renders a placeholder benchmark or a
+loading state that never resolves.
+
+**Loading, error and empty are three distinct states.** `fetchTrendingMarkets` rethrows
+by design, so a failed fetch renders a red retryable "Couldn't load outcomes" — never
+an empty list, which would read as "this event has nothing to forecast". Genuinely
+empty (every leg closed) gets its own honest message.
+
+Counts shown to the user come from `markets.length`, not `marketCount`: the Republican
+nominee field reports `marketCount: 128` but yields 42 selectable markets, so the
+footer reads "Showing the 8 most likely of 42 outcomes."
+
+Accessibility: `role="dialog"` + `aria-modal` + `aria-labelledby`, Escape closes,
+initial focus moves to the dialog, the async region is `aria-live="polite"`, options
+are real `<button>`s at `min-h-11` with `focus-visible` rings, and the close control
+is an SVG with an `aria-label` (no emoji icons).
 
 ### §3.2 `cards/predictionOverview/`
 

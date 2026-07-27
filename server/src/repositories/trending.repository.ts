@@ -80,6 +80,23 @@ export interface TrendingForecast {
     /** Total non-closed markets in the event — 1 means binary. Includes inactive
      *  placeholder legs, so see the warning on `markets` before displaying it. */
     marketCount: number;
+    /**
+     * True when the event's outcomes are mutually exclusive — a candidate field
+     * ("Next Prime Minister of Ethiopia?", exactly one leg can resolve Yes).
+     * False when they are independent, overlapping propositions — the "ladder"
+     * shape ("Bitcoin above ___ on July 27?", "…ceasefire continues through…?"),
+     * where several legs can resolve Yes together.
+     *
+     * Read from Polymarket's own `negRisk` flag, not inferred from the title.
+     * Validated against 100 live events: `negRisk` is uniform across the markets
+     * of all 93 multi-market events, and cleanly separates candidate fields
+     * (Ethiopia PM, Ballon d'Or, Fed Decision, party nominees) from ladders
+     * (Bitcoin strike ladders, date-series ceasefire markets).
+     *
+     * Used only to word the picker — both shapes are still a flat list to choose
+     * from. Binary events are always false and never reach a picker.
+     */
+    mutuallyExclusive: boolean;
 }
 
 // In-memory cache for the Polymarket fetch. The /trending endpoint is public
@@ -315,6 +332,11 @@ function toTrendingForecast(event: any): TrendingForecast | null {
         volume24h: Number(event?.volume24hr ?? 0) || 0,
         marketCount: markets.length,
         markets: toTrendingMarkets(markets),
+        // Read from the markets rather than the event: event-level `negRisk` is
+        // absent on binary events, while the market-level flag is always present
+        // and uniform within an event (verified, 93/93 multi-market events).
+        mutuallyExclusive:
+            markets.length > 1 && markets.every((m: any) => m?.negRisk === true),
     };
 
     if (markets.length === 1) {

@@ -8,6 +8,7 @@ import { StateMessage } from '../components/ui/StateMessage';
 import { CreateForecastView } from '../components/CreateForecastView';
 import { TrendingContext } from '../components/CreateForecastContext';
 import { SettingsModal, type SettingsSection } from '../components/SettingsModal';
+import type { TrendingMarket } from '../services/trending.service';
 import { shouldShowFollowUpComposer } from '../lib/followUpComposer';
 import { resolveFollowUpPendingState } from '../lib/followUpPending';
 import type { UserProfile } from '../services/user.service';
@@ -23,13 +24,19 @@ import type {
     TimelineEvent,
 } from '../types';
 
-interface TrendingQuestionView {
+/** Exported so `App.tsx` maps into this exact shape instead of keeping a second,
+ *  silently-drifting copy of it (the KG-C-1 hazard — it had already drifted). */
+export interface TrendingQuestionView {
     id: string;
+    /** The event title — a display label, not the question that gets submitted. */
     question: string;
     probability: number | null;
     outcomes: { label: string; probability: number }[];
+    /** Inline for binary events only; `[]` for multi-outcome (fetched on demand). */
+    markets: TrendingMarket[];
     volume24h: number;
     marketCount: number;
+    mutuallyExclusive: boolean;
     url: string;
 }
 

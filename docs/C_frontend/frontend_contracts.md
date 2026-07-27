@@ -440,7 +440,8 @@ passthrough of `gamma-api.polymarket.com/events`, cached 5 minutes in-process.
   outcomes: { label: string; probability: number }[];
   markets: TrendingMarket[];     // added 2026-07-27 — CONDITIONALLY POPULATED, see below
   volume24h: number;             // was `popularityScore` (same value, clearer name)
-  marketCount: number; }         // 1 ⇒ binary; counts inactive legs too — see below
+  marketCount: number;           // 1 ⇒ binary; counts inactive legs too — see below
+  mutuallyExclusive: boolean; }  // added 2026-07-27 — candidate field vs ladder
 
 // added 2026-07-27
 TrendingMarket = {
@@ -515,6 +516,26 @@ Unlike `fetchTrendingForecasts`, the client wrapper `fetchTrendingMarkets` **ret
 rather than degrading to `[]`: it backs a direct user action, so the caller must be
 able to distinguish "loading" from "failed" and offer a retry. Silently returning `[]`
 would render an empty picker that reads as "this event has no markets".
+
+#### `mutuallyExclusive` — candidate field vs. ladder
+
+Read from Polymarket's own **`negRisk`** flag; it is not inferred from the title.
+
+| Value | Shape | Examples |
+|---|---|---|
+| `true` | Candidate field — exactly one leg can resolve Yes | "Next Prime Minister of Ethiopia?", "Fed Decision in July?", party nominees |
+| `false` (with >1 market) | Independent, overlapping legs — the "ladder" shape | "Bitcoin above ___ on July 27?", "…ceasefire continues through…?" |
+
+Validated against 100 live events: `negRisk` is **uniform across the markets of all 93
+multi-market events**, and separates the two shapes cleanly. Taken from the *markets*
+rather than the event, because event-level `negRisk` is absent on binary events while
+the market-level flag is always present.
+
+Ladders are observably non-exclusive in the data — the ceasefire event shows July 25,
+24 and 26 all at 100% simultaneously, which a candidate field cannot do.
+
+**It changes wording only, never behaviour.** Both shapes render as one flat list to
+choose from. Binary events are always `false` and never reach a picker.
 
 **`probability: null` is load-bearing.** A candidate field (Ballon d'Or has 89 markets)
 has no single probability, which is why Polymarket's own card shows leading outcomes

@@ -54,6 +54,15 @@ export interface TrendingForecast {
     volume24h: number;
     /** Total markets in the event; 1 means binary. */
     marketCount: number;
+    /**
+     * True when the outcomes are mutually exclusive (a candidate field — exactly
+     * one can resolve Yes). False when they are independent, overlapping
+     * propositions (the "ladder" shape: strike ladders, date series).
+     *
+     * From Polymarket's `negRisk` flag, not guessed from the title. Affects only
+     * how the picker words itself — both shapes are a flat list to choose from.
+     */
+    mutuallyExclusive: boolean;
 }
 
 export async function fetchTrendingForecasts(limit = 20): Promise<TrendingForecast[]> {

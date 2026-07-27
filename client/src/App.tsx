@@ -4,7 +4,7 @@ import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { PlanSelection } from './pages/PlanSelection';
-import { DashboardPage } from './pages/DashboardPage';
+import { DashboardPage, type TrendingQuestionView } from './pages/DashboardPage';
 import { ContactPage } from './pages/ContactPage';
 import { FeaturesPage } from './pages/FeaturesPage';
 import { MethodologyPage } from './pages/MethodologyPage';
@@ -63,17 +63,6 @@ type AppState =
   | 'terms'
   | 'privacy'
   | 'cookies';
-
-interface TrendingQuestionView {
-  id: string;
-  question: string;
-  /** Null for a multi-outcome event — render `outcomes` instead of a single number. */
-  probability: number | null;
-  outcomes: { label: string; probability: number }[];
-  volume24h: number;
-  marketCount: number;
-  url: string;
-}
 
 function mapSessionStatus(status: SessionStatus, confidence: number | null): 'stable' | 'volatile' {
   if (status === 'failed') {
@@ -271,11 +260,15 @@ function toTrendingView(items: TrendingForecast[]): TrendingQuestionView[] {
   return items.map((item) => {
     return {
       id: item.id,
+      // The event title — a display label. NOT what gets submitted: the picker
+      // resolves a card to one market's real question first.
       question: item.title || 'Untitled forecast',
       probability: item.probability,
       outcomes: item.outcomes,
+      markets: item.markets,
       volume24h: item.volume24h,
       marketCount: item.marketCount,
+      mutuallyExclusive: item.mutuallyExclusive,
       url: item.url,
     };
   });
