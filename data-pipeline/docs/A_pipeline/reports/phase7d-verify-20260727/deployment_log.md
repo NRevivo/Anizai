@@ -407,4 +407,88 @@ suspected OOM cause and stays **absent**. The DURABLE set at teardown is: **`-7d
   explicitly scopes OUT of 7D as "a genuine architectural change." `-7b5i` ran the day-run on **2.5Gi**, so
   it was almost certainly OOM-storming intermittently (the 3,993-calls-for-232-items storm is the signature);
   the synchronized all-source T0 + resubmit turned a marginal condition into a hard crash-loop.
+
+---
+
+## POST-7D — AGENTS profile switch + hand-off (2026-07-27, after T12 commit `5a8020e`)
+
+Cloud session hand-off from the Domain-A verification into a Domain-B agent session. Executed under Ron's
+D1–D4 directive. Day-run Prometheus figures used for the OOM diagnosis are preserved above (§8.3 step-10c,
+committed in `5a8020e`) — safe before the Prometheus 7-day retention ages them out (~2 days).
+
+### D1 — manual Postgres backup (before any state change)
+`gs://anizai-pipeline-backups/postgres/2026-07-27/anizai.sql.gz` (200 MiB) — includes today's 7D window +
+migration 004. Taken first, before the profile switch.
+
+### D2 — Firestore stale-document gate (queried in-cluster via `agent-worker-ksa` Workload Identity)
+Run BEFORE bringing the agent up, so a stale document couldn't silently drive the first run.
+
+| Listener match set | Count | |
+|---|--:|---|
+| `forecastQueries` status==`pending` (main listener) | **0** | clear |
+| collection-group `messages` role==`user` status==`sent` (2nd listener) | **1** | **NON-ZERO → gate tripped, escalated to Ron** |
+| `forecastQueries` status==`claimed` (KG-B-21, not startup-claimed) | 2 | report-only |
+
+The 1 stale message: `sessions/NaGlzq1YbT1n3IjPeEJM/messages/0b9IeSBYAtDScdX1LLcM`, content `"check"`,
+`role:user`, `status:sent`, `createdAt 2026-07-26T13:34:47.382Z` (userId `gEnzUuBLpcNwITpow33AqEnfFCs1`).
+**Ron's decision: option (b) — accept it, bring the agent up, do NOT flip status.** The "check" follow-up
+would (correctly) process as the session's first run on start.
+
+**Stale-doc framing (Ron's note — worth keeping for the gate's design):** this document was created
+`2026-07-26T13:34:47Z` **while the agent was up** during the 2026-07-26 agent-only run, and *still* ended up
+stranded at `status:sent` until this bring-up claimed it ~26 h later. **The stale-document risk is therefore
+NOT limited to messages sent while the agent is off** — a live agent can still leave a follow-up stranded
+(listener race / mid-teardown / not-yet-attached window). The D2 gate must run regardless of whether the
+prior agent was believed to be up. (KG-B-22 territory.)
+
+### D3 — AGENTS profile applied (Flink DOWN before agent UP, per Ron — one live workload at a time)
+1. `flink-jobmanager` → 0, `flink-taskmanager` → 0; polled to **0 pods** before proceeding.
+2. `agent-worker` → 1 — verified the deployed env carries **no** `LOG_INFO_SAMPLE_RATE` before scaling
+   (KG-B-22 constraint: the agent must NOT inherit the pipeline's OOM-linked override). Pod `1/1 Running`,
+   **0 restarts**.
+- telegram/polymarket already 0; all Airflow DAGs already paused; `trigger-consumer` left at 1 (not in
+  Ron's D3 list — it is the Kafka→Firestore trigger bridge, idle with all producers + Flink at 0).
+
+### The "check" follow-up run — real end-to-end exercise of the follow-up path on `0.5.0-sprint26+55e8093`
+Nobody wanted the answer, but it is a genuine run of the follow-up path on the current image, so captured:
+
+| Field | Value |
+|---|---|
+| Routing | follow-up router classified bare `"check"` as **non-substantive → guardrail/refusal branch** (not a new forecast) |
+| Session tier | `tier_2` (original forecast); no new forecast session created (`agent_session_total` did not increment) |
+| Model | **gpt-4o-mini** |
+| Cost | **$0.00018885** (`agent_llm_cost_usd_total`, ≈ 0.019 ¢) |
+| Latency | ≈ **7.4 s** end-to-end (container start `15:19:56.694` → message `answered` `15:20:04.103`); listener attached + processed before the k8s readiness probe reported 1/1 at ~43 s |
+| Outcome | message `sent → answered`; assistant reply `k3vnqwUdY4JEGg9gquSj` written; session status stays `done`. **Completed successfully.** |
+
+Reply content: *"I can only discuss this forecast and the evidence behind it. I can't re-run the analysis,
+change the probability, or pull in new information here — but I'm happy to explain any part of this forecast
+you're curious about."* — the intended scope-limiting behavior for a non-question follow-up.
+
+### §3 Step 5 health gate — PASS
+- `agent-worker` `1/1 Running`, **0 restarts**, target `up{job="agent-worker"} == 1`.
+- Firestore listeners provably attached (the stale `"check"` was claimed + answered).
+- LLM path working (gpt-4o-mini call succeeded, cost recorded); no ERROR/exception in logs.
+- Note: `.env not found` WARNINGs at boot are expected (secrets arrive via the Secret Manager CSI mount).
+
+### KG-B-21 orphans — reaper evidence
+The 2 `claimed` `forecastQueries` (`e2e-sprint21-resume-661493bb`, `-8118feec`, both *"What will happen in
+the Middle East?"*, `claimedBy: worker-1`) were `claimedAt 2026-05-05` and are **still untouched as of
+2026-07-27 — ~83 days (roughly 3 months)**. Nothing scans `status:claimed`, so they never age out on their
+own. That standing figure is the concrete argument for a `claimed`-orphan reaper. Left in place (Ron).
+
+### D4 — carry-over state at hand-off (per bringup_profiles.md §4 step 5; that file NOT edited here — Advisor owns it)
+- **Live workloads:** `agent-worker` 1/1 (AGENTS profile). Held at 0: `flink-jobmanager`, `flink-taskmanager`,
+  `telegram`, `polymarket`. `trigger-consumer` at 1 (idle bridge). All Airflow DAGs paused. Monitoring stack
+  (prometheus/grafana/alertmanager/exporters, kafka-ui, airflow web+scheduler) up as always-on infra.
+- **Manifest-vs-live drift (KG-C-10 territory):** the committed Flink manifests (`5b03ecd`) declare
+  `replicas: 1`, but live is 0 (profile-driven). A `kubectl apply` of those manifests would resurrect Flink
+  and break the AGENTS profile. KG-C-10 (proposal: source-manifest `replicas: 0` with scale-up as the deploy
+  action) is the standing fix. Recorded in pipeline_sprints.md §4.
+- **Day-run Prometheus figures:** confirmed written into this file (§8.3 step-10c) — durable before retention.
+- **Agent logging (KG-B-22):** agent brought up WITHOUT `LOG_INFO_SAMPLE_RATE=1.0`; consequently INFO
+  (incl. `llm_usage` cost lines) is 1%-sampled in cloud — read cost/latency from Prometheus
+  (`agent_llm_cost_usd_total`, `agent_node_duration_seconds_*`), not logs, as done above.
+
+**Hand-off:** Ron drives the Domain-B agent session from here.
 - **HALTED (TM→0, jobs cancelled). Escalated to Ron — will not keep bumping memory blindly.**
