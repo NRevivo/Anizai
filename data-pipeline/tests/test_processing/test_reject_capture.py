@@ -78,8 +78,10 @@ def reject_calls(monkeypatch):
 
     calls: list[tuple] = []
 
-    def _stub(silver_doc, rescue_cosine, run_id=None):
-        calls.append((silver_doc, rescue_cosine, run_id))
+    def _stub(silver_doc, rescue_cosine, run_id=None, canonical_event_id=None):
+        # Capture canonical_event_id too (Phase 7D T7) — accepting it without
+        # capturing/asserting would be the KG-A-13 blind spot on a new column.
+        calls.append((silver_doc, rescue_cosine, run_id, canonical_event_id))
         return "00000000-0000-0000-0000-000000000000"
 
     monkeypatch.setattr(fr, "insert_reject", _stub)
@@ -107,11 +109,15 @@ class TestDropCaptureEnabled:
             doc, rescued=False, similarity=0.21,
             capture_enabled=True, run_id="dayrun-t",
         )
-        captured_doc, cosine, run_id = reject_calls[0]
+        captured_doc, cosine, run_id, cei = reject_calls[0]
         assert captured_doc is doc, "The reject row must come from the live doc"
         assert cosine == pytest.approx(0.21)
         assert cosine < _THRESHOLD
         assert run_id == "dayrun-t"
+        # T7: the instance key is captured, non-empty, and equals _cost_trace_id
+        # of this fixture (canonical_event_id present → returned as-is). Asserting
+        # the VALUE, not just presence, closes the KG-A-13 blind spot on the column.
+        assert cei == "evt-reject-test"
 
     def test_full_text_passed_untruncated(self, reject_calls):
         """T7B.1 manual FN classification needs the WHOLE article (§2.1)."""
@@ -120,7 +126,7 @@ class TestDropCaptureEnabled:
         apply_rescue_outcome(
             doc, rescued=False, similarity=0.10, capture_enabled=True,
         )
-        captured_doc, _, _ = reject_calls[0]
+        captured_doc, _, _, _ = reject_calls[0]
         assert captured_doc["full_text_raw"] == long_text
         assert len(captured_doc["full_text_raw"]) == len(long_text)
 
@@ -172,7 +178,7 @@ class TestEmptyTextEdge:
             doc, rescued=False, similarity=0.0, capture_enabled=True,
         )
         assert survived is False
-        _, cosine, _ = reject_calls[0]
+        _, cosine, _, _ = reject_calls[0]
         assert cosine == 0.0
 
 
@@ -279,11 +285,16 @@ class TestNegativeBoundary:
 
     def test_capture_point_is_the_drop_branch_only(self):
         """
-        Structural guard (§1: 'by construction'): insert_reject must be
-        CALLED from exactly ONE site in gold_job — inside
-        apply_rescue_outcome. Dedup skips (kv_archive returning None) and
-        DLQ records happen in code paths that simply have no capture call
-        to reach. AST-based so docstring mentions don't count.
+        Structural guard (§1: 'by construction'): insert_reject must be CALLED
+        from exactly these TWO drop branches — and no third:
+          - apply_rescue_outcome                         (news rescue-drop)
+          - PolymarketGoldSocialFunction.process_element (HN low-signal-drop, T6)
+        Dedup skips and DLQ records happen in code paths that simply have no
+        capture call to reach. The site is qualified by enclosing CLASS so the
+        guard rejects an insert_reject added to the WRONG process_element —
+        gold_job defines three, and a stray direct call in
+        GlobalNewsGoldFunction.process_element (double-capturing news rejects)
+        must fail this test. AST-based so docstring mentions don't count.
         """
         import ast
         import inspect
@@ -294,12 +305,18 @@ class TestNegativeBoundary:
 
         class _CallFinder(ast.NodeVisitor):
             def __init__(self):
-                self.stack: list[str] = []
+                self.func_stack: list[str] = []
+                self.class_stack: list[str] = []
+
+            def visit_ClassDef(self, node):
+                self.class_stack.append(node.name)
+                self.generic_visit(node)
+                self.class_stack.pop()
 
             def visit_FunctionDef(self, node):
-                self.stack.append(node.name)
+                self.func_stack.append(node.name)
                 self.generic_visit(node)
-                self.stack.pop()
+                self.func_stack.pop()
 
             visit_AsyncFunctionDef = visit_FunctionDef
 
@@ -310,13 +327,21 @@ class TestNegativeBoundary:
                     else getattr(func, "attr", "")
                 )
                 if name == "insert_reject":
-                    call_sites.append(self.stack[-1] if self.stack else "<module>")
+                    fn = self.func_stack[-1] if self.func_stack else "<module>"
+                    # Qualify with the enclosing class so the two intended sites
+                    # are distinguishable from the other two process_element methods.
+                    site = f"{self.class_stack[-1]}.{fn}" if self.class_stack else fn
+                    call_sites.append(site)
                 self.generic_visit(node)
 
         _CallFinder().visit(tree)
-        assert call_sites == ["apply_rescue_outcome"], (
-            f"insert_reject must be called exactly once, from "
-            f"apply_rescue_outcome — found call sites: {call_sites}"
+        assert call_sites == [
+            "apply_rescue_outcome",
+            "PolymarketGoldSocialFunction.process_element",
+        ], (
+            f"insert_reject must be called from exactly the two intended drop "
+            f"branches (apply_rescue_outcome + PolymarketGoldSocialFunction."
+            f"process_element) — found call sites: {call_sites}"
         )
 
 

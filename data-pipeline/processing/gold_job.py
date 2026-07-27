@@ -965,7 +965,13 @@ def build_gold_global_signal(
     """
     return {
         "metadata": {
-            "signal_id":          str(uuid.uuid4()),
+            # Deterministic signal_id from document_hash (Phase 7D, T5 — KG-A-8):
+            # UUID5 so a re-delivered global_news record maps to the SAME signal_id
+            # and knowledge_vectors ON CONFLICT (signal_id) dedups it, instead of
+            # uuid4() minting a near-duplicate vector on every delivery. Reuses the
+            # Sprint-11 helper unchanged: global_news keys on document_hash, the
+            # social path on content_hash — both are the record's own SHA-256.
+            "signal_id":          _deterministic_signal_id(silver_doc.get("document_hash", "")),
             "canonical_event_id": silver_doc.get("canonical_event_id", ""),
             "source_platform":    "newsapi",
             "published_at":       silver_doc.get("publish_date", ""),
@@ -1200,7 +1206,10 @@ def build_arxiv_gold_global_signal(
     """
     return {
         "metadata": {
-            "signal_id":          str(uuid.uuid4()),
+            # Deterministic signal_id from document_hash (Phase 7D, T5 — KG-A-8):
+            # UUID5 so re-deliveries dedup via knowledge_vectors ON CONFLICT
+            # instead of accumulating near-duplicate vectors. Sprint-11 helper.
+            "signal_id":          _deterministic_signal_id(silver_doc.get("document_hash", "")),
             "canonical_event_id": silver_doc.get("canonical_event_id", ""),
             "source_platform":    "arxiv",
             "publisher":          "arxiv",   # all papers originate from arxiv.org
@@ -1442,7 +1451,10 @@ def build_telegram_gold_global_signal(
     """
     return {
         "metadata": {
-            "signal_id":          str(uuid.uuid4()),
+            # Deterministic signal_id from document_hash (Phase 7D, T5 — KG-A-8):
+            # UUID5 so re-deliveries dedup via knowledge_vectors ON CONFLICT
+            # instead of accumulating near-duplicate vectors. Sprint-11 helper.
+            "signal_id":          _deterministic_signal_id(silver_doc.get("document_hash", "")),
             "canonical_event_id": silver_doc.get("canonical_event_id", ""),
             "source_platform":    "telegram",
             "published_at":       silver_doc.get("publish_date", ""),
@@ -2531,6 +2543,61 @@ def process_opensky_gold_message(
 # Semantic Rescue — module-level helper (Phase 7B, §4.1A)
 # ==========================================================
 
+def _embed_and_score(
+    text: str,
+    openai_client: Any,
+    sniper_ref_vec: Any,   # np.ndarray, typed as Any to avoid a module-level numpy import
+    *,
+    source_name: str,
+    trace_id: str,
+) -> float:
+    """
+    Embed `text` and return its cosine similarity to the sniper reference vector
+    (Phase 7D, T6 / decision D4 — the shared scoring core).
+
+    The reference vector is pre-normalised, so cosine similarity reduces to a dot
+    product: sim = dot(article_vec / ||article_vec||, ref_vec). Returns 0.0 for
+    empty text or a zero-norm embedding (the documented empty-text edge — matches
+    the filter_rejects.rescue_cosine REAL NOT NULL convention).
+
+    Records the paid embed in llm_cost_events (site="rescue_embed") on every call
+    that actually embeds — the embed is paid for whether the article is promoted or
+    dropped, and drop-path rows joined via trace_id quantify the filter's wasted
+    spend (§0 goal 2). Empty text embeds nothing and records nothing.
+
+    Extracted from compute_semantic_rescue with ZERO behaviour change to the news
+    path (the §6 pre/post cosine-equality gate proves it) so the social-path reject
+    cosine (compute_social_rescue_cosine) reuses the identical scoring maths.
+
+    Raises:
+        Any openai API exception — callers decide how to handle (the news path
+        routes to DLQ, B7/§3.5; the social capture path fails open to 0.0).
+    """
+    import numpy as np
+
+    text = (text or "").strip()
+    if not text:
+        return 0.0
+
+    response = openai_client.embeddings.create(
+        model="text-embedding-3-small",
+        input=[text],
+    )
+    record_usage(
+        "text-embedding-3-small", response,
+        site="rescue_embed",
+        source_name=source_name,
+        trace_id=trace_id,
+    )
+    article_vec = np.array(response.data[0].embedding, dtype=np.float32)
+    norm = float(np.linalg.norm(article_vec))
+    if norm == 0.0:
+        return 0.0
+
+    # Dot product with the pre-normalised ref vector = cosine similarity.
+    return float(np.dot(article_vec / norm, sniper_ref_vec))
+
+
 def compute_semantic_rescue(
     silver_doc: dict,
     openai_client: Any,
@@ -2542,49 +2609,34 @@ def compute_semantic_rescue(
 
     Returns (rescued, similarity_score).
 
-    The L2-normalised reference vector reduces cosine similarity to a dot
-    product: sim = dot(article_vec / ||article_vec||, ref_vec).
-
     Why title + lead + truncated body: highest signal-to-noise ratio. Limiting
     body to 512 chars bounds cost to ~100-200 tokens per rescue call (B1).
+
+    The embed + cosine maths now lives in the shared _embed_and_score() core
+    (Phase 7D T6). This function is behaviour-identical to its pre-refactor form —
+    the §6 pre/post cosine-equality gate proves it: empty/zero-norm text still
+    yields (False, 0.0) and the same rescue_embed cost row is recorded.
 
     Raises:
         Any openai API exception — callers route to DLQ (B7, §3.5).
 
     References: Phase 7B B1, B2, §4.1A
     """
-    import numpy as np
-
     text = " ".join(filter(None, [
         silver_doc.get("title", ""),
         silver_doc.get("inverted_pyramid_lead", ""),
         (silver_doc.get("full_text_raw", "") or "")[:512],
     ])).strip()
 
-    if not text:
-        return False, 0.0
-
-    response = openai_client.embeddings.create(
-        model="text-embedding-3-small",
-        input=[text],
-    )
-    # Cost capture on BOTH branches (7B.5-I T4, approved P4): the embed is
-    # paid for whether the article is promoted or dropped — drop-path rows
-    # joined to filter_rejects via trace_id quantify the filter's wasted
-    # spend (§0 goal 2).
-    record_usage(
-        "text-embedding-3-small", response,
-        site="rescue_embed",
+    # KG-A-13 (T8): route the cost row's trace_id through _cost_trace_id() so a
+    # record with an empty canonical_event_id still joins to filter_rejects via its
+    # bronze_ref fallback — closing the latent inconsistency (F13). Matches the
+    # social reject cosine, which already resolves trace_id the same way.
+    similarity = _embed_and_score(
+        text, openai_client, sniper_ref_vec,
         source_name=silver_doc.get("source_name", ""),
-        trace_id=silver_doc.get("canonical_event_id", ""),
+        trace_id=_cost_trace_id(silver_doc),
     )
-    article_vec = np.array(response.data[0].embedding, dtype=np.float32)
-    norm = float(np.linalg.norm(article_vec))
-    if norm == 0.0:
-        return False, 0.0
-
-    # Dot product with pre-normalised ref vector = cosine similarity
-    similarity = float(np.dot(article_vec / norm, sniper_ref_vec))
     return similarity >= threshold, similarity
 
 
@@ -2638,8 +2690,176 @@ def apply_rescue_outcome(
         # Lazy import: keeps module import free of DB deps (same pattern as
         # the persistence imports inside process_element).
         from persistence.filter_rejects import insert_reject
-        insert_reject(silver_doc, similarity, run_id=run_id)
+        # canonical_event_id (T7): instance key from the same fallback chain the
+        # cost layer uses, so a reject joins back to its llm_cost_events rows.
+        insert_reject(
+            silver_doc, similarity, run_id=run_id,
+            canonical_event_id=_cost_trace_id(silver_doc),
+        )
     return False
+
+
+def compute_social_rescue_cosine(
+    silver_social: dict,
+    openai_client: Any,
+    sniper_ref_vec: Any,
+) -> float:
+    """
+    Rescue cosine for a dropped low-signal social (HackerNews) story
+    (Phase 7D, T6 / decision O1(b)).
+
+    Assembles the HN text — title + story_text (Ask/Show HN body) + the top comment
+    texts (the discussion IS the HN signal), the comment block bounded to 512 chars
+    to match the news path's cost envelope — and scores it against the sniper
+    reference vector via the shared _embed_and_score() core. Returns the cosine, or
+    0.0 on empty text / a zero-norm embedding (the filter_rejects.rescue_cosine
+    REAL NOT NULL edge).
+
+    Two cautions carried from §3.3:
+      * D2 — the cosine is CAPTURED for Phase 7B.5; it does NOT drive a promote
+        decision in this sprint. 7B.5 owns the social-path promote threshold.
+      * D4 / KG-A-14 companion — the sniper reference vector was built on NEWS
+        articles, so this cosine is NOT directly comparable to a news-path cosine.
+        7B.5 must sweep a SEPARATE threshold for the social path; do not pool them.
+
+    Uses _cost_trace_id() for the cost row's trace_id: HN social records set
+    canonical_event_id only at Gold-build time, so bronze_ref is the correct
+    fallback (the same chain KG-A-13/T8 applies to the news path).
+    """
+    top_comments = silver_social.get("top_comments") or []
+    comment_text = " ".join(str(c.get("text", "")) for c in top_comments)
+    text = " ".join(filter(None, [
+        silver_social.get("title", ""),
+        silver_social.get("story_text", ""),
+        comment_text[:512],
+    ])).strip()
+    return _embed_and_score(
+        text, openai_client, sniper_ref_vec,
+        source_name=silver_social.get("source_name", "hackernews"),
+        trace_id=_cost_trace_id(silver_social),
+    )
+
+
+def social_reject_doc(silver_social: dict) -> dict:
+    """
+    Normalise a HackerNews Silver social record into the news-document shape that
+    filter_rejects.insert_reject() reads (Phase 7D, T6 / decision D5-O2).
+
+    insert_reject()'s field contract stays explicit — it reads original_url /
+    full_text_raw / etc. — so the CALLER adapts the social record to it rather than
+    insert_reject() learning a second shape (Service Isolation: one writer, one
+    contract). Field mapping:
+
+        source_name           <- "hackernews"
+        original_url          <- url            (HN uses `url`, not `original_url`)
+        title                 <- title
+        inverted_pyramid_lead <- ""             (HN has no lead)
+        full_text_raw         <- story_text, else the joined top-comment texts —
+                                 the reject body 7B.5 reads (and the same text
+                                 compute_social_rescue_cosine scored)
+        relevance_score       <- relevance_score
+        sniper_keywords       <- sniper_keywords
+
+    canonical_event_id is NOT placed in this dict — it is passed as an explicit
+    insert_reject() argument at the call site (T7), from _cost_trace_id().
+    """
+    top_comments = silver_social.get("top_comments") or []
+    body = silver_social.get("story_text", "") or " ".join(
+        str(c.get("text", "")) for c in top_comments
+    )
+    return {
+        "source_name":           silver_social.get("source_name", "hackernews"),
+        "original_url":          silver_social.get("url", ""),
+        "title":                 silver_social.get("title", ""),
+        "inverted_pyramid_lead": "",
+        "full_text_raw":         body,
+        "relevance_score":       silver_social.get("relevance_score", 0.0),
+        "sniper_keywords":       silver_social.get("sniper_keywords", []),
+    }
+
+
+def _load_sniper_reference_vector():
+    """
+    Load the sniper reference vector (.npy), hard-failing at startup if it is
+    missing so a Gold job never silently regresses to keyword-only filtering
+    (Phase 7B B4). Shared by both Gold Flink functions that score against it —
+    GlobalNewsGoldFunction (semantic rescue) and PolymarketGoldSocialFunction
+    (HN reject cosine) — extracted to avoid duplicating the load (Phase 7D,
+    decision D-c). numpy is imported inside (container-only dependency).
+
+    Returns:
+        np.ndarray — the reference vector, float32.
+
+    Raises:
+        FileNotFoundError — if the committed .npy is absent (fail-fast at open()).
+    """
+    from processing.keyword_sniper import SNIPER_REFERENCE_VECTOR_PATH
+    import numpy as np
+
+    if not SNIPER_REFERENCE_VECTOR_PATH.exists():
+        logger.error(
+            "[gold/flink] sniper_reference_vector.npy not found at %s. "
+            "Run processing/build_sniper_reference_vector.py and commit the "
+            ".npy file (Phase 7B T7B.6).",
+            SNIPER_REFERENCE_VECTOR_PATH,
+        )
+        raise FileNotFoundError(
+            f"sniper_reference_vector.npy missing: {SNIPER_REFERENCE_VECTOR_PATH}"
+        )
+    vec = np.load(str(SNIPER_REFERENCE_VECTOR_PATH)).astype(np.float32)
+    logger.info("[gold/flink] Sniper reference vector loaded — shape=%s", vec.shape)
+    return vec
+
+
+def dedup_skip_enrichment(
+    doc_id: Optional[str],
+    archive_raised: bool,
+    *,
+    gate_enabled: bool,
+) -> bool:
+    """
+    Decide whether Gold enrichment should be skipped as a known duplicate
+    (KG-A-7; plan §5 T3, decision §3.3/D3).
+
+    The dedup signal is knowledge_vault.archive()'s return value, which the Flink
+    GlobalNewsGoldFunction already computes one step before enrichment and currently
+    discards: archive() returns None when the document_hash is already present (F1).
+    Gating on it adds ZERO extra queries on an operator already implicated in KG-A-9
+    checkpoint stalls — this is the whole point of D3 over a fresh exists_* call.
+
+    CRITICAL — doc_id is None in TWO cases that must never be conflated:
+      (i)  duplicate      — archive() returned None with no exception -> SKIP.
+      (ii) archive raised — the caller's try/except logged a warning and left doc_id
+           at its None initial value. This is a FAILURE, not a duplicate; enrichment
+           must PROCEED (fail-open), because a transient DB blip must never silently
+           stop ingestion. archive() itself remains the last-resort dedup guard (F1).
+
+    archive_raised=True therefore always returns False (proceed), regardless of the
+    gate. True is returned only for case (i) with the gate enabled.
+
+    Pure and module-level so BOTH branches are Gate-2 testable without a PyFlink
+    runtime (plan §6, §7.7) — same rationale as apply_rescue_outcome().
+
+    Note (stranded-article gap, plan §5 T12): an article whose row is already in
+    knowledge_vault but whose enrichment previously failed (-> DLQ, no vector) is
+    skipped here on re-delivery and never receives a knowledge_vectors row. Rare,
+    recoverable via DLQ reprocessing or by disabling the gate; recorded, not fixed.
+
+    Args:
+        doc_id:         Return of knowledge_vault.archive() (None => duplicate OR the
+                        archive raised — disambiguated by archive_raised).
+        archive_raised: True if archive() raised and was caught by the caller.
+        gate_enabled:   settings.ENRICHMENT_DEDUP_GATE_ENABLED, read once at open().
+
+    Returns:
+        True  — skip enrichment/embedding/Gold-build/vector-write (known duplicate).
+        False — proceed to enrichment (new article, archive failure, or gate off).
+    """
+    if not gate_enabled:
+        return False
+    if archive_raised:
+        return False
+    return doc_id is None
 
 
 if PYFLINK_AVAILABLE:
@@ -2661,8 +2881,36 @@ if PYFLINK_AVAILABLE:
         def open(self, runtime_context):
             # Phase 9.5 Stage B Item 2: centralised factory (max_retries=5).
             from utils.openai_client import get_openai_client
-            from config.settings import OPENAI_API_KEY
+            from config.settings import (
+                OPENAI_API_KEY,
+                ENRICHMENT_DEDUP_GATE_ENABLED,
+                REJECT_CAPTURE_ENABLED,
+                RUN_ID,
+            )
             self._openai_client = get_openai_client(api_key=OPENAI_API_KEY)
+
+            # Phase 7D (§4.2): enrichment dedup gate flag (KG-A-7, social path),
+            # read once at startup — env-only toggle (pod restart). Logged so the
+            # gate state is verifiable in the job logs (§8.3 live-smoke check).
+            self._dedup_gate_enabled = ENRICHMENT_DEDUP_GATE_ENABLED
+            logger.info(
+                "[gold/flink] social enrichment dedup gate %s (KG-A-7)",
+                "ENABLED" if self._dedup_gate_enabled else "disabled",
+            )
+
+            # Phase 7D (T6 — KG-A-12): social-path reject capture. The sniper
+            # reference vector scores the rescue cosine for a dropped low-signal HN
+            # story; the flag gates the filter_rejects write; RUN_ID tags the rows.
+            # Same env-only, read-at-startup semantics as GlobalNewsGoldFunction, and
+            # the same hard-fail if the committed .npy is missing (D-c helper).
+            self._reject_capture_enabled = REJECT_CAPTURE_ENABLED
+            self._run_id = RUN_ID
+            self._sniper_ref_vec = _load_sniper_reference_vector()
+            logger.info(
+                "[gold/flink] social reject capture %s (run_id=%r)",
+                "ENABLED" if self._reject_capture_enabled else "disabled",
+                self._run_id,
+            )
 
         def process_element(self, value: str, _ctx: ProcessFunction.Context):
             from persistence.social_vectors import insert as sv_insert
@@ -2671,6 +2919,7 @@ if PYFLINK_AVAILABLE:
                 exists_by_content_hash,
                 fetch_social_id_by_content_hash,
             )
+            from persistence.filter_rejects import insert_reject
 
             try:
                 silver_social = json.loads(value)
@@ -2679,31 +2928,100 @@ if PYFLINK_AVAILABLE:
                 yield (DLQ_TAG, json.dumps(dlq))
                 return
 
-            # Archive raw Silver record to social_vault and capture social_id.
-            # social_id is wired into gold_record["metadata"]["silver_data_ref"]
-            # so the RAG agent can drill down from the Gold vector to the raw
-            # Silver comments in social_vault (Gap 1 fix, Sprint 11, Section 5.1).
+            source_name  = silver_social.get("source_name", "")
+            content_hash = silver_social.get("content_hash", "")
+            is_high      = silver_social.get("is_high_signal", False)
+
+            # social_vault dedup check drives BOTH the T4 gate and the archive
+            # decision — computed once (fail-open). A NEW Silver record is archived
+            # here (incl. low-signal HN: the raw discussion archive must not change
+            # when the dedup gate toggles); a DUPLICATE is never re-archived, and its
+            # existing social_id is fetched LAZILY below, only on the path that
+            # actually persists a Gold vector. So a skipped (T4) / captured (T6) /
+            # DLQ'd record runs no extra social_vault query — the T3 discipline,
+            # applied to the social side. social_id is wired into
+            # gold_record["metadata"]["silver_data_ref"] so the RAG agent can drill
+            # down from the Gold vector to the raw Silver comments (Gap 1, Sprint 11).
             social_id: str | None = None
+            already_archived = False
             # Phase 9.5 Stage B Item 1b: retry transient DB errors (DNS race,
             # Postgres restart) before falling through to the non-fatal warning.
             try:
                 from utils.retry import retry_on_transient
-                content_hash = silver_social.get("content_hash", "")
-                if content_hash and exists_by_content_hash(content_hash):
-                    # Batch already archived — look up existing social_id rather
-                    # than re-inserting, so silver_data_ref is always populated.
-                    social_id = fetch_social_id_by_content_hash(content_hash)
-                else:
+                already_archived = bool(content_hash) and exists_by_content_hash(content_hash)
+                if not already_archived:
                     social_id = retry_on_transient(
                         sv_archive, silver_social,
                         op_name="social_vault.archive",
                     )
             except Exception as exc:
-                # Non-fatal: archive failure must not block Gold enrichment.
-                # silver_data_ref will remain None (unknown) — correct sentinel.
-                logger.warning("[gold/flink] social_vault.insert failed: %s", exc)
+                # Non-fatal, fail-open: a social_vault error must not block Gold
+                # enrichment. already_archived stays False; silver_data_ref remains
+                # None (the correct sentinel for an unknown reference).
+                logger.warning("[gold/flink] social_vault.archive failed: %s", exc)
 
-            source_name = silver_social.get("source_name", "")
+            # HackerNews: reject-capture (low-signal) THEN dedup gate (high-signal).
+            # The T6 capture is ordered BEFORE the T4 gate so a low-signal HN
+            # DUPLICATE is captured identically whether the gate is on or off (the
+            # named invariance assertion, §6). The gate is is_high_signal-guarded, so
+            # the two branches are mutually exclusive — a story is captured OR gated,
+            # never both. Polymarket comments fall straight through to
+            # process_social_pulse_message untouched (F8 / KG-A-4).
+            if source_name == "hackernews":
+                if not is_high:
+                    # T6 — KG-A-12: a low-signal HN story is dropped (never enriched).
+                    # Capture it to filter_rejects with its rescue cosine so Phase
+                    # 7B.5 can sweep a social-path threshold. Flag-gated + fail-open;
+                    # the cosine is captured, NOT promoted (D2 — 7B.5 owns promote).
+                    if self._reject_capture_enabled:
+                        try:
+                            cosine = compute_social_rescue_cosine(
+                                silver_social, self._openai_client, self._sniper_ref_vec
+                            )
+                        except Exception as exc:
+                            # An embed failure must not turn a clean drop into an
+                            # error — capture with cosine 0.0 (the REAL NOT NULL edge)
+                            # and move on (fail-open).
+                            logger.warning(
+                                "[gold/social_reject] cosine failed story_id=%s: %s "
+                                "— capturing 0.0",
+                                str(silver_social.get("story_id", ""))[:20], exc,
+                            )
+                            cosine = 0.0
+                        # insert_reject is itself fail-open (never raises); the caller
+                        # normalises the HN record into the news-doc shape (D5/O2) and
+                        # passes the instance key (T7) from the same _cost_trace_id()
+                        # chain — HN records carry no canonical_event_id yet, so this
+                        # resolves to bronze_ref.
+                        insert_reject(
+                            social_reject_doc(silver_social), cosine,
+                            run_id=self._run_id,
+                            canonical_event_id=_cost_trace_id(silver_social),
+                        )
+                    return  # dropped — no enrichment (mirrors today's (None,None) skip)
+
+                if self._dedup_gate_enabled and already_archived:
+                    # T4 — KG-A-7: high-signal HN already enriched on a prior
+                    # delivery. Skip — no archive (already there), no fetch (no Gold
+                    # record to build).
+                    logger.info(
+                        "[gold/dedup] skip HN enrichment — content_hash=%s… "
+                        "story_id=%s (already archived, KG-A-7)",
+                        (content_hash or "")[:16],
+                        str(silver_social.get("story_id", ""))[:20],
+                    )
+                    return
+
+            # Enrich path (high-signal HN not gated, or any Polymarket record). For a
+            # DUPLICATE we still need the existing social_id for silver_data_ref —
+            # fetch it lazily now, only on the path that actually persists a vector
+            # (a new record already captured social_id from sv_archive above).
+            if already_archived and social_id is None and content_hash:
+                try:
+                    social_id = fetch_social_id_by_content_hash(content_hash)
+                except Exception as exc:
+                    logger.warning("[gold/flink] fetch_social_id failed: %s", exc)
+
             if source_name == "hackernews":
                 topic, record = process_hackernews_gold_message(
                     silver_social,
@@ -2879,10 +3197,8 @@ if PYFLINK_AVAILABLE:
                 GOLD_SEMANTIC_RESCUE_THRESHOLD,
                 REJECT_CAPTURE_ENABLED,
                 RUN_ID,
+                ENRICHMENT_DEDUP_GATE_ENABLED,
             )
-            from processing.keyword_sniper import SNIPER_REFERENCE_VECTOR_PATH
-            import numpy as np
-
             self._openai_client = get_openai_client(api_key=OPENAI_API_KEY)
             self._rescue_threshold = GOLD_SEMANTIC_RESCUE_THRESHOLD
 
@@ -2898,22 +3214,22 @@ if PYFLINK_AVAILABLE:
                 self._run_id,
             )
 
-            # Load sniper reference vector — hard-fail at startup if missing (B4).
-            # Prevents silent regression to keyword-only filtering.
-            if not SNIPER_REFERENCE_VECTOR_PATH.exists():
-                logger.error(
-                    "[gold/flink] sniper_reference_vector.npy not found at %s. "
-                    "Run processing/build_sniper_reference_vector.py and commit "
-                    "the .npy file (Phase 7B T7B.6).",
-                    SNIPER_REFERENCE_VECTOR_PATH,
-                )
-                raise FileNotFoundError(
-                    f"sniper_reference_vector.npy missing: {SNIPER_REFERENCE_VECTOR_PATH}"
-                )
-            self._sniper_ref_vec = np.load(str(SNIPER_REFERENCE_VECTOR_PATH)).astype(np.float32)
+            # Phase 7D (§4.2): enrichment dedup gate flag, read once at startup —
+            # env-only toggle (pod restart; no image rebuild, no Flink resubmit).
+            # Logged so the gate state is verifiable in the job logs before any
+            # traffic flows (§8.3 live-smoke check).
+            self._dedup_gate_enabled = ENRICHMENT_DEDUP_GATE_ENABLED
             logger.info(
-                "[gold/flink] Sniper reference vector loaded — shape=%s threshold=%.2f",
-                self._sniper_ref_vec.shape, self._rescue_threshold,
+                "[gold/flink] enrichment dedup gate %s (KG-A-7)",
+                "ENABLED" if self._dedup_gate_enabled else "disabled",
+            )
+
+            # Load sniper reference vector via the shared helper (Phase 7D, D-c):
+            # hard-fails at startup if missing (B4), preventing silent regression to
+            # keyword-only filtering. PolymarketGoldSocialFunction loads it the same way.
+            self._sniper_ref_vec = _load_sniper_reference_vector()
+            logger.info(
+                "[gold/flink] semantic-rescue threshold=%.2f", self._rescue_threshold,
             )
 
         def _semantic_rescue(self, silver_doc: dict) -> tuple[bool, float]:
@@ -2979,6 +3295,7 @@ if PYFLINK_AVAILABLE:
             # Returns doc_id (UUID string) or None if document_hash already exists.
             # Non-fatal: archive failure must not block Gold enrichment.
             doc_id: str | None = None
+            archive_raised = False
             # Phase 9.5 Stage B Item 1b: retry transient DB errors.
             try:
                 from utils.retry import retry_on_transient
@@ -2987,7 +3304,29 @@ if PYFLINK_AVAILABLE:
                     op_name="knowledge_vault.archive",
                 )
             except Exception as exc:
+                # doc_id stays None — but this is a FAILURE, not a duplicate. The
+                # flag keeps the T3 gate below from misreading it as an already-
+                # archived hash (§3.3/D3): archive failure must proceed to enrichment.
+                archive_raised = True
                 logger.warning("[gold/flink] knowledge_vault.archive failed: %s", exc)
+
+            # T3 — KG-A-7 dedup gate (D3). The dedup signal is archive()'s return,
+            # computed just above and — until now — discarded. A duplicate is
+            # archive() returning None WITHOUT raising: skip enrichment / embedding /
+            # Gold-build / vector-write. An archive *failure* (archive_raised) also
+            # leaves doc_id None but must proceed to enrichment (fail-open) — the
+            # helper enforces that distinction. archive()'s own dedup check remains
+            # the last-resort guard (F1) and is not removed.
+            if dedup_skip_enrichment(
+                doc_id, archive_raised, gate_enabled=self._dedup_gate_enabled
+            ):
+                logger.info(
+                    "[gold/dedup] skip enrichment — document_hash=%s… source=%s "
+                    "(already archived, KG-A-7)",
+                    (silver_doc.get("document_hash", "") or "")[:16],
+                    silver_doc.get("source_name", ""),
+                )
+                return
 
             # Dispatch to the correct Gold process function by source_name.
             source_name = silver_doc.get("source_name", "")

@@ -20,7 +20,8 @@ record_usage) because insert_reject is called directly from the Flink drop
 branch with no intermediate policy layer.
 
 Public interface:
-    insert_reject(silver_doc, rescue_cosine, run_id=None) → reject_id (str) | None
+    insert_reject(silver_doc, rescue_cosine, run_id=None, canonical_event_id=None)
+                                                          → reject_id (str) | None
     fetch_rejects(run_id=None, limit=100)                 → list[dict]
 
 References:
@@ -47,6 +48,7 @@ def insert_reject(
     silver_doc: dict,
     rescue_cosine: float,
     run_id: Optional[str] = None,
+    canonical_event_id: Optional[str] = None,
 ) -> Optional[str]:
     """
     Persist one filter-rejected article. FAIL-OPEN — never raises.
@@ -61,10 +63,16 @@ def insert_reject(
     row here failed both stages by construction.
 
     Args:
-        silver_doc:    The Silver Full-Text Document that failed both stages.
-        rescue_cosine: Similarity returned by compute_semantic_rescue()
-                       (< threshold by construction; 0.0 for the empty-text edge).
+        silver_doc:    The Silver document that failed both stages. For the social
+                       path (HackerNews) the caller normalises the record into this
+                       news-doc shape first (Phase 7D, social_reject_doc / D5-O2).
+        rescue_cosine: Similarity returned by compute_semantic_rescue() / the social
+                       reject cosine (< threshold; 0.0 for the empty-text edge).
         run_id:        Collection-run tag; empty/None → stored as SQL NULL.
+        canonical_event_id: Instance key (Phase 7D, T7) — _cost_trace_id() of the
+                       rejected object, resolved at the caller (canonical_event_id
+                       or bronze_ref). Joins the reject back to its llm_cost_events
+                       / vault rows. Empty/None → stored as SQL NULL.
 
     Returns:
         reject_id (UUID string) on success, None on any failure (after a
@@ -73,6 +81,7 @@ def insert_reject(
     sql = """
         INSERT INTO filter_rejects (
             run_id,
+            canonical_event_id,
             source_name,
             original_url,
             title,
@@ -82,13 +91,14 @@ def insert_reject(
             sniper_keywords,
             rescue_cosine
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         RETURNING reject_id::text;
     """
     try:
         params = (
-            run_id or None,   # "" → NULL
+            run_id or None,              # "" → NULL
+            canonical_event_id or None,  # "" → NULL (Phase 7D, T7 — instance key)
             silver_doc.get("source_name", "unknown"),
             silver_doc.get("original_url", ""),
             silver_doc.get("title", ""),
@@ -105,8 +115,8 @@ def insert_reject(
         logger.debug(
             "[filter_rejects] captured reject_id=%s source=%s url=%s cosine=%.4f",
             reject_id,
-            params[1],
-            (params[2] or "")[:80],
+            params[2],   # source_name (index shifted by canonical_event_id at [1])
+            (params[3] or "")[:80],  # original_url
             rescue_cosine,
         )
         return reject_id
@@ -132,6 +142,7 @@ def fetch_rejects(run_id: Optional[str] = None, limit: int = 100) -> list[dict]:
             SELECT
                 reject_id::text,
                 run_id,
+                canonical_event_id,
                 source_name,
                 original_url,
                 title,
@@ -152,6 +163,7 @@ def fetch_rejects(run_id: Optional[str] = None, limit: int = 100) -> list[dict]:
             SELECT
                 reject_id::text,
                 run_id,
+                canonical_event_id,
                 source_name,
                 original_url,
                 title,

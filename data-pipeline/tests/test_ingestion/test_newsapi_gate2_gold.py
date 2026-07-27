@@ -479,16 +479,32 @@ class TestNewsAPIGoldSchema:
         """content_vitals.title must match silver_doc.title."""
         assert gold_record["content_vitals"]["title"] == silver_doc_high_signal["title"]
 
-    def test_signal_id_unique_per_call(self, silver_doc_high_signal, mock_ai_meta):
+    def test_signal_id_deterministic_per_document(self, silver_doc_high_signal, mock_ai_meta):
         """
-        signal_id must be a fresh UUID on each call — each Gold record is
-        a distinct row in knowledge_vectors with its own primary key.
+        signal_id is DETERMINISTIC (KG-A-8, Phase 7D T5): the same Silver document
+        (same document_hash) produces the SAME signal_id on every delivery, so
+        knowledge_vectors ON CONFLICT (signal_id) dedups re-deliveries instead of
+        accumulating a near-duplicate vector each time.
+
+        The negative case is the point: a DIFFERENT document_hash must produce a
+        DIFFERENT signal_id — that proves the builder threads document_hash through.
+        A builder keyed on a constant, or on source_name/doc_id, would still pass
+        "same doc → same id" but fail here.
         """
-        client = _make_openai_client(mock_ai_meta)
-        _, r1 = process_newsapi_gold_message(silver_doc_high_signal, client)
-        client2 = _make_openai_client(mock_ai_meta)
-        _, r2 = process_newsapi_gold_message(silver_doc_high_signal, client2)
-        assert r1["metadata"]["signal_id"] != r2["metadata"]["signal_id"]
+        _, r1 = process_newsapi_gold_message(silver_doc_high_signal, _make_openai_client(mock_ai_meta))
+        _, r2 = process_newsapi_gold_message(silver_doc_high_signal, _make_openai_client(mock_ai_meta))
+        assert r1["metadata"]["signal_id"] == r2["metadata"]["signal_id"], (
+            "same document_hash → same signal_id (deterministic)"
+        )
+
+        other = dict(silver_doc_high_signal)
+        h = other["document_hash"]
+        other["document_hash"] = ("f" + h[1:]) if h[0] != "f" else ("0" + h[1:])
+        assert other["document_hash"] != h
+        _, r3 = process_newsapi_gold_message(other, _make_openai_client(mock_ai_meta))
+        assert r3["metadata"]["signal_id"] != r1["metadata"]["signal_id"], (
+            "different document_hash → different signal_id (builder threads the right field)"
+        )
 
 
 # ==========================================================

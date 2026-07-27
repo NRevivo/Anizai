@@ -105,6 +105,30 @@ REJECT_CAPTURE_ENABLED = (
 RUN_ID = os.getenv("RUN_ID", "")
 
 # ==========================================================
+# 5d. Enrichment Dedup Gate (Phase 7D, §4.2 — KG-A-7)
+# ==========================================================
+# ENRICHMENT_DEDUP_GATE_ENABLED gates the pre-dispatch dedup skip on both Gold
+# paths, so an already-seen item is not re-enriched:
+#   - global_news (GlobalNewsGoldFunction): when knowledge_vault.archive()
+#     returns None WITHOUT raising, the document_hash is already archived, so
+#     enrichment / embedding / Gold-build / vector-write are skipped. An archive
+#     *failure* (raised, caught → doc_id still None) still proceeds to
+#     enrichment — fail-open, so a dedup outage never silently stops ingestion.
+#   - social / HackerNews (PolymarketGoldSocialFunction): when a high-signal
+#     story is already in social_vault (exists_by_content_hash), the consensus
+#     call is skipped.
+# Default TRUE — this is a kill switch, not an experiment: the gate is the
+# sprint's purpose (RPD headroom before the multi-day run). Read at job startup
+# (open()); toggling requires a pod restart only (env-only — no image rebuild,
+# no Flink cancel/resubmit). The archive() dedup guard and the
+# knowledge_vectors/social_vectors ON CONFLICT guards remain the last-resort
+# correctness backstops regardless of this flag (F1/F6).
+ENRICHMENT_DEDUP_GATE_ENABLED = (
+    os.getenv("ENRICHMENT_DEDUP_GATE_ENABLED", "true").strip().lower()
+    in {"1", "true", "yes"}
+)
+
+# ==========================================================
 # 6. Source Credentials — Grouped by Producer
 # ==========================================================
 

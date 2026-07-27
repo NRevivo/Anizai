@@ -523,7 +523,8 @@ CREATE INDEX IF NOT EXISTS idx_rtl_session_time
 CREATE TABLE IF NOT EXISTS filter_rejects (
     reject_id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     run_id                TEXT,                    -- day-run tag (RUN_ID env); NULL outside tagged runs
-    source_name           TEXT NOT NULL,           -- newsapi / arxiv / telegram
+    source_name           TEXT NOT NULL,           -- newsapi / arxiv / telegram / hackernews (social path, Phase 7D). No CHECK constraint — see migration 004.
+    canonical_event_id    TEXT,                    -- instance key (Phase 7D, T7): _cost_trace_id() of the rejected object; joins the reject back to llm_cost_events / vault rows. NULL for pre-7D rows.
     original_url          TEXT,
     title                 TEXT,
     inverted_pyramid_lead TEXT,
@@ -536,6 +537,10 @@ CREATE TABLE IF NOT EXISTS filter_rejects (
 
 CREATE INDEX IF NOT EXISTS idx_filter_rejects_run
     ON filter_rejects (run_id, rejected_at);
+
+-- Instance-key lookup (Phase 7D, T7): resolve a reject back to its canonical event.
+CREATE INDEX IF NOT EXISTS idx_filter_rejects_cei
+    ON filter_rejects (canonical_event_id);
 
 
 -- ==========================================================

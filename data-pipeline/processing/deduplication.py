@@ -116,5 +116,51 @@ def hash_social_batch(market_id: str, comments: list[dict]) -> str:
     return sha256_hash(f"{market_id}|{'|'.join(ids)}")
 
 
+# ==========================================================
+# Story Deduplication — HackerNews (Phase 7D, D1a)
+# ==========================================================
+
+def hash_hackernews_story(story_id: str) -> str:
+    """
+    Stable dedup key for a HackerNews story, keyed on story_id ALONE
+    (Phase 7D, decision D1a — plan §3).
+
+    Why story_id-only, not hash_social_batch(story_id, top_comments):
+        D1a is "one enrichment per HackerNews story, ever." The previous
+        derivation folded the comment set into the hash, so the key drifted every
+        pulse as comments accrued — re-archiving and re-enriching the same story
+        repeatedly (the social side of KG-A-7 / KG-A-8). Keying on story_id alone
+        makes the key — and therefore the social_vault dedup check and the
+        _deterministic_signal_id() UUID5 derived from this same content_hash —
+        stable for the life of the story. HackerNews is a social-pulse source
+        feeding community sentiment; re-analysing a story as its comment count
+        drifts is low-value relative to its RPD cost. If the multi-day run shows HN
+        evidence is load-bearing, D1 option (c) (a refresh window) becomes a
+        data-backed follow-up rather than a guess made now.
+
+    Why the "hackernews|" namespace prefix:
+        story_id is an Algolia objectID (a bare integer string); the prefix keeps
+        it from ever colliding with another source's key in the shared
+        social_vault content_hash space.
+
+    Whitespace normalisation (Phase 7D, T7):
+        story_id is stripped before hashing, so " 12345 " and "12345" produce the
+        SAME key. A stray whitespace difference must never fork a story's dedup
+        identity — the Silver mapper strips it too, and this is the defensive
+        backstop that keeps the pure hasher stable for any caller.
+
+    Args:
+        story_id: HackerNews Algolia objectID — the story's stable identifier.
+
+    Returns:
+        64-character SHA-256 hex string.
+
+    Usage (Silver Job — HackerNews branch, map_hackernews_story_to_silver):
+        content_hash = hash_hackernews_story(story_id)
+        # stored as `content_hash` in the Silver Social record (Section C.3)
+    """
+    return sha256_hash(f"hackernews|{str(story_id).strip()}")
+
+
 # Reddit deduplication (hash_reddit_post) removed — Sprint 11 T4.
 # Reddit API pre-approval required (Nov 2025 policy). All code removed.

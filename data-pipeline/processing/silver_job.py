@@ -80,7 +80,7 @@ from config.kafka_topics import (
     SILVER_SOCIAL_PULSE,
     SILVER_STRUCTURED_METRICS,
 )
-from processing.deduplication import hash_document, hash_social_batch
+from processing.deduplication import hash_document, hash_social_batch, hash_hackernews_story
 from processing.keyword_sniper import snipe, snipe_article
 from processing.translation import (
     needs_translation,
@@ -1273,13 +1273,17 @@ def map_hackernews_story_to_silver(raw: dict, envelope: dict) -> dict:
         double-counting. content="" because there is no separate article body
         at Bronze time (Section 4.1A).
 
-    Why content_hash uses hash_social_batch(story_id, top_comments):
-        Follows the Polymarket comment branch pattern — story_id anchors the
-        batch, top comment IDs form the content fingerprint. A story re-fetched
-        within the same pulse window with identical top_comments produces the
-        same hash and is deduplicated by the Social Vault (Section 4.1C).
-        If new top comments appear in the next pulse, the hash changes and the
-        story is re-ingested with updated commentary.
+    Why content_hash uses hash_hackernews_story(story_id) — Phase 7D, D1a:
+        story_id ALONE is the dedup anchor: one enrichment per HackerNews story,
+        ever (plan §3, decision D1a). The earlier derivation,
+        hash_social_batch(story_id, top_comments), folded the comment set into the
+        hash, so the key drifted every pulse as comments accrued and the same
+        story was re-archived and re-enriched (the social side of KG-A-7/KG-A-8).
+        Keying on story_id alone makes both the social_vault dedup check and the
+        _deterministic_signal_id() UUID5 derived from this content_hash stable for
+        the life of the story. NOTE: this changes the key's semantics, so on first
+        deploy every in-flight story presents a never-before-seen key once and is
+        enriched one final time — expected, not a fault (plan §3/D1, §8.3 step 7).
 
     Why no impact_boost:
         Impact Boost is reserved for NewsAPI articles covering Israeli/Middle
@@ -1300,7 +1304,7 @@ def map_hackernews_story_to_silver(raw: dict, envelope: dict) -> dict:
         Silver Social dict conforming to the HackerNews Story-Centric pattern
         in Section C.3, passing validate_silver_social() without errors.
     """
-    story_id     = str(raw.get("story_id", ""))
+    story_id     = str(raw.get("story_id", "")).strip()  # strip so whitespace never forks the dedup key (T7)
     title        = raw.get("title", "")
     url          = raw.get("url", "")           # empty for Ask HN (no external link)
     story_text   = raw.get("story_text", "")    # Ask HN / Show HN body text
@@ -1316,8 +1320,9 @@ def map_hackernews_story_to_silver(raw: dict, envelope: dict) -> dict:
         content="",              # no full-text body available at Bronze time
     )
 
-    # SHA-256 dedup (Section 4.1C) — story_id + sorted top comment IDs
-    content_hash = hash_social_batch(story_id, top_comments)
+    # SHA-256 dedup (Section 4.1C; Phase 7D D1a) — story_id ALONE (one enrichment
+    # per story, ever). See map_hackernews_story_to_silver docstring for rationale.
+    content_hash = hash_hackernews_story(story_id)
 
     return {
         # --- Silver Social Discourse Store — HackerNews Story-Centric (Section C.3) ---
@@ -1363,7 +1368,7 @@ def process_hackernews_message(
         2. Payload fails validate_bronze_payload()    → (DEAD_LETTER_QUEUE, dlq)
         3. raw_payload.story_id is empty              → (DEAD_LETTER_QUEUE, dlq)
            Why: story_id is the Kafka partition key and the dedup anchor for
-           hash_social_batch(). A story without an ID cannot be deduplicated
+           hash_hackernews_story(). A story without an ID cannot be deduplicated
            and must not enter the Social Vault (Section 4.1C).
         4. raw_payload.title is empty                 → (DEAD_LETTER_QUEUE, dlq)
            Why: title is the primary display field in the Gold Social schema
@@ -1416,13 +1421,13 @@ def process_hackernews_message(
     raw = payload.get("raw_payload", {})
 
     # --- Guard: story_id must be non-empty ---
-    # story_id is the Kafka partition key and hash_social_batch() anchor.
+    # story_id is the Kafka partition key and hash_hackernews_story() anchor.
     # An empty story_id means the Algolia objectID was missing — this story
     # cannot be deduplicated and must not enter the Social Vault (Section 4.1C).
     if not str(raw.get("story_id") or "").strip():
         errors = [
             "raw_payload.story_id is empty — story_id is the partition key and "
-            "dedup anchor for hash_social_batch() (Section 4.1C)."
+            "dedup anchor for hash_hackernews_story() (Section 4.1C)."
         ]
         logger.error(
             "[silver/hackernews] Missing story_id for event_id=%s",

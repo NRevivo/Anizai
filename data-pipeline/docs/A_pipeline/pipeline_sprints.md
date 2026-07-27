@@ -1,7 +1,7 @@
 # pipeline_sprints.md
 > Domain: A — Pipeline
 > Type: Sprints
-> Last updated: 2026-07-23
+> Last updated: 2026-07-26
 > TL;DR: Live status of the pipeline — what's closed, the open sprints (Phase 7B.5 calibration + its 7B.5-I instrumentation prerequisite), deferred items, and the Domain A Known Gaps (KG-A-*). Open this to see what pipeline work remains.
 
 ## Navigation
@@ -31,6 +31,7 @@
 | Phase 7C — Scraper retirement | Closed | 2026-05-09 | Scraper deleted; `scrape_attempted` dropped; `newspaper4k` removed | — |
 | Phase 7B.5 — Filter-threshold calibration | Open (queued) | — | Empirically validate the 7B thresholds + A1 removals on production vault data | `plans/phase7b5_filter_calibration.md` |
 | Phase 7B.5-I — Filter observability & cost instrumentation | Open (active) | — | Reject retention + `rescue_cosine` persistence + per-call LLM cost events/views; one-day cloud collection run produces the 7B.5 dataset + the pipeline-day cost number | `plans/phase7b5i_filter_observability_and_cost.md` |
+| Phase 7D — Enrichment gating & social-path reject coverage | Open (active) | — | Gate Gold enrichment on the dedup that already runs one step earlier (KG-A-7); deterministic global_news `signal_id` (KG-A-8); social-path reject capture incl. HackerNews (KG-A-12); `filter_rejects` instance key; close KG-A-13 | `plans/phase7d_enrichment_gating.md` |
 
 > Closed rows have no `plans/` file — their detail lives in `pipeline_archive.md`
 > (and, for old flat-format work, `../../task_plan_archive.md`).

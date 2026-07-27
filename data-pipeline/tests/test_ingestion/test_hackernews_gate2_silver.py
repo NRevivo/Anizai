@@ -47,13 +47,13 @@ Key HackerNews departures from Telegram/ArXiv Silver Gate 2:
   - Guard on title (not message_text) — primary Gold embedding input
   - validate_silver_social() (not validate_silver_document())
   - No impact_boost field — not applicable to HackerNews (Section B.2)
-  - content_hash = hash_social_batch(story_id, top_comments) (Section 4.1C)
+  - content_hash = hash_hackernews_story(story_id) — story_id-only, D1a (Section 4.1C)
   - DLQ source_topic = BRONZE_HACKERNEWS
 
 References:
     - Section 4.1:   Silver Job specification
     - Section 4.1A:  Keyword Sniper — gates Gold OpenAI call (not Silver emission)
-    - Section 4.1C:  SHA-256 deduplication — hash_social_batch(story_id, top_comments)
+    - Section 4.1C:  SHA-256 deduplication — hash_hackernews_story(story_id) (D1a)
     - Section 4.4:   Mock-Driven Development
     - Section 9.3:   Triple-Gate Test Matrix — Gate 2
     - Section B.2:   HackerNews ingestion parameters (points > 50, pulse mode)
@@ -74,7 +74,7 @@ from config.kafka_topics import (
     DEAD_LETTER_QUEUE,
     SILVER_SOCIAL_PULSE,
 )
-from processing.deduplication import hash_social_batch
+from processing.deduplication import hash_hackernews_story
 from processing.silver_job import map_hackernews_story_to_silver, process_hackernews_message
 from utils.kafka_utils import build_bronze_message
 from utils.validators import validate_silver_social
@@ -447,15 +447,27 @@ class TestHackerNewsSilverDedup:
         _, r_b = process_hackernews_message(_build_envelope(raw_b))
         assert r_a["content_hash"] != r_b["content_hash"]
 
-    def test_hash_social_batch_matches_silver_content_hash(self, silver_record, hn_raw):
+    def test_hn_content_hash_is_story_id_only(self, silver_record, hn_raw):
         """
-        content_hash == hash_social_batch(story_id, top_comments).
-
-        Confirms the Silver Job uses the correct dedup function (not hash_document)
-        and that the implementation matches the canonical formula (Section 4.1C).
+        D1a: content_hash keys on story_id ALONE (one enrichment per story, ever) —
+        the regression guard. If anyone ever reverts to comment-inclusive hashing
+        (hash_social_batch), this fails immediately and by name: the SAME story_id
+        with a DIFFERENT top_comments set must yield the SAME content_hash.
+        (Different story_id → different hash is covered by
+        test_different_stories_produce_different_hashes.)
         """
-        expected = hash_social_batch(
-            str(hn_raw["story_id"]),
-            hn_raw["top_comments"],
+        few  = copy.deepcopy(hn_raw)
+        many = copy.deepcopy(hn_raw)
+        few["top_comments"]  = [{"text": "a", "comment_id": "1"}]
+        many["top_comments"] = [
+            {"text": "a", "comment_id": "1"},
+            {"text": "b", "comment_id": "2"},
+            {"text": "c", "comment_id": "3"},
+        ]
+        _, r_few  = process_hackernews_message(_build_envelope(few))
+        _, r_many = process_hackernews_message(_build_envelope(many))
+        assert r_few["content_hash"] == r_many["content_hash"], (
+            "same story_id, different comments → same content_hash (story_id-only, D1a)"
         )
-        assert silver_record["content_hash"] == expected
+        # Call-site check (kept): the key is exactly hash_hackernews_story(story_id).
+        assert silver_record["content_hash"] == hash_hackernews_story(str(hn_raw["story_id"]))
