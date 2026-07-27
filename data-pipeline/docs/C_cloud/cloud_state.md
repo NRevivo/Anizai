@@ -1,7 +1,7 @@
 # cloud_state.md
 > Domain: C — Cloud
 > Type: State
-> Last updated: 2026-07-26 (§1 + §3 replica-hold rows refreshed to live after the agent-only cloud run; agent, pipeline image tags, and §6 Scheduler/Airflow verified 2026-07-23–26; monitoring/storage rows as of 2026-06-15, unverified against live)
+> Last updated: 2026-07-27 (§1 + §3 Flink image rolled to `1.19.1-7d` by Phase 7D T11, verified against the T11 deployment log — running JM+TM imageID matched the Artifact Registry digest `sha256:9a73a780…`; the Flink `replicas: 0` hold is superseded by the same apply. §3 `telegram` / `polymarket` replica-hold rows as verified 2026-07-26 after the agent-only cloud run; agent + airflow image tags and §6 Scheduler/Airflow verified 2026-07-23–26; monitoring/storage rows as of 2026-06-15, unverified against live)
 > TL;DR: Current GKE runtime state — what is deployed, what runs only locally, the known
 > cluster gaps (KG-C-*), and the Scheduler/Airflow state. Open this to answer "what is
 > actually running in cloud right now, and what isn't?"
@@ -23,8 +23,10 @@ topology and the deployed-workload macro view; read this file for the precise
 **deployed-vs-local-only boundary** and the gaps that affect a cloud run.
 
 **The one fact that matters most:** the cloud no longer runs a uniformly Phase-9.5-era stack.
-Two workloads have rolled since the 9.5 closeout: the **pipeline** (flink + airflow) to
-`-7b5i` in **Phase 7B.5-I T7** (the day-run image), and the **agent** to
+Three rolls have landed since the 9.5 closeout: the **pipeline** (flink + airflow) to
+`-7b5i` in **Phase 7B.5-I T7** (the day-run image); **flink alone** onward to
+`anizai-flink:1.19.1-7d` in **Phase 7D T11** on **2026-07-27** (airflow stays at
+`-7b5i` — the `anizai-airflow` rebuild is still pending as Stage 2 T2.1); and the **agent** to
 **`anizai-agent:0.5.0-sprint26` at `replicas:0`** (hard-off) on **2026-07-23** (B-deploy
 Stage 1 — the cumulative hub Sprint 22–26 image). Sprint 27 remains
 open hub work (not built). Primary source for the refreshed rows: the live cluster + the
@@ -76,7 +78,7 @@ for the full image/version table; this lists kind + the most recent change per w
 | kafka | StatefulSet | KRaft; `KAFKA_LOG_DIRS=/var/lib/kafka/data/kafka-logs` (durable PVC subdir, 9.5-A); 19 topics | 9.5-A |
 | postgres | StatefulSet | `timescale/timescaledb-ha:pg16`; `publishNotReadyAddresses: true` (9.5-B) | 9.5-B |
 | airflow-postgres | StatefulSet | `postgres:16`, metadata DB | Phase 9 (9D) |
-| flink-jobmanager / -taskmanager | Deployment | `anizai-flink:1.19.1-7b5i` (7B.5-I T7 deploy); K8s HA enabled (Phase 9 follow-up, 2026-05-19). **Held at `replicas: 0` live (manifest says 1 — KG-C-10)** | 7B.5-I T7 (day-run); hold verified 2026-07-26 |
+| flink-jobmanager / -taskmanager | Deployment | `anizai-flink:1.19.1-7d` (Phase 7D T11 deploy, 2026-07-27 — new tag, `-7b5i` never overwritten); K8s HA enabled (Phase 9 follow-up, 2026-05-19). **The 2026-07-26 `replicas: 0` hold is superseded** — T11 §8.3 step 6 applied both manifests, which declare `replicas: 1`, and that is what brought Flink up for the window (git and live now agree for these two; the KG-C-10 drift persists for `telegram` / `polymarket`). Note the manifest edits were left **uncommitted** during the window; the durable set lands in the teardown commit | 7D T11 (2026-07-27) |
 | airflow-scheduler | Deployment | `anizai-airflow:2.9.3-7b5i` (7B.5-I T7 deploy); liveness probe :8974 (9.5-A); hosts 7 producer DAGs (**now manually paused — see §6**) | 7B.5-I T7 (day-run) |
 | airflow-webserver | Deployment | `anizai-airflow:2.9.3-7b5i` (7B.5-I T7 deploy) | 7B.5-I T7 (day-run) |
 | kafka-ui | Deployment | `provectuslabs/kafka-ui:v0.7.2` | Phase 9 (9B) |

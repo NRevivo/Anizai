@@ -2,7 +2,10 @@
 
 > Domain: C — Cloud (operational)
 > Type: Guide
-> Last updated: 2026-07-26
+> Last updated: 2026-07-27 (boundary-hygiene pass with `cluster_operations_guide.md`:
+> §3 Step 4 Firestore gate widened to three options and moved earlier; §4 Teardown gained
+> a close-the-taps step and a Postgres backup gate; §5 trap 3 rewritten — the Flink half
+> of the sampling claim is withdrawn and `LOG_INFO_SAMPLE_RATE` is now banned on Flink)
 > TL;DR: **One** bring-up/teardown procedure with a **profile selector** — AGENTS,
 > PIPELINE, or FULL. Point Claude Code at this file and name a profile. Procedural
 > only: it holds sequences and gates, never live facts (those live in
@@ -121,9 +124,27 @@ entire current match set as ADDED on first attach:
 2. collection-group `messages` where `role == 'user'` and `status == 'sent'`
 
 Anything already sitting in either set is claimed and processed *immediately* —
-before you ask a single question. Count both. If either is non-zero, decide before
-proceeding: clear them (flip status; do not delete), or accept and record that the
-session's first N runs are not yours.
+before you ask a single question.
+
+**This check is free, and it does not need the cluster. Run it first, before you
+resize anything.** Firestore lives in a different GCP project (`anizai-ai`) and is
+reachable whether or not a node exists, so both counts can be taken while the pool is
+still at 0. Treat it as a decision you make *before* the session, not a step you
+discover halfway through it.
+
+Count both sets. If either is non-zero, choose deliberately between three options —
+not two:
+
+1. **Clear them** — flip status; do not delete.
+2. **Accept them**, and record that the session's first N runs are not yours.
+3. **Do not bring the agent up at all.** A large or unexplained queue is a legitimate
+   reason to stop and decide before spending anything. Under AGENTS that means
+   abandoning or postponing the session; under FULL it means running pipeline-only for
+   now and scaling `agent-worker` later.
+
+The cost of skipping this is not hypothetical: on 2026-07-26 an agent-only bring-up
+would have executed **nine unsolicited follow-ups across six historical sessions**
+before the operator asked anything (§5 trap 2).
 
 Also worth a look: `forecastQueries` stuck at `claimed`. Nothing scans that status, so
 a document orphaned by a crashed worker sits there permanently. It will not be picked
@@ -137,7 +158,9 @@ the drop procedure). Then confirm OpenAI credit and RPD headroom — a large bac
 replay and a forecast session share one account and one ceiling.
 
 **All profiles — observability.** If this session's purpose is to produce numbers,
-read §5 trap 3 first. The numbers you want may not be reaching the logs.
+read §5 trap 3 first. The numbers you want may not be reaching the logs — and the
+obvious remedy is banned: **do not set `LOG_INFO_SAMPLE_RATE` on the Flink workloads.**
+It killed the TaskManager twice on 2026-07-27 and cost hours.
 
 ### Step 5 — Bring the agent up (AGENTS / FULL only)
 
@@ -158,18 +181,34 @@ Any failure → stop and report. Do not repair by editing manifests mid-session.
 
 1. **Confirm durability before removing anything.** Firestore is external and
    survives regardless. Postgres and Prometheus survive on their PVCs. Container
-   stdout goes to Cloud Logging — verify it is actually queryable there (mind
-   `textPayload` vs `jsonPayload.message`), and dump it if it is not.
+   stdout goes to Cloud Logging — verify it is actually queryable there and dump it if
+   it is not (`cluster_operations_guide.md` §11 holds the filters and the
+   `textPayload` vs `jsonPayload.message` trap).
 2. **Know where the numbers live.** Cost and per-node latency come from the agent's
    Prometheus counters, not the logs (§5 trap 3). Prometheus retention is finite and
    the retention clock is evaluated *on startup*, so data that survives a teardown can
    still be purged minutes into the next bring-up. **If a session produced numbers
    worth keeping, write them into a doc during the session.**
-3. Scale `agent-worker` to 0.
-4. Resize `main-pool` to 0. Confirm zero nodes.
-5. **State the carry-over explicitly.** Which workloads were held at 0 and were
-   deliberately *not* restored? Whoever brings the cluster up next needs that
-   sentence, or they will spend an hour wondering why Bronze is silent.
+3. **Close the taps before anything else stops.** Re-pause whatever DAGs this session
+   unpaused; scale `telegram` and `polymarket` back to 0 if the profile brought them
+   up. Under PIPELINE / FULL you may also cancel the Flink jobs for a clean final
+   checkpoint and tidy HA state — not required, since HA preserves the graphs either
+   way, but it produces better diagnostics next time (`cluster_operations_guide.md`
+   §3 holds the command). Nothing below this step should be done while data is still
+   flowing.
+4. **Back up Postgres if anything wrote to it this session.** Flink writes to the
+   vaults, and a schema migration counts; the agent reads only. If either happened,
+   take a manual backup now — `cluster_operations_guide.md` §8 holds the procedure.
+   **Why this is a gate and not a nicety:** the `postgres-backup` CronJob fires at
+   02:00 UTC and is not aware of scale-downs (KG-C-9), so a session that opens and
+   closes between two firings is never backed up at all. Two daily backups were
+   already missed this way in May 2026.
+5. Scale `agent-worker` to 0.
+6. Resize `main-pool` to 0. Confirm zero nodes.
+7. **State the carry-over explicitly.** Which workloads were held at 0 and were
+   deliberately *not* restored? Which DAGs are left paused? Whoever brings the cluster
+   up next needs those sentences, or they will spend an hour wondering why Bronze is
+   silent.
 
 ---
 
@@ -187,19 +226,60 @@ historical sessions before the operator asked anything. The parent-`done` guard 
 not help: a follow-up's parent is *always* done, so the guard always passes, and there
 is no age check. Always run the Step 4 gate.
 
-**3 — INFO logs are 1 %-sampled; the numbers live in Prometheus.**
-`utils/logging_config.setup_logging()` installs a sampling filter: WARNING and above
-pass at 100 %, INFO passes at `LOG_INFO_SAMPLE_RATE` (default **0.01**). The policy was
-written for a pipeline handling ~100 msg/s; it applies to the agent too, which handles
-single-digit forecasts per hour. `setup_logging()` is idempotent and first-caller-wins,
-so an import-time call anywhere in the agent's dependency graph silently configures it
-for the whole process.
+**3 — Log sampling: what is proven, what is not, and what you must not do about it.**
+This trap is the canonical statement of the sampling behaviour. `cluster_operations_guide.md`
+§5.6 and §11 defer to it; if they ever disagree with this section, this section wins.
 
-Consequence: `llm_usage` lines (emitted at INFO) do not reliably reach Cloud Logging.
-Do not plan a measurement session around grepping them. The durable sources are
-`agent_llm_cost_usd_total` and `agent_node_duration_seconds` in Prometheus. To get full
-INFO for a session, set `LOG_INFO_SAMPLE_RATE=1.0` on the agent Deployment — it is read
-at module import, so this requires a fresh pod. (Related: KG-B-4.)
+*The mechanism.* `utils/logging_config.setup_logging()` installs a sampling filter:
+WARNING and above pass at 100 %, INFO passes at `LOG_INFO_SAMPLE_RATE` (default
+**0.01**). `setup_logging()` is idempotent and first-caller-wins, so an import-time call
+anywhere in a process's dependency graph silently configures it for that whole process.
+
+*The agent — evidenced.* Sampling demonstrably applies. A ~20-hour agent session on
+2026-07-25/26 produced **7 log entries in total**. `llm_usage` lines are emitted at INFO
+and therefore do not reliably reach Cloud Logging: do not plan a measurement session
+around grepping them. The durable sources are `agent_llm_cost_usd_total` and
+`agent_node_duration_seconds` in Prometheus. (Related: KG-B-4.)
+
+*Flink — the same claim, and it does not hold.* This file used to assert that the
+sampling applies to the Flink jobs too. **That half was contradicted by direct
+observation on 2026-07-27:** with the variable absent and the code default at 0.01, the
+operator startup lines and the `[gold/dedup]` skip lines all appeared on the Flink UDF
+path — at a true 1 % sample they would have been essentially none. Treat the Flink half
+of the sampling claim as **unverified**, and do not plan around it in either direction.
+
+> ### Do not set `LOG_INFO_SAMPLE_RATE` on the Flink workloads.
+>
+> Setting it to `1.0` on the JobManager / TaskManager manifests **killed the pipeline on
+> 2026-07-27.** The TaskManager was OOMKilled (exit 137) twice — 38 s and then 34 s after
+> data arrived — and it cost hours.
+>
+> The evidence is a clean natural experiment, not a hunch. Attempt 1 died at the
+> committed `2560Mi`. The limit was raised to `6Gi` and attempt 2 died at 34 s — 2.4× the
+> memory moved time-to-kill by four seconds, which is the signature of consumption
+> growing with throughput, not of a fixed footprint meeting a wall. Attempt 3 reverted
+> the limit to `2560Mi` **and removed the variable**, processed the same accumulated
+> queue, and ran clean with zero restarts. Same burst, same memory, one variable
+> different, opposite outcome. JVM heap stayed a flat bounded sawtooth (~170–536 MB)
+> throughout, so the growth was entirely Python-side.
+>
+> **The mechanism is not established — do not assume it is log volume.** The first
+> explanation offered (roughly a hundredfold increase in log records) is inconsistent
+> with the observation above: if INFO passes unsampled on this path either way, setting
+> the variable to `1.0` cannot have multiplied record volume, so something else is
+> responsible. Unresolved. Raising the container memory limit is **not** the workaround
+> — `6Gi` proved that. If a session genuinely needs full INFO out of Flink, the
+> Python-side memory has to be bounded first (`python.fn-execution.*` / managed memory).
+> That is real PyFlink tuning work, not a manifest edit.
+
+*The agent Deployment is a different manifest and a different decision.* `1.0` is
+recommended there in several places (KG-B-4), but **it has never actually been set** —
+the variable is absent from `agent-deployment.yaml` as of 2026-07-27, and the
+2026-07-25/26 run went out at the 1 % default. The agent's volume is lower by orders of
+magnitude, so it is probably safe — but probably is the honest word while the Flink
+mechanism is unexplained. If you set it, do it as a deliberate step with the pod watched
+for the first few minutes, not as routine pre-session hygiene. It is read at module
+import, so it needs a fresh pod. The durable numbers come from Prometheus regardless.
 
 **4 — Live replicas have drifted from git, in the direction that bites.**
 On 2026-07-26 `flink-jobmanager`, `flink-taskmanager`, `telegram` and `polymarket` were

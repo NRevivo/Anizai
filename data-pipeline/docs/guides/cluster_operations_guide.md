@@ -4,9 +4,16 @@
 This is the long-term reference for operating the running pipeline.
 Audience: Ron, and future Claude sessions reaching for "how do I X?".
 
+> Last updated: 2026-07-27 — boundary-hygiene pass with `bringup_profiles.md`. Live
+> state (image tags, replica counts, DAG pause state, Scheduler state) was removed from
+> §1, §3, §4 and §12 and now lives only in `cloud_state.md`; §3 was rescoped from a
+> start/stop checklist to a raw-command reference under `bringup_profiles.md`; §8 gained
+> a manual-backup procedure; the INFO-sampling claim in §5.6 and §11 was corrected — it
+> is proven for the agent and **withdrawn for Flink**. See §15 for the standing rule.
+
 For one-time deployment history see
-`data-pipeline/docs/archive/cloud_deployment_implementation.md` (Phase 9)
-and `data-pipeline/docs/phase95_cluster_robustness_implementation.md`
+`data-pipeline/docs/old_docs/cloud_deployment_implementation.md` (Phase 9)
+and `data-pipeline/docs/old_docs/phase95_cluster_robustness_implementation.md`
 (Phase 9.5).
 
 For day-to-day port-forward commands see
@@ -32,28 +39,32 @@ which always wins over anything written here.
   collection windows). `polymarket-pool` was deleted in Phase 9.5 Stage A
   (KG-PHASE-9.5 carry: Polymarket now runs on main-pool with everything else).
 - Namespace: `anizai`.
-- Cloud Scheduler jobs `scale-up-main-pool` / `scale-down-main-pool` exist
-  but are currently **PAUSED** (verified live 2026-07-26). Ron resumes them
-  manually. The one-shot auto-close job created for the Domain-A day-run fired
-  on 2026-07-23 and has since been deleted — only the two recurring jobs remain,
-  so nothing will scale the pool on its own.
+- Cloud Scheduler jobs `scale-up-main-pool` / `scale-down-main-pool` exist. Whether
+  they are paused or enabled at any moment is **live state and is not recorded here**
+  — see `cloud_state.md` §6, and above it `gcloud scheduler jobs list`. The resume
+  procedure and its readiness checklist are §4 below.
 
 ### Per-pod purpose
+
+> **Image tags and replica counts are deliberately not stated here.** The Image column
+> below names the image, never its tag — which tag is deployed is live state and belongs
+> to `cloud_state.md` §3, and above it to the cluster. This guide advertised tags three
+> rebuilds out of date once; the column is kept narrow so it cannot happen again.
 
 | Pod | Image | Purpose | Failure mode if down |
 |---|---|---|---|
 | `postgres-0` | timescale/timescaledb-ha:pg16 | Vault tables (knowledge_vault, momentum_vault, social_vault, knowledge_vectors, social_vectors, mapping_dict, divergence_alerts). pgvector + TimescaleDB hypertable. | Gold cannot persist. Backed by 20Gi PVC + daily `pg_dump` to GCS. |
 | `kafka-0` | apache/kafka:3.7.0 | KRaft single-broker. 19 topics. **Data dir is `/var/lib/kafka/data/kafka-logs` subdir of the 10Gi PVC** — must explicitly set `KAFKA_LOG_DIRS` (Phase 9.5 F1; default would be `/tmp` and ephemeral). | All producers + Flink consumers stuck. |
 | `kafka-ui` | provectuslabs/kafka-ui:v0.7.2 | Topic + message inspection UI on port-forward. | Operator UX only. |
-| `flink-jobmanager` | anizai-flink:1.19.1-7b5i | Submits + supervises Flink jobs. K8s HA via ConfigMap leader election (Phase 9 follow-up). | Job graph survives via HA ConfigMaps; running tasks stop. |
-| `flink-taskmanager` | anizai-flink:1.19.1-7b5i | Runs Silver + Gold PyFlink tasks (4 slots). Mounts checkpoint PVC. | Jobs RESTARTING until TM recovers; messages back up in Kafka. |
-| `agent-worker` | anizai-agent:0.5.0-sprint26 | LangGraph forecast agent. Attaches **two** Firestore listeners on startup: `forecastQueries` where `status=='pending'`, and (since Sprint 24) a **collection-group** listener on `messages` where `role=='user'` and `status=='sent'`. Each delivers its full current match set on first attach — see `bringup_profiles.md` §5 trap 2. OpenAI calls via `utils/openai_client.py` factory (max_retries=5). Held at `replicas: 0` declaratively since the 2026-07-23 Stage-1 deploy; brought up with `kubectl scale`, not by editing the manifest. | No forecasts processed; queries pile up in Firestore. |
+| `flink-jobmanager` | anizai-flink | Submits + supervises Flink jobs. K8s HA via ConfigMap leader election (Phase 9 follow-up). | Job graph survives via HA ConfigMaps; running tasks stop. |
+| `flink-taskmanager` | anizai-flink | Runs Silver + Gold PyFlink tasks (4 slots). Mounts checkpoint PVC. | Jobs RESTARTING until TM recovers; messages back up in Kafka. |
+| `agent-worker` | anizai-agent | LangGraph forecast agent. Attaches **two** Firestore listeners on startup: `forecastQueries` where `status=='pending'`, and (since Sprint 24) a **collection-group** listener on `messages` where `role=='user'` and `status=='sent'`. Each delivers its full current match set on first attach — see `bringup_profiles.md` §5 trap 2. OpenAI calls via `utils/openai_client.py` factory (max_retries=5). Normally held off and brought up deliberately with `kubectl scale` rather than by editing the manifest — current declared and live replicas are in `cloud_state.md` §3; bring-up is `bringup_profiles.md` §3 step 5. | No forecasts processed; queries pile up in Firestore. |
 | `airflow-postgres-0` | postgres:16 | Airflow metadata DB (DAG run state, task instances). 5Gi PVC. Not backed up (KG-PHASE-9.5-* candidate). | Scheduler can't run DAGs; webserver UI shows blank state. |
-| `airflow-scheduler` | anizai-airflow:2.9.3-7b5i | Fires the 7 producer DAGs (arxiv, fred, googletrends, hackernews, newsapi, opensky, openweather). Liveness probe on port **8974** (NOT 8793 — Phase 9.5 F2). | Scheduled producer runs miss their windows. |
-| `airflow-webserver` | anizai-airflow:2.9.3-7b5i | Airflow UI on port-forward. | Operator UX only. |
-| `polymarket` | anizai-polymarket:0.2.0-p95 | Always-on WebSocket producer (CLOB ticks + REST market refresh). Comment-fetch loop disabled by feature flag (Phase 9.5 Item 3). | Polymarket data goes silent during downtime; price gaps not backfillable. |
-| `telegram` | anizai-telegram:0.1.0 | MTProto continuous channel listener. Session file from Secret Manager. | Telegram data goes silent during downtime. |
-| `trigger-consumer` | anizai-trigger-consumer:0.1.0 | Consumes `ingestion_triggers` topic from the agent for reactive ingestion. **The deployed `0.1.0` image predates Sprint 23 and its SecretProviderClass mounts no NewsAPI key**, so the newsapi reactive dispatch cannot run today even though the repo code supports it — a trigger emitted by the agent is dispatched and fails on the consumer side. Fixing this needs an image rebuild **and** a secret added to the SPC (it is not fixed by rebuilding `anizai-airflow`, a common misreading). | Agent-triggered ingest doesn't fire. |
+| `airflow-scheduler` | anizai-airflow | Fires the 7 producer DAGs (arxiv, fred, googletrends, hackernews, newsapi, opensky, openweather). Liveness probe on port **8974** (NOT 8793 — Phase 9.5 F2). | Scheduled producer runs miss their windows. |
+| `airflow-webserver` | anizai-airflow | Airflow UI on port-forward. | Operator UX only. |
+| `polymarket` | anizai-polymarket | Always-on WebSocket producer (CLOB ticks + REST market refresh). Comment-fetch loop disabled by feature flag (Phase 9.5 Item 3). | Polymarket data goes silent during downtime; price gaps not backfillable. |
+| `telegram` | anizai-telegram | MTProto continuous channel listener. Session file from Secret Manager. | Telegram data goes silent during downtime. |
+| `trigger-consumer` | anizai-trigger-consumer | Consumes `ingestion_triggers` topic from the agent for reactive ingestion. A trigger the consumer cannot dispatch fails **on the consumer side** and is logged, not fatal to the agent. Whether the deployed image actually supports the newsapi reactive path — and whether its SecretProviderClass mounts the NewsAPI key — is deployment state: see `cloud_state.md` §3/§4. Note that closing that gap needs a `anizai-trigger-consumer` rebuild **plus** an SPC secret; rebuilding `anizai-airflow` does not fix it (a common misreading). | Agent-triggered ingest doesn't fire. |
 | `prometheus` | prom/prometheus:v2.51.2 | Scrapes 5 targets (Flink JM/TM, agent /metrics, kafka-exporter, postgres-exporter). 10Gi PVC, 7-day TSDB retention (Phase 9.5 F2). | No metrics scraped; dashboards blank. Alerts stop firing. |
 | `kafka-exporter` | danielqsj/kafka-exporter:v1.7.0 | Kafka topic + partition + broker → Prometheus metrics. | DLQ-depth + topic-staleness alerts go silent. |
 | `postgres-exporter` | prometheuscommunity/postgres-exporter:v0.15.0 | Postgres internals + Anizai-specific vault freshness queries. | Vault-freshness alerts + dashboard panels go silent. |
@@ -119,28 +130,20 @@ network calls + Flink checkpoint windows, not the pipeline itself.
 
 ---
 
-## Section 3 — Cluster start / stop checklist
+## Section 3 — Raw commands: pool resize and post-resize verification
 
-The cluster is normally scaled-to-0 between collection windows to control
-cost. Currently this is **manual** (Ron runs `gcloud container clusters
-resize`); Cloud Scheduler jobs exist but are PAUSED.
-
-> **Use `bringup_profiles.md` instead of this section for anything other than a
-> full-system start.** What follows is the FULL profile only — it assumes every
-> workload should come up. It has no profile selector and no pre-flight gates, so
-> following it for an agent-only or pipeline-only session will start workloads you
-> did not want and skip the checks that matter (stale Firestore documents claimed
-> on agent startup; Kafka backlog replayed through Gold enrichment the moment Flink
-> schedules). Kept here for the full-start command detail and the expected-pod
-> reference below.
+> **This section is a command reference, not a procedure.** `bringup_profiles.md`
+> owns the order and the gates — which workloads to hold at 0, when to check what,
+> when to stop. It deliberately carries no `gcloud` invocations, so the commands it
+> tells you to run live here. Run its §3 / §4 and reach into this section for the
+> exact syntax; do not follow this section top-to-bottom as a start-up sequence.
 >
-> Two expectations below are also out of date: `agent-worker` no longer comes up
-> with everything else (it is held at `replicas: 0` and scaled up deliberately),
-> and `polymarket` / `telegram` have been sitting at 0 live while their committed
-> manifests still declare `replicas: 1` — read desired replicas from the cluster,
-> never from the repo.
+> **Shell warning:** the blocks below are tagged `powershell` but are mixed. Steps 1–2
+> use PowerShell line continuation (backtick); steps 4–5 use bash (`JM=$(...)`,
+> `| wc -l`). Pasting a whole block into one shell will fail partway. Run them
+> individually, in a shell that matches.
 
-### Start (scale 0 → 1)
+### Pool resize, 0 → 1
 
 ```powershell
 # 1. Scale main-pool back to 1 node.
@@ -152,15 +155,12 @@ gcloud container clusters resize anizai-cluster `
 #    Typically ~3-5 min for the node + ~30s per pod after.
 kubectl get pods -n anizai --watch
 
-# 3. After all pods are 1/1 Running, the following are expected:
-#    - kafka-0          1/1 Running 0 restarts
-#    - postgres-0       1/1 Running 0 restarts
-#    - flink-jobmanager 1/1 Running 0 restarts
-#    - flink-taskmanager 1/1 Running 0-1 restarts (HA recovery)
-#    - polymarket / telegram / trigger-consumer 1/1 Running 2-3 restarts
-#      (NoBrokersAvailable + retry during Kafka boot — settles in ~60s)
-#    - agent-worker     1/1 Running 0 restarts
-#    - prometheus + alertmanager + grafana + exporters: 1/1 Running
+# 3. WHICH pods should be Running depends entirely on the profile you applied.
+#    bringup_profiles.md §2 (the profile table) and §3 step 3 own that expectation —
+#    do not read a pod list out of this file. Two things are worth knowing either
+#    way: flink-taskmanager may show 0-1 restarts (HA recovery), and
+#    polymarket / telegram / trigger-consumer typically show 2-3 restarts from
+#    NoBrokersAvailable while Kafka boots — that settles in ~60s and is not a fault.
 
 # 4. Verify Flink jobs auto-recovered to RUNNING:
 JM=$(kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}')
@@ -177,7 +177,11 @@ kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 #   kubectl create job kafka-init-manual --from=cronjob/kafka-init -n anizai
 ```
 
-### Stop (scale 1 → 0)
+### Pool resize, 1 → 0
+
+> Teardown order and its gates — closing the producer taps, the Postgres backup
+> decision, and the carry-over statement — are `bringup_profiles.md` §4. What follows
+> is only the commands that step calls for.
 
 ```powershell
 # 1. Optional: cleanly cancel running Flink jobs first to ensure their
@@ -206,9 +210,10 @@ kubectl get nodes
 
 ## Section 4 — Cloud Scheduler resume procedure
 
-Cloud Scheduler currently has two PAUSED jobs that, when resumed, will
-auto-scale main-pool Mon-Fri 05:00 IL up / 15:00 IL down. **Do not resume
-without first confirming the cluster is in good operational shape** —
+The two recurring Scheduler jobs, when enabled, auto-scale main-pool Mon-Fri
+05:00 IL up / 15:00 IL down. Their current paused/enabled state is live — read it
+from `cloud_state.md` §6 or `gcloud scheduler jobs list`, not from here.
+**Do not resume without first confirming the cluster is in good operational shape** —
 the start cycle exercises every Phase 9.5 finding.
 
 ### Pre-resume checklist
@@ -308,9 +313,10 @@ kubectl port-forward -n anizai svc/airflow-webserver 8090:8080
   or KG-PHASE-9.5-5 (pytrends 404), that's an **intentional-silent**
   producer per Phase 9.5 Stage B Item 4 (producer raises on 100% unit
   failure → Airflow shows `failed`).
-- **Newsapi paused by design**: `airflow dags list` shows
-  `is_paused=True` for `newsapi_high_frequency`. Sprint C4 deliberately
-  paused this. Manual trigger doesn't fire while paused.
+- **The DAG is paused**: `airflow dags list` shows `is_paused=True`. A paused DAG
+  does not fire on schedule and cannot be manually triggered either — unpause first.
+  Producer DAGs are routinely left paused between sessions on purpose, so this is a
+  likely explanation before it is a fault; see Section 12 and `cloud_state.md` §6.
 - **Polymarket comments disabled by feature flag**: `POLYMARKET_COMMENTS_ENABLED=false`
   default. Only the comment-fetch loop is gated; price WebSocket still
   runs. If polymarket Bronze is silent, it's the WebSocket, not the flag.
@@ -419,12 +425,14 @@ kubectl logs -n anizai -l app=agent-worker --tail=200 | grep -E "ERROR|Traceback
 ```
 
 > **The agent's INFO logs are 1 %-sampled — do not read their absence as evidence.**
-> ERROR and WARNING are emitted at 100 %, so the grep above is reliable for
+> ERROR and WARNING are emitted at 100 %, so the grep above **is** reliable for
 > failures. Everything at INFO (including the per-forecast `llm_usage` cost lines)
 > passes at `LOG_INFO_SAMPLE_RATE`, default `0.01`. A forecast that ran perfectly
 > will usually leave no INFO trace at all. Cost and per-node latency come from
 > Prometheus (`agent_llm_cost_usd_total`, `agent_node_duration_seconds`), not from
-> logs. See `bringup_profiles.md` §5 trap 3 and KG-B-4.
+> logs. **`bringup_profiles.md` §5 trap 3 is the canonical statement of the sampling
+> behaviour — read it before acting on it, and do not generalise the claim above to
+> the Flink workloads.** (Related: KG-B-4.)
 
 Common log patterns:
 - `RateLimitError` from `openai` → OpenAI RPD hit. See 5.5.
@@ -630,11 +638,43 @@ not history, so the actual loss is permanent).
 
 ---
 
-## Section 8 — Restore drill procedure
+## Section 8 — Backup and restore procedures
 
-Tested Phase 9.5 Stage A F4. Backups land at
-`gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz` daily at
-02:00 UTC. 30-day GCS lifecycle.
+Backups land at `gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz`
+daily at 02:00 UTC, via the `postgres-backup` CronJob. 30-day GCS lifecycle.
+
+### Manual backup (on demand)
+
+**When you need this:** `bringup_profiles.md` §4 step 4 calls for it at teardown
+whenever something wrote to Postgres during the session. The CronJob fires at a fixed
+wall-clock time and is not aware of scale-downs (KG-C-9), so a session that opens and
+closes between two firings is never captured. Two daily backups were lost this way in
+May 2026.
+
+The CronJob is fully self-contained, so the simplest correct manual backup is to run
+it on demand rather than assembling a `pg_dump` by hand:
+
+```powershell
+kubectl create job -n anizai --from=cronjob/postgres-backup backup-manual-$(Get-Date -UFormat %Y%m%d-%H%M)
+
+# Watch it to completion (~1-2 min; it apt-installs postgresql-client-16 first):
+kubectl get jobs -n anizai -w
+kubectl logs -n anizai -l job-name=<job-name> --tail=20
+# Expect a final line: "Backup complete: gs://.../YYYY-MM-DD/anizai.sql.gz"
+
+# Confirm the object actually landed before scaling anything down:
+gsutil ls -l gs://anizai-pipeline-backups/postgres/$(Get-Date -UFormat %Y-%m-%d)/
+```
+
+**One thing to know before you run it:** the destination key is date-stamped, not
+time-stamped, so a manual run **overwrites** that day's object. That is usually what
+you want (a later snapshot replaces an earlier one), but if the 02:00 run captured a
+good state and the database has since been damaged, the manual run destroys the good
+copy. In that situation restore first, back up second.
+
+### Restore drill
+
+Tested Phase 9.5 Stage A F4.
 
 ```powershell
 # 1. Pick a backup to restore. Today (-1 day for guaranteed completeness):
@@ -750,11 +790,14 @@ All container stdout/stderr flows to Cloud Logging via `fluentbit-gke`
 (kube-system DaemonSet, GKE-managed). Common useful filters:
 
 > **Two things that will make you think logging is broken when it is not.**
-> (1) **INFO is sampled at 1 %** for any process that ran `setup_logging()` — which
-> includes the agent and the Flink jobs. WARNING and above are at 100 %. A ~20-hour
-> agent session on 2026-07-25/26 produced **7 entries in total**. Absence of INFO is
-> not absence of activity; raise `LOG_INFO_SAMPLE_RATE` to `1.0` on the workload if
-> a session needs full INFO (read at module import — requires a fresh pod).
+> (1) **INFO may be sampled at 1 %** for a process that ran `setup_logging()`.
+> WARNING and above are always at 100 %. This is **proven for the agent** — a ~20-hour
+> session on 2026-07-25/26 produced 7 entries in total — so absence of agent INFO is
+> not absence of activity. **It is NOT proven for the Flink jobs**; direct observation
+> on 2026-07-27 contradicted it. This paragraph previously asserted both, and that was
+> wrong. **`bringup_profiles.md` §5 trap 3 is canonical here — read it before you act,
+> and note that raising `LOG_INFO_SAMPLE_RATE` on the Flink workloads is banned: it
+> OOM-killed the TaskManager twice on 2026-07-27.**
 > (2) **Structured logs land in `jsonPayload.message`, not `textPayload`.** The
 > JSON formatter is the default for anything using `setup_logging()`, so a
 > `textPayload=~"..."` filter silently returns nothing. Several filters below are
@@ -801,11 +844,10 @@ operator doesn't alarm. Known Gaps now live per domain in each
 
 | Component | State | What re-evaluates this |
 |---|---|---|
-| **All 7 producer DAGs** | `is_paused=True` since the Domain-A day-run closed (2026-07-23) — deliberate, so Domain-A producers stay off during Domain-B work. Supersedes the newsapi-only row this table used to carry. **Pausing the DAGs does not stop ingestion on its own:** `telegram` and `polymarket` are always-on Deployments, not DAGs. | Unpause per profile when a pipeline or full run is intended — see `bringup_profiles.md` §2. |
+| **Producer DAGs (Airflow)** | Producer DAGs are routinely left paused between sessions on purpose. **Which ones are paused right now is live state and is not recorded here** — read it from the cluster (`airflow dags list`); `cloud_state.md` §6 records the current intent and why. **Two separate mechanisms decide what actually runs after a bring-up, and neither is derived from this file or from the repo:** (a) DAG pause state lives in Airflow's metadata DB and survives pod restarts *and* cluster scale-ups — a paused DAG stays paused and will not come back on its own; (b) workload replicas live on the Kubernetes object — `kubectl scale` changes them and `kubectl apply` silently resets them to whatever the manifest declares (KG-C-10). **Pausing the DAGs does not stop ingestion on its own:** `telegram` and `polymarket` are always-on Deployments, not DAGs. | Check both mechanisms on every bring-up rather than assuming what is running. Profiles and the order to apply them: `bringup_profiles.md` §2–§3. |
 | `opensky_high_frequency` | Cluster cannot reach `opensky-network.org` (KG-PHASE-C-6). Producer raises on 100% box-failure → Airflow shows `failed`. | When GCP firewall is configured to allow opensky-network.org (separate infra coordination work). |
 | `googletrends_daily` | pytrends 4.9.2 returns 404 on Google's unofficial Trends endpoint (KG-PHASE-9.5-5; no pytrends version fixes this). Producer raises on 100% geo-failure. | When (a) pytrends upstream ships a fix, OR (b) we switch to Google's official Trends API (cost + OAuth required), OR (c) we retire googletrends from the producer set. |
 | Polymarket comments | `POLYMARKET_COMMENTS_ENABLED=false` (KG-PHASE-9.5-4). Gamma `/comments` endpoint had a breaking change (now requires `parent_entity_id` + `entity_entity_type`; correct enum value unknown). | When upstream API contract is reverse-engineered OR a Polymarket developer support contact resolves it. |
-| ~~`agent-worker:8000/metrics`~~ | **No longer broken — resolved by Sprint 26 (26.4), verified live 2026-07-26.** Three real metric families are exposed and scraped: `agent_node_duration_seconds{node_name}` (Histogram), `agent_llm_cost_usd_total{model}` (Counter), and `agent_session_total{tier,status}` (Counter). Verified against `agent/metrics.py`. These are the **authoritative** source for agent cost and per-node latency, since INFO logs are 1 %-sampled (§5.6, §11). Retention is 7 days on `prometheus-pvc`, and the retention clock is evaluated at Prometheus startup — so numbers that survive a teardown can still be purged minutes into the next bring-up. Copy anything worth keeping into a doc during the session. | Row retained one cycle, then delete. |
 
 ---
 
@@ -864,3 +906,12 @@ has evolved, a command no longer applies, etc.) — update this file. The
 goal is to keep it the canonical operational reference. If something
 changes systemically (new producer, new exporter, new dashboard panel),
 update Section 1, Section 12, and Section 13 together.
+
+**But do not record live state here, ever.** If the thing you are about to write down
+is an image tag, a replica count, a DAG's paused/unpaused state, or the Cloud Scheduler
+jobs' enabled/paused state — it belongs in `cloud_state.md`, not in this file. This
+guide once advertised image tags three rebuilds out of date precisely because that rule
+did not exist. Two related boundaries, for the same reason: bring-up and teardown
+*order and gates* belong to `bringup_profiles.md` (this file holds the commands they
+call for), and the sampling behaviour of INFO logs is stated canonically in that file's
+§5 trap 3 (§5.6 and §11 here defer to it).
