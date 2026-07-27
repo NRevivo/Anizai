@@ -27,7 +27,7 @@
 -- Applied to local dev Postgres in T9/T10 (Gate 3 / E2E); applied to cloud
 -- Postgres in T11 (§8.3 step 1, same window as the deployment).
 --
--- References: docs/A_pipeline/plans/phase7d_enrichment_gating.md §4.1 (schema),
+-- References: docs/A_pipeline/archive_plans/phase7d_enrichment_gating.md §4.1 (schema),
 --             §5 T2/T7; dayrun_analysis.md §6 (the instance-key gap)
 
 -- ----------------------------------------------------------

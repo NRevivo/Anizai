@@ -11,7 +11,7 @@ Requires live Postgres with pgvector. Skips via db_available without it. Cleanup
 by the test_<id> canonical_event_id prefix (cleanup_knowledge_vectors).
 
 References:
-    - docs/A_pipeline/plans/phase7d_enrichment_gating.md §5 T5, §6, §9(3)
+    - docs/A_pipeline/archive_plans/phase7d_enrichment_gating.md §5 T5, §6, §9(3)
     - persistence/knowledge_vectors.py::insert (ON CONFLICT guard)
     - processing/gold_job.py::build_gold_global_signal, _deterministic_signal_id
 """

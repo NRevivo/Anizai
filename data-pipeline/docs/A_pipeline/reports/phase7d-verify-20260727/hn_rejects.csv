@@ -1,0 +1,12 @@
+# Phase 7D C5 (HN rejects captured, KG-A-12) + C6 (instance key populated). filter_rejects by source since :t_start.
+source,rows,distinct_url,min_rescue_cosine,max_rescue_cosine,null_canonical_event_id
+hackernews,288,50,0.1064,0.3523,0
+newsapi,119,57,0.1121,0.3410,0
+arxiv,978,468,0.1191,0.3426,0
+# C5 (HackerNews): 288 rows / 50 distinct = 5.8 rows/story. RAW count is INSTANCES not stories (the guard's warning) —
+#   the T6 capture runs BEFORE the T4 gate, so a low-signal HN story on the front page is re-captured every pulse.
+#   This 5.8x is LIVE confirmation of the §6 named ordering assertion (T6-before-T4), not just the AST test. KG-A-12 CLOSED.
+# C6: 0 NULL canonical_event_id across ALL three sources — instance keys fully populated.
+# Cosine note (7B.5 data): all in [0.106, 0.353]. HN max 0.3523 sits just above the 0.35 promote threshold, but the
+#   social path is CAPTURE-ONLY in 7D (D2 — no promote branch wired). 7B.5 owns the promote decision.
+# Reject-rate slice: HN 50 of 52 distinct stories rejected ~= 96% (vs day-run inferred 79.7%). Single slice, n=52 — record, do not chase.

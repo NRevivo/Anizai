@@ -1,0 +1,38 @@
+# Phase 7D — C0 pre-window baseline (§8.3 step 4 / §8.4.2 C0). Captured 2026-07-27, before jobs submitted.
+# Cluster anizai-cluster, main-pool=1 node, all five producers/processors held at 0. Window RUN_ID: phase7d-verify-20260727.
+# ALL read-only. Nothing written/altered/deleted (§8.4.3 prohibition honored). DB=anizai on postgres-0.
+group,item,metric,value,note
+kafka_bronze,ingest.bronze.arxiv,retained,4200,low_wm=4200 end=8400 — LLM(global_news) but gate-skipped (already archived)
+kafka_bronze,ingest.bronze.fred,retained,260,low_wm=522 end=782 — structured_metrics, no LLM
+kafka_bronze,ingest.bronze.googletrends,retained,0,low_wm=0 end=0 — dormant (KG-A-3)
+kafka_bronze,ingest.bronze.hackernews,retained,3900,low_wm=2350 end=6250 — LLM(social) — the expensive replay half (re-key + reject rows)
+kafka_bronze,ingest.bronze.newsapi,retained,3125,low_wm=123 end=3248 — LLM(global_news) but gate-skipped
+kafka_bronze,ingest.bronze.opensky,retained,0,low_wm=756 end=756 — dormant (KG-A-5)
+kafka_bronze,ingest.bronze.openweather,retained,1510,low_wm=900 end=2410 — structured_metrics, no LLM
+kafka_bronze,ingest.bronze.polymarket,retained,34819,low_wm=17100 end=51919 — structured_metrics + comments(flag-OFF F8) — NON-LLM, but checkpoint load
+kafka_bronze,ingest.bronze.predictit,retained,0,low_wm=0 end=0 — dormant
+kafka_bronze,ingest.bronze.reddit,retained,0,low_wm=0 end=0 — dormant
+kafka_bronze,ingest.bronze.telegram,retained,898,low_wm=340 end=1238 — LLM(global_news) control source but gate-skipped
+kafka_bronze,TOTAL,retained,48712,sum of all ingest.bronze.* retained
+kafka_silver,process.silver.global_news,retained,0,low_wm=end=20271 — aged out (3-day retention; day-run was 5d ago)
+kafka_silver,process.silver.social_pulse,retained,0,low_wm=end=7650 — aged out
+kafka_silver,process.silver.structured_metrics,retained,0,low_wm=end=67007 — aged out
+kafka_silver,TOTAL,retained,0,gold_job has NO backlog to replay from Silver
+kafka_dlq,dead-letter-queue,end_offset,7142,C9 baseline + abort-checkpoint canary — NEVER truncate
+social_vault_hn,day-run window,hn_rows,127,source_name=hackernews ingested_at in [2026-07-22T09:25:26Z 2026-07-23T09:25:26Z]
+social_vault_hn,day-run window,distinct_story_id,59,
+social_vault_hn,day-run window,archival_rows_per_story,2.153,"ARCHIVAL duplication (distinct comment-sets/story) = a LOWER BOUND, NOT the enrichment figure (corrected 2026-07-27)"
+hn_enrichment,day-run window,gold_consensus_calls,732,"732 distinct trace_id, 0 empty; gold_embed also 732 (1:1) = internal-consistency check passes"
+hn_enrichment,day-run window,consensus_per_story,12.41,"732/59 = ENRICHMENT duplication (the real D1 figure). ~12.4x => D1 option (a) STRONGLY validated. NOT the invalid dayrun §4.1 comparison (that used an archive-row count; this uses distinct stories)"
+hn_enrichment,day-run window,silver_deliveries_pulled,3600,"day-run report §: ~3,600 HN pulled; high-signal=732 (==consensus, confirms pre-7D every high-signal delivery enriched); 3,600-732=2,868 low-signal rejected (79.7%, matches KG-A-12/§0). Deliveries-vs-consensus divergence is the reject rate, NOT a denominator error => 59 confirmed sound"
+social_vectors,day-run window,hackernews_rows,29,first-ever export of social_vectors (closes dayrun_analysis §4.1)
+social_vectors,day-run window,total_rows,29,
+knowledge_vectors,whole table,total_rows,27459,
+knowledge_vectors,whole table,distinct_signal_id,27459,== total (signal_id is PK) => trivially equal; NOT the debt measure (original plan spec was tautological — corrected in plan C0/C7)
+knowledge_vault,whole table,vault_articles,2759,"AUTHORITATIVE distinct-article count (UNIQUE B-tree on document_hash, F2); global_news only, directly comparable to knowledge_vectors"
+knowledge_vectors,whole table,vectors_per_article,9.953,27459 vectors / 2759 articles
+knowledge_vectors,whole table,excess_vector_debt,24700,"27,459-2,759 = 24,700 excess duplicate vectors (~90% of table) => LARGE KG-A-8 debt, WORSE than the 22,305/81% canonical estimate reported at Gate A (SUPERSEDED). Last recorded 9,202 predates day-run => strongly supports §8.4.3 reset before multi-day run"
+knowledge_vectors,whole table,distinct_canonical_event_id,5154,"NOT a clean article count: 5,154 > 2,759 vault articles => canonical_event_id is finer than article (partly per-delivery via bronze_ref fallback). Do NOT use as article denominator"
+openai_rpd,today UTC 2026-07-27,calls_today,0,llm_cost_events proxy — last event 2026-07-23 13:07 (day-run); full 10k/day Tier-1 cap free
+openai_rpd,today UTC 2026-07-27,cost_today_usd,0,
+openai_credit,dollar balance,value,NOT_QUERYABLE_HERE,billing API restricted + no key mounted; Ron's OpenAI dashboard is authoritative

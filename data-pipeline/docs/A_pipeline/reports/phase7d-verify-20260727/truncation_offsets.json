@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "partitions": [
+    {"topic": "ingest.bronze.arxiv", "partition": 0, "offset": 2701},
+    {"topic": "ingest.bronze.arxiv", "partition": 1, "offset": 2678},
+    {"topic": "ingest.bronze.arxiv", "partition": 2, "offset": 3021},
+    {"topic": "ingest.bronze.fred", "partition": 0, "offset": 257},
+    {"topic": "ingest.bronze.fred", "partition": 1, "offset": 435},
+    {"topic": "ingest.bronze.fred", "partition": 2, "offset": 90},
+    {"topic": "ingest.bronze.hackernews", "partition": 0, "offset": 2265},
+    {"topic": "ingest.bronze.hackernews", "partition": 1, "offset": 2056},
+    {"topic": "ingest.bronze.hackernews", "partition": 2, "offset": 1929},
+    {"topic": "ingest.bronze.newsapi", "partition": 0, "offset": 784},
+    {"topic": "ingest.bronze.newsapi", "partition": 1, "offset": 1423},
+    {"topic": "ingest.bronze.newsapi", "partition": 2, "offset": 1041},
+    {"topic": "ingest.bronze.openweather", "partition": 0, "offset": 1205},
+    {"topic": "ingest.bronze.openweather", "partition": 1, "offset": 723},
+    {"topic": "ingest.bronze.openweather", "partition": 2, "offset": 482},
+    {"topic": "ingest.bronze.polymarket", "partition": 0, "offset": 16176},
+    {"topic": "ingest.bronze.polymarket", "partition": 1, "offset": 16293},
+    {"topic": "ingest.bronze.polymarket", "partition": 2, "offset": 19450},
+    {"topic": "ingest.bronze.telegram", "partition": 0, "offset": 0},
+    {"topic": "ingest.bronze.telegram", "partition": 1, "offset": 670},
+    {"topic": "ingest.bronze.telegram", "partition": 2, "offset": 568}
+  ]
+}

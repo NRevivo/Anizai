@@ -341,7 +341,7 @@ this window if applied unchanged. All four rows below must be set in BOTH manife
 | `REJECT_CAPTURE_ENABLED` | `"false"` | `"true"` | T6 runs, reaches the write, and writes nothing. **C5/C6 return zero rows and it looks like a code bug.** The single most dangerous of the four. |
 | `RUN_ID` | `"dayrun-20260722"` | `"phase7d-verify-20260727"` | This window's rows are stamped with the day-run's tag and mix into the corpus 7B.5 calibrates on. |
 | `ENRICHMENT_DEDUP_GATE_ENABLED` | *absent* | `"true"` (explicit) | Works (code default is on), but the kill switch is not at hand — needing it mid-window means editing YAML under pressure. |
-| `LOG_INFO_SAMPLE_RATE` | *absent* | `"1.0"` | INFO passes at 1%. The six startup lines (§8.3 step 8) and the `[gold/dedup]` skip lines are INFO — **C1 would be off by two orders of magnitude.** |
+| `LOG_INFO_SAMPLE_RATE` | *absent* | **REVERTED 2026-07-27 — leave absent (default 0.01).** | **This row is withdrawn.** Setting it to `1.0` was an Advisor addition for this window and is now judged not worth its risk: it multiplies Python-worker log traffic ~100× and that traffic crosses the Beam worker→JVM channel, making it a live suspect in the T0 OOM. It is also the single largest delta between this window and the `dayrun-20260722` configuration, which provably ran nine sources for 24 hours. **What it costs:** C1's skip-line count becomes a ~1% sample — acceptable, because C1 was never the magnitude (C2/C3 are SQL and unaffected), and the six startup lines become unreliable — also acceptable, because the four flags were verified far more directly by importing `config.settings` in-container (§8.3 step 8b). ERROR and WARNING pass at 100% regardless, so crash and failure detection is untouched. |
 
 **Resting state after the window (decided by Ron 2026-07-27):**
 
@@ -694,22 +694,58 @@ the whole window.
 
 **— Deploy and submit, still no traffic —**
 
-6. **Update BOTH Flink manifests and apply.** Image tag → `1.19.1-7d`; and all four env
-   vars from the §4.2 verified table, in **both** JM and TM, identically:
+6. **Update BOTH Flink manifests and apply.** Image tag → `1.19.1-7d`; and the three
+   env vars from the §4.2 verified table, in **both** JM and TM, identically:
    `REJECT_CAPTURE_ENABLED="true"`, `RUN_ID="phase7d-verify-20260727"`,
-   `ENRICHMENT_DEDUP_GATE_ENABLED="true"`, `LOG_INFO_SAMPLE_RATE="1.0"`.
-   `LOG_INFO_SAMPLE_RATE` is read at module import in the Python worker, so it must be in
-   place **before** the TaskManager pod starts — which is why it is set here and not
-   later. Applying restores `replicas: 1` on both, which is the intended state (§8.1).
+   `ENRICHMENT_DEDUP_GATE_ENABLED="true"`.
+   **`LOG_INFO_SAMPLE_RATE` is NOT set — reverted 2026-07-27, see §4.2.** Leave it absent,
+   at the pipeline default. Every other value in these manifests, including
+   `resources.limits.memory`, must match the `dayrun-20260722` configuration exactly:
+   that configuration provably ran nine sources for 24 hours, and the fewer deltas this
+   window carries against it, the fewer candidate explanations there are when something
+   goes wrong. Applying restores `replicas: 1` on both, which is the intended state
+   (§8.1).
 7. **Cancel and re-submit both jobs (KG-C-4 / F15).** A pod restart is **not** sufficient:
    HA restores the old compiled job graph and the new image is silently ignored. Cancel
    whatever recovered, then `flink run -d -py .../silver_job.py` and
    `.../gold_job.py`. Verify both reach `RUNNING` — not merely that pods are `Ready` — and
    that neither is in a RESTARTING loop.
-8. **GATE — read the six operator startup lines. Do not proceed past this step until they
-   are correct.** VERIFIED 2026-07-27 against `processing/gold_job.py`: both Gold
-   operators log their flag state in `open()`, i.e. at job start, **before any message is
-   processed**. On a silent system these are the entire verification of §4.2:
+8. **GATE — pre-T0 flag verification. CORRECTED 2026-07-27 during execution; the original
+   version of this step was factually wrong.**
+
+   > **What was wrong.** This step used to say that both Gold operators log their flag
+   > state "at job start, before any message is processed", and made the six log lines the
+   > pre-T0 gate. The *code reading* was right — the lines are emitted from `open()`. The
+   > *assumption about when `open()` runs* was not. Under PyFlink/Beam the Python user
+   > function's `open()` is invoked lazily, when the first Beam bundle is processed — not
+   > at job submission. On a deliberately silent system (§8.3 steps 2–5 truncate Bronze and
+   > leave Silver empty) **no bundle ever starts, so `open()` never runs and the six lines
+   > cannot exist pre-T0.** Confirmed empirically 2026-07-27: jobs RUNNING, restarts 0,
+   > zero bundles processed, zero `[gold/flink]` lines. Record as a T12 discrepancy.
+
+   **Verify the same facts directly instead — all of it is available with zero data flow
+   and zero spend.** The log lines were only ever a proxy for these:
+
+   a. **Raw env, in the running TaskManager container** — all four §4.2 vars present with
+      the intended values, and present in the Python worker's Beam environment payload.
+   b. **Parsed settings, in-container** — the gap (a) leaves open is that the log line
+      echoes `config.settings`, not the raw var, so a parsing or naming mismatch would
+      still slip through. Close it: exec into the TaskManager and import the settings
+      module directly (`PYTHONPATH=/opt/flink/usrlib` is set at image level), printing
+      `ENRICHMENT_DEDUP_GATE_ENABLED`, `REJECT_CAPTURE_ENABLED`, `RUN_ID` and
+      `GOLD_SEMANTIC_RESCUE_THRESHOLD`. This verifies exactly the values the six lines
+      would have printed.
+   c. **Sniper vector loads, not merely exists** — `numpy.load` it in-container and print
+      the shape. `_load_sniper_reference_vector()` is, as of 7D, called by **both** Gold
+      operators and hard-fails at `open()`, so a bad `.npy` presents as "the Gold job dies
+      on first data", not as degraded filtering. A 1536-dim float32 vector is 6,272 bytes
+      on disk (6,144 + a 128-byte npy header); a size that matches is a good sign, a
+      successful `load` with `shape=(1536,)` is proof.
+   d. Jobs `RUNNING`, restarts 0, no RESTARTING loop, no ERROR/traceback, DLQ flat.
+
+   **The six lines still get verified — at the T0+5 abort checkpoint (step 10), which is
+   where the first bundles run.** They are not skipped; they move. Reference table for
+   what they must read when they do appear:
 
    | Emitted by | Line | Must read |
    |---|---|---|
@@ -720,14 +756,16 @@ the whole window.
    | `PolymarketGoldSocialFunction` | `[gold/flink] social reject capture … (run_id=…)` | `ENABLED`, same `run_id` |
    | both | `[gold/flink] Sniper reference vector loaded — shape=…` | present, no `FileNotFoundError` |
 
-   If any line is missing entirely, suspect `LOG_INFO_SAMPLE_RATE` — these are INFO. If a
-   line reads `disabled`, the manifest did not take: fix it and restart the pod before
-   going further. **Finding this here costs a pod restart; finding it at C5 costs the
-   window.** Note also that `_load_sniper_reference_vector()` is, as of 7D, called by
-   *both* Gold operators and hard-fails at `open()` — so a missing `.npy` presents as
-   "the Gold job will not start", not as degraded filtering. (`Dockerfile.flink` copies
-   `processing/` wholesale, so this is expected to be a non-issue; it is listed so the
-   symptom is recognisable.)
+   If any line is missing entirely once bundles have run, suspect `LOG_INFO_SAMPLE_RATE`
+   — these are INFO. If a line reads `disabled`, the manifest did not take: fix it and
+   restart the pod. **Note the asymmetry the lazy-`open()` correction introduces:** the
+   two `GlobalNewsGoldFunction` operators wake on the first *global_news* bundle and the
+   two `PolymarketGoldSocialFunction` ones on the first *social* bundle, so the social
+   lines will not appear until HackerNews data actually flows — their absence at T0+5 is
+   not a failure if no HN pulse has landed yet. Expect each line **more than once**:
+   `env.set_parallelism(2)` means two subtasks per operator, each running its own
+   `open()`. Duplicates are normal; a *short* count is the signal that an operator did not
+   initialise.
 
 **— Open the taps: this is T0 —**
 
@@ -739,16 +777,25 @@ the whole window.
    ~20 minutes later gives newsapi a **guaranteed duplicate pair**, which is exactly what
    C2/C3 need to see.
    **`:t_start` = this moment.** Record it in UTC; every §8.4.2 query is bounded on it.
-10. **ABORT CHECKPOINT at T0+5 minutes.** The wiring in `GlobalNewsGoldFunction.
-    process_element` and the T4/T6 social branch has **never executed anywhere** — T10
-    states this plainly (local Flink is broken, KG-A-10; T9 proved branch order by AST,
-    not by running it). This window is its first execution, not a re-verification. So stop
-    and check:
-    - both jobs still `RUNNING`, restart count unchanged;
-    - no `ERROR` / traceback in the TaskManager logs;
+10. **ABORT CHECKPOINT at T0+5 minutes. REVISED 2026-07-27 — now evidence-based, not
+    log-based.** With `LOG_INFO_SAMPLE_RATE` reverted to the default (§4.2), INFO passes
+    at ~1% and the six startup lines are no longer reliable evidence. That is acceptable:
+    the flags were verified far more directly at step 8b by importing `config.settings`
+    in-container. So check the **outputs**, which are SQL and unaffected by sampling:
+    - both jobs still `RUNNING`, restart count unchanged, TaskManager not restarting;
+    - no `ERROR` / traceback in the TaskManager log — **ERROR and WARNING pass at 100%
+      regardless of sampling**, so this check is untouched by the revert;
     - DLQ end offset has not moved from the C0 baseline;
-    - at least one `[gold/dedup]` line **or** one `filter_rejects` row with
-      `source_name='hackernews'`.
+    - **rows are landing:** at least one new `knowledge_vault` row, and at least one new
+      `llm_cost_events` row, since `:t_start`. This is the proof the wiring executes at
+      all — the thing T10 could not verify anywhere.
+    - **the gate is firing:** a `[gold/dedup]` line if sampling happens to surface one,
+      OR — better — `gold_enrich` call count below the count of items delivered for a
+      source with known duplicates. Do not treat the absence of a sampled log line as
+      evidence of anything.
+    - once HN data has landed: at least one `filter_rejects` row with
+      `source_name='hackernews'` and a populated `canonical_event_id`. If no HN pulse has
+      arrived yet, hold this sub-check open rather than passing or failing it.
 
     If anything is wrong: set `ENRICHMENT_DEDUP_GATE_ENABLED=false` (or cancel the jobs),
     and **T0 is void** — re-declare it after the fix. A void T0 costs nothing; discovering
@@ -822,9 +869,9 @@ just a number. C0 is read-only, takes about two minutes, and produces one file:
 |---|---|
 | `dead-letter-queue` end offset | C9's baseline. The DLQ retains 30 days, so an absolute in-window count is meaningless without it. This is also the abort checkpoint's canary (§8.3 step 10). |
 | Per-topic low-watermark + end offset for every `ingest.bronze.*` and `process.silver.*` | The §8.2 measurement, kept as evidence of what was discarded and how much. |
-| `social_vault`: rows vs `count(DISTINCT platform_data->>'story_id')` where `source_name='hackernews'`, bounded to the day-run window `[2026-07-22T09:25:26Z, 2026-07-23T09:25:26Z]` | **The measurement §3/D1 was decided without.** Archival and enrichment shared one gate (`exists_by_content_hash` over the comment-inclusive hash), so rows÷distinct-story is the HN enrichment duplication factor for the day-run. High ⇒ option (a) retro-validated. Near 1.0 ⇒ D1's saving was smaller than assumed while D1a's archival cost (only the first comment-set per story is retained) was still paid — a real argument to revisit option (c) sooner. Feeds T12 item (8). |
+| `social_vault`: rows vs `count(DISTINCT platform_data->>'story_id')` where `source_name='hackernews'`, bounded to the day-run window `[2026-07-22T09:25:26Z, 2026-07-23T09:25:26Z]`, **AND `gold_consensus` calls in `llm_cost_events` for hackernews over the same window, against the same distinct-story denominator** | **The measurement §3/D1 was decided without — but it takes TWO ratios, not one (corrected 2026-07-27).** `social_vault` rows ÷ distinct stories measures **archival** duplication, i.e. distinct comment-sets per story. It is a **lower bound**, not the answer: pre-7D there was **no dedup gate on the social path at all**, so enrichment ran on **every delivery** whether or not archival was skipped as a same-hash duplicate. The figure D1 turns on is **enrichment** duplication = `gold_consensus` calls ÷ distinct `story_id`. Report both and label them. High enrichment ratio ⇒ option (a) retro-validated. Near 1.0 ⇒ D1's saving was smaller than assumed while D1a's archival cost (only the first comment-set per story is retained) was still paid — a real argument to revisit option (c) sooner. **Note this is NOT the invalid `dayrun_analysis.md` §4.1 comparison:** that one put Gold spend over an *archive row count*; this one puts it over *distinct stories*, which is the correct denominator. Feeds T12 item (8). |
 | `social_vectors`: row count in the same day-run window | Closes `dayrun_analysis.md` §4.1, which could not export this table. |
-| `knowledge_vectors`: total rows vs `count(DISTINCT signal_id)` | **The evidence base for the §8.4.3 reset decision, which currently rests on an assumption nobody has measured.** The last recorded figure (9,202) predates the day-run entirely. Small debt ⇒ there may be no reason to reset at all. Also the baseline that makes C7 mean something. Feeds T12 item (9). |
+| `knowledge_vectors` total rows vs `knowledge_vault` total rows | **CORRECTED 2026-07-27 (the original spec here said "total vs `count(DISTINCT signal_id)`", which is tautological — `signal_id` is the PRIMARY KEY per F6, so the two are equal by construction and measure nothing).** The authoritative denominator for *distinct articles* is `knowledge_vault`, which carries a UNIQUE B-tree on `document_hash` (F2) and therefore holds exactly one row per distinct article. `knowledge_vectors` receives only the global_news Gold path (`kv_insert`), so in a world without KG-A-8 the two counts would be ~1:1; the excess is the accumulated duplicate-vector debt. **This is the evidence base for the §8.4.3 reset decision, which until now rested on an assumption nobody had measured** — the last recorded figure (9,202) predates the day-run entirely. If `canonical_event_id` is also reported as a denominator, state explicitly whether it is per-delivery-instance or per-article, otherwise the ratio cannot be interpreted. Feeds T12 item (9). |
 
 **Nothing in C0 writes, alters, or deletes anything.** §8.4.3's prohibition applies in full.
 
@@ -836,7 +883,7 @@ just a number. C0 is read-only, takes about two minutes, and produces one file:
 | **C4** | arxiv verified | Same as C2/C3, filtered to arxiv, after the manual DAG trigger (**§8.3 step 11** — moved early) | arxiv appears in the data at all — if absent, the trigger did not fire |
 | **C5** | HackerNews rejects captured | `filter_rejects` rows in-window with `source_name='hackernews'`: count, **`count(DISTINCT original_url)` alongside it (NEW 2026-07-27)**, min/max `rescue_cosine`, count of NULL `canonical_event_id`. → `hn_rejects.csv` | Count > 0, cosines in range, **zero NULL instance keys**. **Report BOTH counts and state the ratio.** The T6 capture branch sits *before* the T4 gate (deliberately — the named invariance assertion, §6), so a low-signal HN story that stays on the front page is re-captured **every 20-minute pulse**. Over 90 minutes expect roughly 4–5 rows per distinct story. Reading the raw count as a story count overstates the daily corpus rate by that factor — a real risk, since §8.5's PVC estimate and §0's "~2,868/day" are both **instance** figures. |
 | **C6** | Instance key populated everywhere | `filter_rejects` in-window: count of NULL `canonical_event_id`, all sources. → folded into `hn_rejects.csv` | 0 |
-| **C7** | No duplicate vectors | `knowledge_vectors`: count of rows in-window vs `count(DISTINCT signal_id)`. **Report against the C0 whole-table baseline** so the in-window result is separable from the pre-existing debt | Equal in-window. The C0 whole-table figure is expected to be unequal — that is historical debt T5 does not clear retroactively (T12), not a C7 failure |
+| **C7** | No duplicate vectors | **CORRECTED 2026-07-27 — the original "rows in-window vs `count(DISTINCT signal_id)`" is tautological (`signal_id` is the PK, F6) and proves nothing.** Measure instead: `knowledge_vectors` rows added in-window vs `knowledge_vault` rows added in-window (the latter is one row per distinct `document_hash`, F2). Report against the C0 whole-table baseline so the in-window result is separable from the pre-existing debt | ~1:1 in-window — one vector per newly archived article. The C0 whole-table ratio is expected to be far worse: that is historical debt T5 does not clear retroactively (T12), not a C7 failure. Note one legitimate in-window excess: a **pre-existing** article re-delivered for the first time post-deploy carries a `uuid4` `signal_id` that the new UUID5 does not collide with, so it writes one extra vector once (T12, KG-A-8 qualification) |
 | **C8** | Cost instrumentation still healthy | `llm_cost_events` in-window: rows per `site`; count of empty `trace_id`. → `cost_health.csv` | Rows present at every expected site; 0 empty trace_ids (KG-A-13 regression guard) |
 | **C9** | No regression | **DLQ end offset now vs the C0 baseline (NEW 2026-07-27 — a delta, not an absolute; the topic retains 30 days, so a raw count is meaningless)**; both Flink jobs still `RUNNING` with restart count unchanged since submission; Kafka consumer lag not climbing. → `health.txt` | DLQ delta at or near zero, no restart loop. Note two legitimate DLQ sources if the delta is non-zero: an embedding API error on the global_news low-signal path routes to DLQ by design (B7), and so does an unknown `source_name`. Neither is a 7D regression — identify which before reporting a failure |
 
@@ -980,6 +1027,45 @@ sequencing is not lost:
 - **Unpause the producer DAGs deliberately** — they are re-paused at §8.4.4 for the
   Domain-B work, so a multi-day run starts from "all paused" and must unpause what it
   actually wants.
+- **NEVER set `LOG_INFO_SAMPLE_RATE=1.0` on the Flink workloads. RESOLVED 2026-07-27 by
+  a clean natural experiment — this bullet replaces an earlier one that wrongly blamed
+  container memory.** Sequence: attempt 1 OOMKilled the TaskManager (exit 137) 38 s after
+  data arrived at the committed `2560Mi`; the limit was raised to `6Gi` and attempt 2
+  OOMKilled at 34 s — 2.4× the memory moved time-to-kill by 4 seconds, which is the
+  signature of consumption growing with **throughput**, not of a fixed footprint meeting a
+  wall. Attempt 3 reverted the limit to `2560Mi` **and** removed `LOG_INFO_SAMPLE_RATE`,
+  processed the *same* accumulated queue, and ran clean with restarts 0. Same burst, same
+  memory, one variable different, opposite outcome. JVM heap during attempt 3 was a flat
+  bounded sawtooth (~170–536 MB) while the container had died in the earlier attempts —
+  so the growth was entirely **Python-side**, never the JVM.
+  **Mechanism: NOT established — do not repeat the first explanation.** The initial write-up
+  here said "~100× more log records over the buffered Beam logging channel." That
+  explanation is now in doubt: during the successful attempt, with the variable absent and
+  the code default at `0.01`, INFO was observed to pass **unsampled** on the Flink UDF path
+  — all 14 operator startup lines appeared, and the 56 `[gold/dedup]` skips reconcile
+  exactly against DB-derived counts (62 enriched + 46 news skips = 108 high-signal newsapi
+  articles, alongside 119 low-signal rejects, summing to the ~227-message backlog). At a
+  true 1% sample those lines would have been ~0. **If INFO is unsampled either way, then
+  setting the variable to `1.0` cannot have multiplied record volume, and the mechanism is
+  something else** — plausibly that setting it changes which handlers `setup_logging()`
+  installs, producing duplicate propagation rather than a higher sample rate. Unresolved.
+  Record as an open question; do not restate the 100× story as fact.
+  **Related documentation defect:** `guides/bringup_profiles.md` §5 trap 3 and
+  `guides/cluster_operations_guide.md` §11 both assert that INFO is 1%-sampled for
+  "anything using `setup_logging()`, which includes the agent and the Flink jobs." The
+  agent half is evidenced (a ~20-hour session produced 7 entries). The **Flink** half
+  appears false, and sessions have been planned around it — "do not plan a measurement
+  session around grepping INFO" may be wrong for the pipeline. Verify before relying on
+  either statement again.
+- **Consequences that DO stand, independent of the mechanism:** (i) container memory is not the lever — raising it chases an unbounded
+  quantity, as `6Gi` proved; (ii) the `2560Mi` / 4-slot / `process.size=2048m`
+  configuration is **sufficient** — verified independently by Prometheus over the whole
+  `dayrun-20260722` window: TaskManager `up` 100%, zero job restarts, 2 failed checkpoints
+  in 24 hours across all nine sources; (iii) this was **not** KG-A-9 and must not be
+  recorded as such — an earlier session hypothesis to that effect was disproved by the
+  day-run metrics and is withdrawn. If a future session needs full INFO from Flink, bound
+  the Python-side memory first (`python.fn-execution.*` / managed memory) — that is real
+  PyFlink tuning work, not a manifest edit.
 - Decide Cloud Scheduler daily up/down vs continuous. Continuous avoids the daily
   backup-miss and daily Flink restart; it costs more.
 - `LOG_INFO_SAMPLE_RATE=1.0` on the agent Deployment before it comes up (KG-B-4) —

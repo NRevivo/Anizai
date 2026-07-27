@@ -12,7 +12,7 @@ infra). cleanup_filter_rejects deletes this run's rows by their test_<id> run_id
 prefix on teardown.
 
 References:
-    - docs/A_pipeline/plans/phase7d_enrichment_gating.md §4.1, §5 T7, §6
+    - docs/A_pipeline/archive_plans/phase7d_enrichment_gating.md §4.1, §5 T7, §6
     - persistence/filter_rejects.py::insert_reject, fetch_rejects
     - infrastructure/sql/migrations/004_enrichment_gating.sql
 """

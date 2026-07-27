@@ -1,0 +1,4 @@
+# Phase 7D C3 — wasted enrichment: gold_enrich events since :t_start whose trace_id has NO matching knowledge_vault.canonical_event_id.
+metric,value
+gold_enrich_without_matching_vault_canonical,0
+# PASS — every enrichment resulted in an archive. This is the day-run's enriched_then_deduped metric, re-run -> 0.

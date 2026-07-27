@@ -43,6 +43,7 @@ root) — consult only for rare history of old-style work.
 | Phase 7A — Provider migration | 2026-05-09 | NewsAPI → newsapi.ai; full body |
 | Phase 7B — Filter + semantic rescue | 2026-05-09 | Two-stage gate; threshold raise; drop semantics |
 | Phase 7C — Scraper retirement | 2026-05-09 | Scraper + column + dependency removed |
+| Phase 7D — Enrichment gating & social reject coverage | 2026-07-27 | Dedup gates Gold enrichment (KG-A-7); deterministic global_news signal_id (KG-A-8); HN reject capture (KG-A-12); instance key (KG-A-13). Verified live on cloud (arxiv 18.1→1.0). |
 
 ---
 
@@ -463,3 +464,45 @@ body text: 5 files deleted, the `scrape_attempted` column dropped via migration 
 | Dependency + docs | `requirements.txt`, `requirements.lock`, `docs/VALIDATION_GUIDE.md` |
 
 **Known Gaps Raised.** None — the truncated-text gap is closed (accepted as the new normal). Migration `002` scheduled for cloud Postgres as part of Phase 9 (C5) preparation.
+
+---
+
+## Phase 7D — Enrichment Gating & Social-Path Reject Coverage (2026-07-27)
+
+**Outcome.** Gated Gold enrichment on the dedup that already runs one step earlier (KG-A-7), made the global_news
+`signal_id` deterministic (KG-A-8), extended reject capture to the HackerNews social path (KG-A-12), and added the
+`filter_rejects` instance key `canonical_event_id` (KG-A-13). T1–T10 green locally; T11 verified **live on cloud
+traffic** (close pack: `reports/phase7d-verify-20260727/`); T12 this closeout. Full plan:
+`archive_plans/phase7d_enrichment_gating.md`.
+
+**Live cloud evidence (`run_id=phase7d-verify-20260727`).** Enrichment per distinct item collapsed by the gate:
+**arxiv 18.1→1.0** (1,850 would-be `gold_enrich` → 102 across a two-run burst), **newsapi 1.74→1.0**; C3
+wasted-enrichment **0**; KG-A-8 vectors:archives **1:1** (newsapi 62=62, arxiv 102=102); HackerNews **288 rejects**
+captured (50 distinct, 0 NULL instance keys) in a source that captured nothing before; C8 **0 empty trace_id**
+across 1,717 calls; **0 DLQ regression**, TM restart-free. **Social gate fired but n=2 high-signal HN stories —
+fired, not verified.**
+
+**Key Decisions.**
+1. Gate on `archive()`'s existing `None` return (global_news) — no new query; distinguish "duplicate" from "archive raised" and fail-open on the raise (D3).
+2. HackerNews dedup key = `story_id` only (D1a) — one enrichment per story ever; drives archival too (KG-A-16).
+3. Social path stores the rescue cosine but does NOT wire the promote branch (D2) — 7B.5 owns the social threshold.
+4. `ENRICHMENT_DEDUP_GATE_ENABLED` kill switch (default on); `REJECT_CAPTURE_ENABLED` extended to the social path.
+
+**Cloud config (durable, committed `5b03ecd`).** Image `anizai-flink:1.19.1-7d`; TM memory unchanged (2560Mi/2Gi);
+`RUN_ID` neutral; `LOG_INFO_SAMPLE_RATE` intentionally absent (setting it 1.0 OOM-crashed the TaskManager, KG-A-17);
+JobManager `strategy.type: Recreate` (K8s-HA rolling-update deadlock).
+
+**Tasks Completed.**
+| Deliverable | File |
+|---|---|
+| Dedup gate + social key + deterministic signal_id + reject capture + instance key | `processing/gold_job.py`, `silver_job.py`, `deduplication.py`, `persistence/filter_rejects.py` |
+| Config kill switches | `config/settings.py` |
+| Schema | `infrastructure/sql/init.sql`, migration `004_enrichment_gating.sql` |
+| Tests (Gate 2/3 + E2E) | `tests/test_processing/test_phase7d_*.py`, `tests/test_persistence/test_*_gate3.py` |
+| Cloud verification close pack | `docs/A_pipeline/reports/phase7d-verify-20260727/` |
+| Durable cloud config | `k8s/flink-jobmanager-deployment.yaml`, `k8s/flink-taskmanager-deployment.yaml` |
+
+**Known Gaps Raised.** KG-A-14 (stranded-article), KG-A-15 (Dockerfile installs from `requirements.txt` not lock),
+KG-A-16 (HN first-delivery lockout), KG-A-17 (OOM mechanism unresolved), KG-A-18 (doc defect — Flink INFO sampling
+claim), KG-A-19 (low-signal rescue waste); KG-B-4 closed → KG-B-22 (agent logging config); D2 counter-example +
+KG-C-10 `replicas: 0` proposal recorded. Detail: `pipeline_sprints.md §4`.

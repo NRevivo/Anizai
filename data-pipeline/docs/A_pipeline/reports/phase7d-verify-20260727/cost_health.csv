@@ -1,0 +1,14 @@
+# Phase 7D C8 — cost instrumentation health. llm_cost_events by site/source since :t_start. 0 empty trace_id = KG-A-13 regression guard.
+site,source_name,calls,empty_trace_id,cost_usd
+gold_consensus,hackernews,2,0,0.0008
+gold_embed,arxiv,102,0,0.0001
+gold_embed,hackernews,2,0,0.0000
+gold_embed,newsapi,62,0,0.0001
+gold_enrich,arxiv,102,0,0.0404
+gold_enrich,newsapi,62,0,0.0269
+rescue_embed,arxiv,978,0,0.0069
+rescue_embed,hackernews,288,0,0.0007
+rescue_embed,newsapi,119,0,0.0002
+TOTAL,,1717,0,0.0761
+# PASS — rows present at every expected site; 0 empty trace_id (KG-A-13 held). Total window spend: $0.0761 over 1717 calls.
+# Note: rescue_embed dominates volume (1385) — low-signal rejects each pay a rescue embedding BEFORE the gate (gap 4, by design).

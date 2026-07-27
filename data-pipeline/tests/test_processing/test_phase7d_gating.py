@@ -24,7 +24,7 @@ directly; the branch ORDER (which is what §4.3 and the named ordering assertion
 turn on) is replicated faithfully and documented inline.
 
 References:
-    - docs/A_pipeline/plans/phase7d_enrichment_gating.md §4.3, §5 T3/T4/T6, §6
+    - docs/A_pipeline/archive_plans/phase7d_enrichment_gating.md §4.3, §5 T3/T4/T6, §6
     - processing/gold_job.py: dedup_skip_enrichment, apply_rescue_outcome,
       GlobalNewsGoldFunction.process_element, PolymarketGoldSocialFunction.process_element
 """

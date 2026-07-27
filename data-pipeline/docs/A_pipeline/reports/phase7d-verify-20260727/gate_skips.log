@@ -1,0 +1,28 @@
+# Phase 7D close pack — C1 (gate fires on real traffic). :t_start = 2026-07-27T12:38:53Z (attempt 2).
+#
+# ===== HEADER: six operator startup lines (§8.3 step 8) — all present, correct, >=2x (parallelism=2), sniper x4 =====
+      2 [gold/flink] enrichment dedup gate ENABLED (KG-A-7)
+      2 [gold/flink] reject capture ENABLED (run_id='phase7d-verify-20260727')
+      2 [gold/flink] semantic-rescue threshold=0.35
+      4 [gold/flink] Sniper reference vector loaded — shape=(1536,)
+      2 [gold/flink] social enrichment dedup gate ENABLED (KG-A-7)
+      2 [gold/flink] social reject capture ENABLED (run_id='phase7d-verify-20260727')
+#   (Step-8 flag verification moved to submission+5 per the corrected plan; all read correctly.)
+#
+# ===== [gold/dedup] SKIP TOTALS — UNSAMPLED (INFO passes full on the Flink UDF path; these are true counts) =====
+#   global_news (T3 gate):  1794 total = newsapi 46 + arxiv 1748
+#                           (arxiv = TWO runs: manual trigger 13:20:47 + the scheduled run for the latest
+#                            interval [2026-07-26T07:00], created on unpause — expected under catchup=False)
+#   hackernews  (T4 gate):  10  = 2 distinct high-signal stories x 5 skips each
+#
+# ===== sample [gold/dedup] lines (source-tagged) =====
+[gold/dedup] skip enrichment — document_hash=d02cdbda80f95673… source=newsapi (already archived, KG-A-7)
+[gold/dedup] skip enrichment — document_hash=ce6214d28c77d4db… source=newsapi (already archived, KG-A-7)
+[gold/dedup] skip enrichment — document_hash=a15eea1957f0a41f… source=newsapi (already archived, KG-A-7)
+[gold/dedup] skip enrichment — document_hash=be500e8f9d565de0… source=newsapi (already archived, KG-A-7)
+[gold/dedup] skip enrichment — document_hash=ee86358deb6f6019… source=newsapi (already archived, KG-A-7)
+[gold/dedup] skip enrichment — document_hash=b5ed66a3f38e1ab0… source=newsapi (already archived, KG-A-7)
+#
+# VERDICT: PASS. Gate fires on BOTH paths (global_news T3 + social T4). Count = mechanism proof, not magnitude
+# (magnitude is C2/C3, SQL). Note: NO LOG_INFO_SAMPLE_RATE in this run (reverted to fix the OOM) — yet INFO is
+# empirically unsampled on the Flink UDF path, so these counts are real. See deployment_log T12 doc-defect note.

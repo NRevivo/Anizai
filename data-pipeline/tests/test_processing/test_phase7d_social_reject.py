@@ -14,7 +14,7 @@ cosines are NOT directly comparable to news-path cosines — Phase 7B.5 sweeps a
 separate social threshold. These tests assert the mechanics, not a threshold.
 
 References:
-    - docs/A_pipeline/plans/phase7d_enrichment_gating.md §3 D2/D4, §5 T6, §6
+    - docs/A_pipeline/archive_plans/phase7d_enrichment_gating.md §3 D2/D4, §5 T6, §6
     - processing/gold_job.py::compute_social_rescue_cosine, social_reject_doc, _embed_and_score
 """
 

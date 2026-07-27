@@ -1,0 +1,7 @@
+# Phase 7D C2 (+C4 arxiv) — gate effectiveness. enrich/consensus calls vs rows archived, per source, since :t_start (12:38:53Z).
+# Ratio -> 1.0 means each distinct item enriched exactly once (duplicates skipped by the gate).
+source,enrich_or_consensus_calls,rows_archived,ratio,notes
+newsapi,62,62,1.00,"gold_enrich vs knowledge_vault. Day-run 1360->644 (2.11). Pre-gate here 108 (62+46 skips) -> 1.74; gate -> 1.00. (1.74<2.11 = less elapsed duplication, not the gate doing less.)"
+arxiv,102,102,1.00,"C4. gold_enrich vs knowledge_vault. TWO runs (manual + the scheduled run for the latest interval created on unpause, expected under catchup=False): 1850 would-be enrich -> 102 (94.5% cut). 18.1x combined = ~9x/run ~ day-run 8.4x. The second run's 102 papers were all already archived -> all skipped."
+hackernews,2,2,1.00,"gold_consensus vs social_vectors. Only 2 high-signal stories — FIRED not verified (n=2)."
+telegram,0,0,n/a,"NOT EXERCISED (producer at 0, Bronze truncated, no data). Control-source role (gate must not over-suppress a duplicate-free source) served instead by enrich=distinct on BOTH news sources: 62/62 and 102/102 — every first occurrence enriched."

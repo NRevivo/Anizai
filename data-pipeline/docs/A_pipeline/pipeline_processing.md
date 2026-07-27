@@ -105,7 +105,8 @@ Three pipelines: Social Pulse, Global News, Structured Metrics.
 **A. Semantic enrichment (Social & Global News)** — via OpenAI GPT-4o:
 - **Cognitive Metadata Extraction** (shared 10-field schema): `impact_level` (1–5), `urgency_level` (1–5), `reliability_score` (0.0–1.0), `sentiment_score` (-1.0–1.0), `extracted_entities`, `topic_classification`, `fact_check_flag`, plus an executive summary and key findings.
 - **Temporal Consensus Bundling** — social comments grouped into temporal blocks (`processing/consensus.py` windowing helpers); GPT-4o summarizes each block into a single Consensus Vector rather than embedding individual messages.
-- Embeddings via `text-embedding-3-small`. Deterministic `signal_id = uuid5(content_hash)` so re-deliveries dedup via `ON CONFLICT DO NOTHING`.
+- Embeddings via `text-embedding-3-small`. Deterministic `signal_id = uuid5(content_hash)` so re-deliveries dedup via `ON CONFLICT DO NOTHING` — **as of Phase 7D (T5, KG-A-8) the global_news builders (newsapi/arxiv/telegram) use this too**, not just the social path; live-verified 1:1 vectors:archives (newsapi 62=62, arxiv 102=102). Going-forward-only: pre-existing `uuid4` rows are not retroactively deduped.
+- **Pre-dispatch enrichment dedup gate (Phase 7D, KG-A-7 — `ENRICHMENT_DEDUP_GATE_ENABLED`, default on).** Before the LLM call, both Gold paths skip enrichment for an already-seen item: global_news gates on `knowledge_vault.archive()` returning `None` **without raising** (a duplicate `document_hash`; an archive *failure* fail-opens to enrichment, per D3); the social/HackerNews path gates on `exists_by_content_hash()`. On a skip: no enrichment, no embedding, no Gold build, no vector write — logged INFO `[gold/dedup]`. **Live-verified 2026-07-27:** arxiv **18.1→1.0** and newsapi **1.74→1.0** `gold_enrich` per distinct item, 0 wasted enrichment, 0 DLQ regression. The dedup guard inside `archive()` and the `ON CONFLICT` guards remain last-resort backstops regardless of the flag.
 
 **B. Structural enrichment (Structured Metrics)** — no OpenAI:
 - **Momentum Block** — deterministic `change_24h`, `change_7d`, `change_30d` from keyed state, so the agent answers "what's the trend?" without runtime math.
@@ -126,6 +127,15 @@ Replaces the original single-layer keyword filter. Runs in the Global News Gold 
 **Fail-safety:**
 - Missing `sniper_reference_vector.npy` at `open()` → hard `raise` (no silent regression to keyword-only filtering).
 - OpenAI embedding failure during rescue → `dead-letter-queue` (cannot make a sound rescue/drop decision without the embedding).
+
+**Social-path reject capture (Phase 7D, T6 — KG-A-12).** The two-stage filter above runs in the Global News
+Gold path; as of Phase 7D the **HackerNews** path also computes the rescue cosine and writes a `filter_rejects`
+row when a low-signal story is dropped (gated by `REJECT_CAPTURE_ENABLED`, fail-open), so HackerNews reject rate
+is measurable for the first time. Per D2 the social path stores the cosine but does **not** wire the promote
+branch — 7B.5 owns the social threshold (the sniper reference vector is news-built, so HN cosines are **not**
+comparable to the news-calibrated 0.35; live max HN cosine 0.3523 already exceeds 0.35). The T6 capture is
+ordered **before** the T4 dedup gate, so a low-signal HN duplicate is captured on every pulse. Live 2026-07-27:
+288 HN rejects, 50 distinct stories, 0 NULL instance keys.
 
 > The thresholds (0.15, 0.35) were set theoretically in Phase 7B; empirical calibration
 > against production vault rows is the open Phase 7B.5 work (`pipeline_sprints.md §2`).

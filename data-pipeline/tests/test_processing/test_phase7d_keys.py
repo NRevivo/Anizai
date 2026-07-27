@@ -15,7 +15,7 @@ T5 — deterministic global_news signal_id:
     uuid4() minting a near-duplicate vector every time.
 
 References:
-    - docs/A_pipeline/plans/phase7d_enrichment_gating.md §3 D1a, §5 T4/T5, §6
+    - docs/A_pipeline/archive_plans/phase7d_enrichment_gating.md §3 D1a, §5 T4/T5, §6
     - processing/deduplication.py::hash_hackernews_story
     - processing/silver_job.py::map_hackernews_story_to_silver
     - processing/gold_job.py::_deterministic_signal_id and the three global_news builders

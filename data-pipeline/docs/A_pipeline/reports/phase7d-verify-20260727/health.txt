@@ -1,0 +1,12 @@
+Phase 7D C9 — no regression.  :t_start = 2026-07-27T12:38:53Z (attempt 2, post-revert config).
+
+DLQ end offset:      7142   (C0 baseline 7142)  ->  DELTA 0.  PASS.
+Flink jobs:          anizai-silver-polymarket = RUNNING ; anizai-gold-all-sources = RUNNING.
+TM restart count:    0  since attempt-2 submission — survived the newsapi/HN drain AND the ~2800-msg arxiv double-run burst.
+ERROR-level lines:   0.   Python tracebacks: 0.
+Kafka consumer lag:  n/a via kafka-consumer-groups (Flink KafkaSource manages offsets in checkpoints, not consumer groups).
+                     Drain confirmed instead by flat row-landing: knowledge_vault/llm_cost_events/filter_rejects/silver-end
+                     all constant across 6 samples over ~2 min before arxiv, and again after arxiv drained.
+
+Config in effect (attempt 2): image anizai-flink:1.19.1-7d ; TM limit 2560Mi / req 2Gi ; LOG_INFO_SAMPLE_RATE ABSENT ;
+                     REJECT_CAPTURE_ENABLED=true ; ENRICHMENT_DEDUP_GATE_ENABLED=true ; RUN_ID=phase7d-verify-20260727.
