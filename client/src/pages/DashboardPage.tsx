@@ -581,6 +581,7 @@ export function DashboardPage({
         return (
             <ChatPanel
                 messages={messages}
+                sessionId={activeSessionId}
                 isLoading={isMessagesLoading}
                 isSendingMessage={isSendingMessage}
                 isSendLocked={isSendLocked}
@@ -682,6 +683,7 @@ export function DashboardPage({
                     <div className={`fixed inset-y-0 right-0 w-full max-w-[min(24rem,100vw)] z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                         <ChatPanel
                             messages={messages}
+                            sessionId={activeSessionId}
                             isLoading={isMessagesLoading}
                             isSendingMessage={isSendingMessage}
                             isSendLocked={isSendLocked}
@@ -730,6 +732,7 @@ export function DashboardPage({
                 <div className={`fixed inset-y-0 right-0 w-full max-w-[min(24rem,100vw)] z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                     <ChatPanel
                         messages={messages}
+                        sessionId={activeSessionId}
                         isLoading={isMessagesLoading}
                         isSendingMessage={isSendingMessage}
                         isSendLocked={isSendLocked}

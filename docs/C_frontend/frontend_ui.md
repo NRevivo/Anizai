@@ -257,6 +257,7 @@ spinner. It is used across the dashboard, chat, evidence, trending, and settings
 | Pending follow-up overdue | ✅ | `followUpPendingState === 'stalled'` → static `StateMessage` warning |
 | Send lock while busy | ✅ | `isSendDisabled` gates the send button and the suggested-action chips |
 | Composer withheld until a result exists | ✅ | `shouldShowFollowUpComposer` (`lib/followUpComposer.ts`) → `DashboardPage:170`, consumed at `ChatPanel:151` |
+| Thread pinned to newest message | ✅ | `lib/followUpScroll.ts` + `threadRef` effects in `ChatPanel.tsx` |
 | Failed session | ✅ | Status panel + retry |
 | Clarification | ✅ | Candidate picker |
 | Plan limit | ✅ | Structured `PLAN_LIMIT_EXCEEDED` surfaced from the API (`frontend_api.md §6.1`) |
@@ -348,6 +349,48 @@ Note that `stalled` changes the **indicator only**. `isSendLocked` still derives
 `isAwaitingAssistantResponse`, so the composer's send button stays locked for that
 session — the permanent-send-lock caveat in `sprint-24-25-frontend-tasks.md` is
 unchanged and remains a separate contract decision.
+
+**Thread auto-scroll.** The follow-up thread keeps itself pinned to the newest
+message. Policy lives in `lib/followUpScroll.ts` (19 unit tests); the effects live in
+`ChatPanel.tsx`.
+
+The scroll target is **the thread container itself** — the single `overflow-y-auto`
+div at `ChatPanel.tsx:117`, held by `threadRef`. It is deliberately *not*
+`scrollIntoView`: this panel is nested in the dashboard grid, and scrolling an element
+into view walks up every scrollable ancestor and drags the whole page. Verified in a
+browser that `container.scrollTo(...)` leaves `window.scrollY` untouched.
+
+| Trigger | Behaviour |
+|---|---|
+| Opening / switching to a session with existing follow-ups | instant, in `useLayoutEffect` — no scroll-from-top flash |
+| New message (user or assistant) | smooth |
+| Thinking indicator appearing | smooth |
+| Indicator replaced by the answer | smooth |
+| Composer or suggested chips mounting | instant re-pin (layout correction, not a new message) |
+
+Three details that are easy to get wrong and are load-bearing here:
+
+- **Pinned-ness is tracked, not measured.** `isPinnedToBottomRef` is updated by the
+  container's `onScroll`. Measuring inside the effect would be wrong: by then the new
+  content has already pushed the bottom away, so every update after the first would
+  read as "user scrolled up" and suppress itself.
+- **The initial jump waits on `isLoading`.** `App.tsx` clears `sessionMessages` on a
+  session switch but the previous session's messages stay rendered until the new
+  snapshot lands. Without the gate the one instant jump would be spent on the outgoing
+  thread and the real content would animate in from the top.
+- **`useLayoutEffect` runs without a dependency array** so it re-checks each render
+  until content exists; `hasPerformedInitialJumpRef` makes it a no-op thereafter.
+
+Suppression: if the user has scrolled more than `AUTO_SCROLL_THRESHOLD_PX` (64px,
+under one bubble height) from the bottom, auto-scroll is suppressed — they are reading
+history. It resumes as soon as they return to the bottom. **The one exception is their
+own just-sent message**, which always scrolls regardless of position.
+
+`prefers-reduced-motion` downgrades smooth to instant (`resolveScrollBehavior`). A
+session switch resets pinned state, the initial-jump flag and the last-seen message id,
+so nothing carries between sessions — `ChatPanel` takes a `sessionId` prop purely for
+this. The `ResizeObserver` is disconnected on unmount; the scroll handler is a React
+`onScroll` and needs no manual teardown.
 
 ---
 

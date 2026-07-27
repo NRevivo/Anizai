@@ -1,11 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ChatMessage, SuggestedAction } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { StateMessage } from './ui/StateMessage';
 import { formatRelativeTime } from '../lib/utils';
 import type { FollowUpPendingState } from '../lib/followUpPending';
+import {
+    decideAutoScroll,
+    getDistanceFromBottom,
+    isNearBottom,
+    resolveScrollBehavior,
+} from '../lib/followUpScroll';
 import ReactMarkdown from 'react-markdown';
+
+// Read at call time rather than cached in state: the value is always current
+// without needing a change listener to clean up.
+function prefersReducedMotion(): boolean {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+}
 
 // Staggered delays for the three dots. Kept out of the class list because
 // Tailwind has no arbitrary animation-delay utility configured here.
@@ -51,6 +63,10 @@ function ThinkingIndicator() {
 interface ChatPanelProps {
     messages: ChatMessage[];
     suggestedActions: SuggestedAction[];
+    // Identifies which session the thread belongs to, so scroll state can be
+    // reset on a switch instead of carrying one session's position into the
+    // next. Not used for fetching — ChatPanel is presentational.
+    sessionId?: string | null;
     isLoading?: boolean;
     isSendingMessage?: boolean;
     // T3 send-lock: true while the session is still producing an answer
@@ -76,6 +92,7 @@ interface ChatPanelProps {
 export function ChatPanel({
     messages,
     suggestedActions,
+    sessionId = null,
     isLoading = false,
     isSendingMessage = false,
     isSendLocked = false,
@@ -85,6 +102,111 @@ export function ChatPanel({
     onActionClick
 }: ChatPanelProps) {
     const [inputValue, setInputValue] = useState('');
+
+    // --- Auto-scroll ------------------------------------------------------
+    // Scrolls the thread's own container only. Never scrollIntoView: this panel
+    // sits inside the dashboard grid, and scrolling an element into view walks
+    // up every scrollable ancestor, dragging the whole page with it.
+    const threadRef = useRef<HTMLDivElement | null>(null);
+    // Whether the user was at the bottom BEFORE the current update rendered.
+    // Maintained by the scroll handler rather than measured inside the effect —
+    // by the time an effect runs, the new content has already pushed the bottom
+    // away, so a fresh measurement would report "scrolled up" every time and
+    // suppress every scroll after the first.
+    const isPinnedToBottomRef = useRef(true);
+    const hasPerformedInitialJumpRef = useRef(false);
+    const lastSeenMessageIdRef = useRef<string | null>(null);
+
+    const scrollToBottom = (behavior: ScrollBehavior) => {
+        const thread = threadRef.current;
+        if (!thread) {
+            return;
+        }
+
+        thread.scrollTo({ top: thread.scrollHeight, behavior });
+    };
+
+    const handleThreadScroll = () => {
+        const thread = threadRef.current;
+        if (!thread) {
+            return;
+        }
+
+        isPinnedToBottomRef.current = isNearBottom(getDistanceFromBottom(thread));
+    };
+
+    // Switching sessions starts a fresh thread: drop the previous session's
+    // pinned state and re-arm the instant jump. In the layout phase so no frame
+    // is painted with carried-over state.
+    useLayoutEffect(() => {
+        hasPerformedInitialJumpRef.current = false;
+        isPinnedToBottomRef.current = true;
+        lastSeenMessageIdRef.current = null;
+    }, [sessionId]);
+
+    // First paint of a session: jump instantly, before the browser paints, so
+    // there is no visible scroll-from-top flash. Gated on `isLoading` because
+    // the previous session's messages remain rendered until the new session's
+    // first snapshot lands — jumping on those would spend the one instant jump
+    // on the wrong thread and leave the real content to animate.
+    useLayoutEffect(() => {
+        if (hasPerformedInitialJumpRef.current || isLoading || messages.length === 0) {
+            return;
+        }
+
+        scrollToBottom('auto');
+        hasPerformedInitialJumpRef.current = true;
+        lastSeenMessageIdRef.current = messages[messages.length - 1].id;
+    });
+
+    // Subsequent updates — a new message either way, the thinking indicator
+    // appearing, or the answer replacing it.
+    useEffect(() => {
+        if (!hasPerformedInitialJumpRef.current) {
+            return;
+        }
+
+        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+        const isNewMessage = lastMessage !== null && lastMessage.id !== lastSeenMessageIdRef.current;
+        const isOwnNewMessage = isNewMessage && lastMessage.role === 'user';
+        lastSeenMessageIdRef.current = lastMessage?.id ?? null;
+
+        const decision = decideAutoScroll({
+            isPinnedToBottom: isPinnedToBottomRef.current,
+            isOwnNewMessage,
+        });
+
+        if (!decision.scroll) {
+            return;
+        }
+
+        scrollToBottom(
+            resolveScrollBehavior({ isInitial: false, prefersReducedMotion: prefersReducedMotion() })
+        );
+    }, [messages, followUpPendingState]);
+
+    // The container's own height changes when the composer or the suggested
+    // action chips mount (the c75f15f result gate) — the content does not move,
+    // but the bottom does. Re-pin instantly: this is a layout correction, not a
+    // new message, so it should not animate.
+    useEffect(() => {
+        const thread = threadRef.current;
+        if (!thread || typeof ResizeObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            if (!hasPerformedInitialJumpRef.current || !isPinnedToBottomRef.current) {
+                return;
+            }
+
+            scrollToBottom('auto');
+        });
+
+        observer.observe(thread);
+
+        return () => observer.disconnect();
+    }, []);
 
     // The send path is closed while a message is mid-flight (isSendingMessage)
     // or while the session is still answering (isSendLocked). When the composer
@@ -114,7 +236,11 @@ export function ChatPanel({
                 </p>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
+            <div
+                ref={threadRef}
+                onScroll={handleThreadScroll}
+                className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3"
+            >
                 {isLoading && messages.length === 0 ? (
                     <StateMessage
                         compact
