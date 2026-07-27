@@ -430,12 +430,48 @@ session switch) the resolved container is scrolled back to the top, so the resul
 that replaces the timeline does not inherit a scroll position that belonged to the
 timeline's height.
 
-> **Pre-existing, unrelated:** that same centre wrapper is `flex items-center`. When its
-> content is taller than the container, `align-items: center` pushes the content's top
-> above the scroll origin where it cannot be reached — measured at −225px in a browser
-> repro. During a long run the question card at the top is therefore unreachable.
-> Scrolling to the *bottom* is unaffected, so the timeline feature works regardless.
-> Not fixed here; it needs the centring replaced with an `auto`-margin approach.
+**Centring in the centre panel — use `my-auto`, never `items-center`.** All three
+`renderCenterPanel` wrappers (`DashboardPage.tsx:497`, `:520`, `:547`) are
+`h-full flex justify-center …` with the child carrying `my-auto`. The wrappers are
+`flex-direction: row` (never declared, so the default), which makes the **vertical**
+axis the cross axis — hence `my-auto`, not `mx-auto`.
+
+They previously used `align-items: center` on the wrapper. Cross-axis centring has no
+concept of a scroll origin: when the content is taller than the container it is centred
+*around* the container, so the overflow above the top edge sits at a negative offset
+that no amount of scrolling can reach. During a long run the "Active forecast" question
+card was simply unreachable. An auto cross-axis margin gives the same centred result
+when there is free space and collapses to `0` when there is not, so the top stays
+reachable.
+
+Measured in a browser across all three layout trees, before → after:
+
+| Tree | Long content, child top at `scrollTop: 0` | Short content, child top |
+|---|---|---|
+| xl (`:651`) | **−132 → +16** (reachable) | 160 → **160** (unchanged) |
+| tablet (`:675`) | **−132 → +16** | 160 → **160** (unchanged) |
+| mobile (`:710`) | **−164 → +16** | 128 → **128** (unchanged) |
+
+`+16` is the wrapper's `p-4` padding — i.e. fully visible. With short content the
+computed `margin-top` resolves to 144px/112px (the auto margin absorbing free space) and
+the rendered position is **identical to before**, so the centred look is preserved.
+Content at exactly container height produced no jump and no second scrollbar, and
+scroll-to-bottom still lands at `distanceFromBottom: 0` in every case — so neither
+`4b06c12` (follow-up scroll) nor `5627a08` (timeline scroll) regresses, and
+`findScrollableAncestor` still resolves to the same wrapper.
+
+> One Tailwind trap worth recording: `.my-auto` did not exist in the generated CSS
+> before this change, because JIT only emits classes it finds in source. An early
+> measurement using `my-auto` in an injected DOM probe was silently inert and produced a
+> false "short content regresses to top-aligned" reading. Verify a utility is actually
+> emitted before trusting a probe that uses it.
+
+This applies to every state that shares those wrappers — the loading panel, the
+"no forecasts yet" / "select a forecast" empty states, and everything
+`renderStatusPanel()` returns into `:520`, which includes the **clarification
+candidate picker** and the **failed/retry** panel. The clarification picker with several
+candidates is the other case that could exceed the viewport, and it is fixed by the same
+change. The result view (`<Dashboard>`) does not use these wrappers and is unaffected.
 
 ---
 

@@ -494,8 +494,8 @@ export function DashboardPage({
 
         if (isLoading) {
             return (
-                <div className="h-full flex items-center justify-center p-4 sm:p-6 overflow-x-hidden">
-                    <div className="w-full max-w-sm">
+                <div className="h-full flex justify-center p-4 sm:p-6 overflow-x-hidden">
+                    <div className="w-full max-w-sm my-auto">
                         <StateMessage
                             variant="loading"
                             align="center"
@@ -510,9 +510,15 @@ export function DashboardPage({
         if (activeSessionState && activeSessionState.status !== 'done') {
             const statusPanel = renderStatusPanel();
 
+            // Centred with `my-auto` on the child rather than `items-center` on the
+            // wrapper. An auto cross-axis margin absorbs free space when there is
+            // spare room (identical centred look) but collapses to zero when there
+            // is not, so the top of a long run stays reachable. `items-center`
+            // instead pushes the overflow above the scroll origin, where it cannot
+            // be scrolled to.
             return (
-                <div className="h-full flex items-center justify-center p-4 sm:p-8 overflow-x-hidden">
-                    <div className="w-full max-w-2xl space-y-4">
+                <div className="h-full flex justify-center p-4 sm:p-8 overflow-x-hidden">
+                    <div className="w-full max-w-2xl space-y-4 my-auto">
                         <div className="rounded-lg border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Active forecast</p>
                             <h1 className="mt-2 text-lg sm:text-xl font-semibold text-gray-900 break-words">
@@ -538,8 +544,8 @@ export function DashboardPage({
 
         if (!prediction) {
             return (
-                <div className="h-full flex items-center justify-center p-4 sm:p-8 overflow-x-hidden">
-                    <div className="w-full max-w-md">
+                <div className="h-full flex justify-center p-4 sm:p-8 overflow-x-hidden">
+                    <div className="w-full max-w-md my-auto">
                         <StateMessage
                             align="center"
                             title={sessions.length === 0 ? 'No forecasts yet' : 'Select a forecast'}
