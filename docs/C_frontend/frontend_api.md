@@ -80,6 +80,7 @@ Every response is wrapped. Defined in `server/src/types/api.ts`.
 | GET | `/` | — | — | 200 `{ ok: true, name: 'anizai-server' }` | `routes/root.ts` |
 | GET | `/health` | — | — | 200 `{ ok: true, timestamp }` | `routes/health.ts` |
 | GET | `/trending` | — | `?limit` parsed, clamped | 200 `TrendingForecast[]` | `routes/trending.ts` |
+| GET | `/trending/:id/markets` | — | — | 200 `TrendingMarket[]`, 404 `NOT_FOUND` | `routes/trending.ts` |
 
 `/trending` parses `limit` with `Number.parseInt`; non-finite or non-positive falls back
 to **20**, and any value is clamped to a maximum of **100**
@@ -95,10 +96,19 @@ to **20**, and any value is clamped to a maximum of **100**
 > empty result is returned as `[]` with a `warn` rather than backfilled. Shape:
 > `frontend_contracts.md §3.9`.
 
-> **Response weight (2026-07-27).** Each event now carries a `markets[]` array — the
-> full selectable field, uncapped — so `?limit=20` returns ~79 KB uncompressed
-> (was 7.0 KB). Budget for it on the landing page, which calls this unauthenticated.
-> Rationale and per-field shape: `frontend_contracts.md §3.9`.
+> **`markets` is not on this payload for multi-outcome events (2026-07-27).** Only
+> binary events carry their single market inline; every other field is fetched from
+> `GET /trending/:id/markets` when the user opens a picker. Shipping all of them kept
+> `?limit=12` at 59.9 KB against 4.5 KB, on an endpoint the landing page calls
+> unauthenticated on every visit. **An empty `markets` here means "not loaded", not
+> "none exist"** — see `frontend_contracts.md §3.9`.
+
+`GET /trending/:id/markets` takes the Polymarket **event** id (`TrendingForecast.id`),
+not a market or condition id. It reuses the list's 5-minute cache — a click on a
+visible card costs no upstream call — and falls back to a single-event Gamma fetch
+when the cache cannot answer. Returns 404 when the event does not exist upstream, and
+`200 []` when it exists but has nothing selectable. Full semantics:
+`frontend_contracts.md §3.9b`.
 
 ### §3.2 User
 

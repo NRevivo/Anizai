@@ -26,4 +26,27 @@ router.get('/trending', async (req, res, next) => {
     }
 });
 
+/**
+ * GET /trending/:id/markets
+ * Every selectable market for one trending event (public endpoint).
+ *
+ * Split out of `GET /trending` so the list — which the landing page fetches
+ * unauthenticated on every visit — does not carry the full field for every event.
+ * Fetched when the user opens a picker. Binary events already ship their single
+ * market inline and never need this.
+ */
+router.get('/trending/:id/markets', async (req, res, next) => {
+    try {
+        const markets = await trendingService.getEventMarkets(String(req.params.id));
+
+        const response: ApiSuccessResponse = {
+            data: markets,
+        };
+
+        res.json(response);
+    } catch (error) {
+        next(error);
+    }
+});
+
 export default router;

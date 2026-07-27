@@ -57,10 +57,18 @@ export interface TrendingForecast {
     /** Binary: a single Yes entry. Multi-outcome: the leading legs, price-desc. */
     outcomes: TrendingOutcome[];
     /**
-     * Every selectable market in the event, probability-descending. No dedup and
-     * no cap — unlike `outcomes`, this is the full field the picker chooses from.
+     * Selectable markets, probability-descending. No dedup and no cap — unlike
+     * `outcomes`, this is the real field a picker chooses from.
      *
-     * ⚠ `markets.length` is normally SMALLER than `marketCount`: inactive
+     * ⚠️ **CONDITIONALLY POPULATED on the list response. Empty there means "not
+     * loaded at this layer", NEVER "this event has no markets".** `forListResponse`
+     * keeps it inline for binary events (`marketCount === 1`) and strips it for
+     * multi-outcome ones, which are served by `GET /trending/:id/markets` instead —
+     * the list is public and unauthenticated, and shipping every field to every
+     * visitor cost 59.9 KB against 4.5 KB. Internally (`getTopTrendingFull`, the
+     * cache) it is always fully populated.
+     *
+     * ⚠️ `markets.length` is also normally SMALLER than `marketCount`: inactive
      * placeholder legs are excluded here but still counted there (a 33-market
      * Ethiopia field yields 8 selectable markets). Render counts from
      * `markets.length`, not `marketCount`, anywhere the number describes what the
@@ -353,11 +361,42 @@ function toTrendingForecast(event: any): TrendingForecast | null {
     return { ...base, probability: null, outcomes };
 }
 
+/**
+ * Project a cached forecast down to what the LIST response ships.
+ *
+ * The cache holds every event's complete `markets` array — memory is not the
+ * constraint, wire bytes are. A multi-outcome field is dropped here and fetched
+ * per-event from `GET /trending/:id/markets` only once the user actually opens a
+ * picker. Measured on `?limit=12`: 59.9 KB → 4.5 KB.
+ *
+ * Binary events keep their single market inline. It costs ~156 bytes across the
+ * whole page and it is what lets a binary card submit on click with no second
+ * round-trip — that path has no picker to show a spinner in.
+ *
+ * Returns a shallow copy: mutating the cached objects would empty the cache the
+ * detail endpoint reads from.
+ */
+function forListResponse(forecast: TrendingForecast): TrendingForecast {
+    if (forecast.marketCount === 1) return forecast;
+    return { ...forecast, markets: [] };
+}
+
 export const trendingRepository = {
     /**
      * Get trending Polymarket events, ranked by 24-hour traded volume.
+     *
+     * `markets` is stripped for multi-outcome events — see `forListResponse`.
      */
     async getTopTrending(limit = 20): Promise<TrendingForecast[]> {
+        const data = await trendingRepository.getTopTrendingFull(limit);
+        return data.map(forListResponse);
+    },
+
+    /**
+     * The cached forecasts with `markets` intact. Internal — the HTTP list route
+     * must go through `getTopTrending`, which strips them.
+     */
+    async getTopTrendingFull(limit = 20): Promise<TrendingForecast[]> {
         const now = Date.now();
         if (cache && now - cache.fetchedAt < TTL_MS && cache.limit >= limit) {
             return cache.data.slice(0, limit);
@@ -374,6 +413,50 @@ export const trendingRepository = {
         } finally {
             inflight = null;
         }
+    },
+
+    /**
+     * Every selectable market for one event, probability-descending.
+     *
+     * Served from the same in-process cache the list route uses, so the common
+     * case — user clicks a card they can see, within the 5-minute TTL — costs no
+     * upstream call at all.
+     *
+     * Falls back to a single-event Gamma fetch when the cache cannot answer. Two
+     * real cases: the TTL lapsed while the page sat open, and the event dropped
+     * out of the top-N on a refresh because the feed is ranked by 24h volume.
+     * Without the fallback both would 404 a card the user is looking at.
+     *
+     * The fallback deliberately skips the topic/exclusion classifier that
+     * `fetchFresh` applies. The event was already admitted by that filter when it
+     * was rendered; re-checking it here could only reject a card the user has
+     * legitimately clicked.
+     *
+     * Returns null when the event genuinely does not exist upstream (→ 404).
+     */
+    async getEventMarkets(eventId: string): Promise<TrendingMarket[] | null> {
+        const now = Date.now();
+        if (cache && now - cache.fetchedAt < TTL_MS) {
+            const hit = cache.data.find((e) => e.id === eventId);
+            if (hit) return hit.markets;
+        }
+
+        const url = `https://gamma-api.polymarket.com/events?id=${encodeURIComponent(eventId)}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(
+                `Polymarket API error: ${response.status} ${response.statusText}`
+            );
+        }
+
+        const body = (await response.json()) as unknown;
+        const events = Array.isArray(body) ? body : [body];
+        const event = events[0] as any;
+        if (!event || String(event?.id ?? '') !== eventId) return null;
+
+        // Same closed-leg filter the list path applies (see toTrendingForecast).
+        const markets = (event?.markets ?? []).filter((m: any) => m?.closed !== true);
+        return toTrendingMarkets(markets);
     },
 
     async fetchFresh(limit: number): Promise<TrendingForecast[]> {

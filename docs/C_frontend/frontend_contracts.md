@@ -438,7 +438,7 @@ passthrough of `gamma-api.polymarket.com/events`, cached 5 minutes in-process.
   url: string;                   // https://polymarket.com/event/{slug}; rendered as the row link
   probability: number | null;    // Yes price for a binary event; NULL for multi-outcome
   outcomes: { label: string; probability: number }[];
-  markets: TrendingMarket[];     // added 2026-07-27 — the full selectable field
+  markets: TrendingMarket[];     // added 2026-07-27 — CONDITIONALLY POPULATED, see below
   volume24h: number;             // was `popularityScore` (same value, clearer name)
   marketCount: number; }         // 1 ⇒ binary; counts inactive legs too — see below
 
@@ -471,10 +471,50 @@ top 20 visible event titles could never text-match any market question.
 > live events: every *active* market carries a price and every price-less market is
 > inactive (0 exceptions), so the filter drops 521 of 1,039 non-closed markets without
 > losing anything pickable. Render user-facing counts from `markets.length`.
->
-> **Payload cost.** Adding `markets` took `GET /trending?limit=20` from 7.0 KB to
-> 78.9 KB raw (11.2×), 2.0 KB → 21.9 KB gzipped. Most of it is 66-char hex
-> `conditionId`s, which compress poorly. Measured 2026-07-27 against the live feed.
+
+#### `markets` is conditionally populated — read this before branching on it
+
+**An empty `markets` on the list response means "not loaded at this layer". It does
+NOT mean "this event has no markets".** Never render "no markets available" off it.
+
+| Event shape | On `GET /trending` | How to get the field |
+|---|---|---|
+| Binary (`marketCount === 1`) | **populated**, one entry | already there — submit on click, no fetch |
+| Multi-outcome (`marketCount > 1`) | **always `[]`** | `GET /trending/:id/markets` |
+
+Binary stays inline because that path has no picker and therefore nowhere to show a
+spinner; it costs ~156 bytes across a whole page. Multi-outcome fields are stripped
+because the list is public and unauthenticated — the landing page fetches it on every
+visit, and shipping every field to every visitor cost **59.9 KB versus 4.5 KB**
+(`?limit=12`, measured 2026-07-27). Server-side this is `forListResponse`; the
+in-process cache and `getTopTrendingFull` always hold the complete array.
+
+Defensive note: a binary event whose single leg is inactive yields `marketCount === 1`
+with `markets: []`. Check `markets[0]` exists rather than trusting `marketCount`, and
+fall back to the detail endpoint.
+
+### §3.9b `TrendingMarket[]` — `GET /trending/:id/markets`
+
+Added 2026-07-27. Public, unauthenticated, same `{ data }` envelope. Returns every
+selectable market for one event, probability-descending — the array `markets` would
+have carried inline.
+
+Served from the same 5-minute in-process cache as the list, so the common case (user
+clicks a card they can see) costs **no upstream call**: measured 1.3 KB in 2.7 ms.
+On a cache miss — TTL lapsed with the page open, or the event fell out of the top-N
+because the feed is ranked by 24h volume — it falls back to a single-event Gamma
+fetch (~220 ms). Without that fallback both cases would 404 a card the user is
+looking at. The fallback deliberately skips the topic/exclusion classifier: the event
+was already admitted by it when rendered.
+
+- **404 `NOT_FOUND`** — the event does not exist upstream.
+- **200 `[]`** — the event exists but has nothing selectable (e.g. every leg of a
+  resolved strike ladder is closed). A real answer, not an error.
+
+Unlike `fetchTrendingForecasts`, the client wrapper `fetchTrendingMarkets` **rethrows**
+rather than degrading to `[]`: it backs a direct user action, so the caller must be
+able to distinguish "loading" from "failed" and offer a retry. Silently returning `[]`
+would render an empty picker that reads as "this event has no markets".
 
 **`probability: null` is load-bearing.** A candidate field (Ballon d'Or has 89 markets)
 has no single probability, which is why Polymarket's own card shows leading outcomes

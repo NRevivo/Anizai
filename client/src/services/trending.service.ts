@@ -32,11 +32,22 @@ export interface TrendingForecast {
     /** Binary: one Yes entry. Multi-outcome: the leading legs, price-desc. */
     outcomes: TrendingOutcome[];
     /**
-     * Every selectable market, probability-descending — no dedup, no cap. This is
-     * what the selection step chooses from; `outcomes` is only a display summary.
+     * Selectable markets, probability-descending — no dedup, no cap.
      *
-     * ⚠ Usually shorter than `marketCount`, which still counts inactive placeholder
-     * legs. Show `markets.length` when the number describes what the user can pick.
+     * ⚠️ **CONDITIONALLY POPULATED. Empty here means "not loaded at this layer",
+     * NEVER "this event has no markets".**
+     *   - Binary events (`marketCount === 1`) ship their single market inline, so a
+     *     binary card can submit on click with no second round-trip.
+     *   - Multi-outcome events arrive with `markets: []` — the field is omitted
+     *     from the list payload and must be fetched via `fetchTrendingMarkets(id)`.
+     *
+     * Never render "no markets available" off this being empty. Branch on
+     * `marketCount` to decide whether to fetch, and treat an empty array from
+     * `fetchTrendingMarkets` as the only real "none exist" signal.
+     *
+     * ⚠️ Also usually shorter than `marketCount`, which still counts inactive
+     * placeholder legs. Show `markets.length` when the number describes what the
+     * user can actually pick.
      */
     markets: TrendingMarket[];
     /** 24-hour traded volume in USD — the value the feed is ranked by. */
@@ -63,4 +74,24 @@ export async function fetchTrendingForecasts(limit = 20): Promise<TrendingForeca
         console.error('Failed to load trending forecasts; rendering empty.', error);
         return [];
     }
+}
+
+/**
+ * Fetch the full selectable field for one trending event.
+ *
+ * Needed because `TrendingForecast.markets` is only populated inline for binary
+ * events — see the warning on that field. Call this when opening a picker for a
+ * multi-outcome event.
+ *
+ * Unlike `fetchTrendingForecasts`, this **rethrows**. It backs a direct user
+ * action, so the caller must be able to tell "still loading" from "failed" and
+ * show a retry — silently resolving to `[]` here would render an empty picker
+ * that looks like "this event has no markets", which is exactly the fabricated
+ * -certainty failure the empty-list degrade avoids elsewhere.
+ */
+export async function fetchTrendingMarkets(eventId: string): Promise<TrendingMarket[]> {
+    return apiRequest<TrendingMarket[]>(
+        `/trending/${encodeURIComponent(eventId)}/markets`,
+        { requireAuth: false }
+    );
 }
