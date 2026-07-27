@@ -306,6 +306,33 @@ function App() {
     const detail = await fetchSessionDetail(sessionId);
     setActiveSessionId(sessionId);
     setActiveSessionDetail(detail);
+
+    // Fold the result back into the sidebar row.
+    //
+    // `sessions[].latestProbability` is NOT stored on the Firestore session doc —
+    // the agent never writes it, so the doc holds null forever. Express derives it
+    // from sessionResults (`enrichLatestProbability`), but only on GET /sessions,
+    // which runs on dashboard entry. A forecast that finishes while the dashboard
+    // is open therefore reached 'done' with the row still showing "—": the live
+    // listener carries the doc's null, and this function used to refresh only
+    // `activeSessionDetail`. Copying the freshly-loaded result across fixes the
+    // row without a second list round-trip.
+    const finalProbability = detail.result?.finalProbability ?? null;
+    const confidence = detail.result?.confidence ?? null;
+    if (finalProbability === null && confidence === null) {
+      return;
+    }
+    setSessions((current) =>
+      current.map((item) =>
+        item.id === sessionId
+          ? {
+              ...item,
+              latestProbability: finalProbability ?? item.latestProbability,
+              latestConfidence: confidence ?? item.latestConfidence,
+            }
+          : item
+      )
+    );
   }, []);
 
   useEffect(() => {
