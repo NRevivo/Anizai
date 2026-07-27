@@ -73,7 +73,7 @@ spec:
         fsGroup: 9999
       containers:
         - name: flink-taskmanager
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7b5i
+          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7d
           imagePullPolicy: IfNotPresent
           # Shell wrapper — same pattern as the JobManager.
           # Reads CSI-mounted secret files, exports as env vars, then
@@ -123,9 +123,15 @@ spec:
             # the Gold Python workers actually run, so these are the copies that
             # matter at runtime; the JM pair keeps the manifests symmetric.
             - name: REJECT_CAPTURE_ENABLED
-              value: "false"
+              value: "true"
             - name: RUN_ID
-              value: "dayrun-20260722"
+              value: ""
+            # Phase 7D durable (KG-A-7): the enrichment dedup gate is a kill switch, default on — stays true.
+            # REJECT_CAPTURE_ENABLED stays true (7B.5 needs the reject corpus). RUN_ID neutral until a run sets it.
+            # LOG_INFO_SAMPLE_RATE intentionally ABSENT (default): setting it to 1.0 triggered a TaskManager OOM
+            # in the 7D window (mechanism unresolved — reports/phase7d-verify-20260727/deployment_log.md); do NOT re-add.
+            - name: ENRICHMENT_DEDUP_GATE_ENABLED
+              value: "true"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are read from
             # CSI-mounted files and exported by the shell wrapper above.
           volumeMounts:
