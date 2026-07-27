@@ -7,6 +7,20 @@ export interface TrendingOutcome {
     probability: number;
 }
 
+/** One selectable market inside an event — the unit a forecast is created against. */
+export interface TrendingMarket {
+    /** Polymarket condition id; the pipeline's join key for this market. */
+    conditionId: string;
+    /** The real market question. Submit this verbatim — never the event title. */
+    question: string;
+    /** Short leg label ("Abiy Ahmed"); falls back to `question` for binary events. */
+    groupItemTitle: string;
+    /** Yes-side probability, 0–1. Multiply by 100 only at render time. */
+    probability: number;
+    /** 24-hour traded volume for this market, in USD. */
+    volume24h: number;
+}
+
 export interface TrendingForecast {
     id: string;
     title: string;
@@ -17,6 +31,14 @@ export interface TrendingForecast {
     probability: number | null;
     /** Binary: one Yes entry. Multi-outcome: the leading legs, price-desc. */
     outcomes: TrendingOutcome[];
+    /**
+     * Every selectable market, probability-descending — no dedup, no cap. This is
+     * what the selection step chooses from; `outcomes` is only a display summary.
+     *
+     * ⚠ Usually shorter than `marketCount`, which still counts inactive placeholder
+     * legs. Show `markets.length` when the number describes what the user can pick.
+     */
+    markets: TrendingMarket[];
     /** 24-hour traded volume in USD — the value the feed is ranked by. */
     volume24h: number;
     /** Total markets in the event; 1 means binary. */

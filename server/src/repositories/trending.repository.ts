@@ -7,6 +7,40 @@ export interface TrendingOutcome {
     probability: number;
 }
 
+/**
+ * One selectable market inside an event.
+ *
+ * This is the unit a forecast is actually created against. `outcomes` above is a
+ * *display* summary (deduped, capped at three); `markets` is the *complete*
+ * selectable field, because the user picks one of these and we submit its
+ * `question` verbatim plus its `conditionId`.
+ *
+ * Why both `question` and `groupItemTitle`: the picker shows the short label but
+ * must submit the full question. Submitting the label ("Abiy Ahmed") or the event
+ * title ("Next Prime Minister of Ethiopia?") is what makes the pipeline's
+ * question-matching miss — only `question` is the text the vault stores.
+ */
+export interface TrendingMarket {
+    /**
+     * Polymarket condition id. This is the exact value the pipeline stores as
+     * `momentum_vault.external_reference_id` for REST-snapshot rows, so it is the
+     * deterministic join key between a trending card and a vault row.
+     */
+    conditionId: string;
+    /** The real market question — submitted verbatim as the forecast question. */
+    question: string;
+    /**
+     * Short leg label for a candidate field ("Abiy Ahmed"). Binary events carry no
+     * `groupItemTitle`, so this falls back to `question` and the picker stays
+     * renderable without a second null check.
+     */
+    groupItemTitle: string;
+    /** Yes-side probability, 0–1. */
+    probability: number;
+    /** 24-hour traded volume for this individual market, in USD. */
+    volume24h: number;
+}
+
 export interface TrendingForecast {
     /** Polymarket event id. */
     id: string;
@@ -22,9 +56,21 @@ export interface TrendingForecast {
     probability: number | null;
     /** Binary: a single Yes entry. Multi-outcome: the leading legs, price-desc. */
     outcomes: TrendingOutcome[];
+    /**
+     * Every selectable market in the event, probability-descending. No dedup and
+     * no cap — unlike `outcomes`, this is the full field the picker chooses from.
+     *
+     * ⚠ `markets.length` is normally SMALLER than `marketCount`: inactive
+     * placeholder legs are excluded here but still counted there (a 33-market
+     * Ethiopia field yields 8 selectable markets). Render counts from
+     * `markets.length`, not `marketCount`, anywhere the number describes what the
+     * user can actually choose.
+     */
+    markets: TrendingMarket[];
     /** 24-hour traded volume, in USD. The value the feed is ranked by. */
     volume24h: number;
-    /** Total markets in the event — 1 means binary. */
+    /** Total non-closed markets in the event — 1 means binary. Includes inactive
+     *  placeholder legs, so see the warning on `markets` before displaying it. */
     marketCount: number;
 }
 
@@ -213,6 +259,40 @@ function yesPrice(market: any): number | null {
     return Number.isFinite(price) ? price : null;
 }
 
+/**
+ * Build the complete selectable field for an event, probability-descending.
+ *
+ * Filters, and why each one is safe:
+ *  - `active !== false` drops unnamed placeholder legs ("Will Person C be the next
+ *    Prime Minister of Ethiopia?"). Measured against 100 live events: every active
+ *    market carries a price and every price-less market is inactive — 0 exceptions
+ *    — so this removes 521 of 1,039 non-closed markets without dropping a single
+ *    market a user could meaningfully pick. Note `outcomes` above does NOT apply
+ *    this filter; it is a display summary and is left exactly as it was.
+ *  - a null `yesPrice` or an empty `conditionId` is defensive only (neither occurs
+ *    in the live sample). A market with no identifier cannot serve as a benchmark,
+ *    which is the entire reason this array exists.
+ */
+function toTrendingMarkets(markets: any[]): TrendingMarket[] {
+    return markets
+        .filter((m: any) => m?.active !== false)
+        .map((m: any): TrendingMarket | null => {
+            const probability = yesPrice(m);
+            const conditionId = String(m?.conditionId ?? '').trim();
+            const question = String(m?.question ?? '').trim();
+            if (probability === null || !conditionId || !question) return null;
+            return {
+                conditionId,
+                question,
+                groupItemTitle: String(m?.groupItemTitle || '').trim() || question,
+                probability,
+                volume24h: Number(m?.volume24hr ?? 0) || 0,
+            };
+        })
+        .filter((m: TrendingMarket | null): m is TrendingMarket => m !== null)
+        .sort((a: TrendingMarket, b: TrendingMarket) => b.probability - a.probability);
+}
+
 function toTrendingForecast(event: any): TrendingForecast | null {
     // Legs can resolve while the parent event is still open; a settled leg would
     // otherwise show as a 0% or 100% outcome.
@@ -226,6 +306,7 @@ function toTrendingForecast(event: any): TrendingForecast | null {
         url: slug ? `https://polymarket.com/event/${slug}` : 'https://polymarket.com',
         volume24h: Number(event?.volume24hr ?? 0) || 0,
         marketCount: markets.length,
+        markets: toTrendingMarkets(markets),
     };
 
     if (markets.length === 1) {

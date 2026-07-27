@@ -438,9 +438,43 @@ passthrough of `gamma-api.polymarket.com/events`, cached 5 minutes in-process.
   url: string;                   // https://polymarket.com/event/{slug}; rendered as the row link
   probability: number | null;    // Yes price for a binary event; NULL for multi-outcome
   outcomes: { label: string; probability: number }[];
+  markets: TrendingMarket[];     // added 2026-07-27 — the full selectable field
   volume24h: number;             // was `popularityScore` (same value, clearer name)
-  marketCount: number; }         // 1 ⇒ binary; the true field size, not outcomes.length
+  marketCount: number; }         // 1 ⇒ binary; counts inactive legs too — see below
+
+// added 2026-07-27
+TrendingMarket = {
+  conditionId: string;      // Polymarket condition id
+  question: string;         // the REAL market question — submit this, never `title`
+  groupItemTitle: string;   // short leg label ("Abiy Ahmed"); falls back to `question`
+  probability: number;      // Yes-side, 0–1
+  volume24h: number; }      // per-market 24h volume, USD
 ```
+
+**`markets` vs `outcomes` — different jobs, do not conflate.** `outcomes` is a
+*display summary*: capped at 3 and deduplicated on rendered percentage. `markets` is
+the *complete selectable field*: no cap, no dedup, probability-descending. The
+selection step reads `markets`; the summary row keeps reading `outcomes`.
+
+**`conditionId` is the deterministic join key.** It is the same value the pipeline
+stores as `momentum_vault.external_reference_id` for REST-snapshot rows, so carrying
+it removes the need to fuzzy-match question text at all.
+
+**Submit `question`, never `title`.** The event title is a display label
+("Fed Decision in July?") that frequently corresponds to no market question at all;
+`question` is the text the vault actually stores. Measured on the live feed, 15 of the
+top 20 visible event titles could never text-match any market question.
+
+> **`markets.length` ≠ `marketCount`.** `markets` excludes inactive placeholder legs
+> ("Will Person C be the next Prime Minister of Ethiopia?"); `marketCount` still counts
+> them. A 33-market Ethiopia field yields 8 selectable markets. Measured against 100
+> live events: every *active* market carries a price and every price-less market is
+> inactive (0 exceptions), so the filter drops 521 of 1,039 non-closed markets without
+> losing anything pickable. Render user-facing counts from `markets.length`.
+>
+> **Payload cost.** Adding `markets` took `GET /trending?limit=20` from 7.0 KB to
+> 78.9 KB raw (11.2×), 2.0 KB → 21.9 KB gzipped. Most of it is 66-char hex
+> `conditionId`s, which compress poorly. Measured 2026-07-27 against the live feed.
 
 **`probability: null` is load-bearing.** A candidate field (Ballon d'Or has 89 markets)
 has no single probability, which is why Polymarket's own card shows leading outcomes

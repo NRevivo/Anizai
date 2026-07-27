@@ -95,6 +95,11 @@ to **20**, and any value is clamped to a maximum of **100**
 > empty result is returned as `[]` with a `warn` rather than backfilled. Shape:
 > `frontend_contracts.md §3.9`.
 
+> **Response weight (2026-07-27).** Each event now carries a `markets[]` array — the
+> full selectable field, uncapped — so `?limit=20` returns ~79 KB raw / ~22 KB gzipped
+> (was 7.0 KB / 2.0 KB). Budget for it on the landing page, which calls this
+> unauthenticated. Rationale and per-field shape: `frontend_contracts.md §3.9`.
+
 ### §3.2 User
 
 | Method | Path | Auth | Validation | Success | Handler |
