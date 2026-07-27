@@ -525,7 +525,11 @@ export function DashboardPage({
                             awaiting_clarification still show the status panel above,
                             but never the agent timeline. */}
                         {['queued', 'claimed', 'running'].includes(activeSessionState.status) && (
-                            <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
+                            <AgentEventsTimeline
+                                events={agentEvents}
+                                isLoading={isAgentEventsLoading}
+                                sessionId={activeSessionId}
+                            />
                         )}
                     </div>
                 </div>

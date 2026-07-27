@@ -11,13 +11,8 @@ import {
     isNearBottom,
     resolveScrollBehavior,
 } from '../lib/followUpScroll';
+import { prefersReducedMotion } from '../lib/autoScroll';
 import ReactMarkdown from 'react-markdown';
-
-// Read at call time rather than cached in state: the value is always current
-// without needing a change listener to clean up.
-function prefersReducedMotion(): boolean {
-    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
-}
 
 // Staggered delays for the three dots. Kept out of the class list because
 // Tailwind has no arbitrary animation-delay utility configured here.

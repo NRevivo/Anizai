@@ -258,6 +258,7 @@ spinner. It is used across the dashboard, chat, evidence, trending, and settings
 | Send lock while busy | ✅ | `isSendDisabled` gates the send button and the suggested-action chips |
 | Composer withheld until a result exists | ✅ | `shouldShowFollowUpComposer` (`lib/followUpComposer.ts`) → `DashboardPage:170`, consumed at `ChatPanel:151` |
 | Thread pinned to newest message | ✅ | `lib/followUpScroll.ts` + `threadRef` effects in `ChatPanel.tsx` |
+| Agent timeline pinned to newest step | ✅ | `findScrollableAncestor` (`lib/autoScroll.ts`) + effects in `AgentEventsTimeline.tsx` |
 | Failed session | ✅ | Status panel + retry |
 | Clarification | ✅ | Candidate picker |
 | Plan limit | ✅ | Structured `PLAN_LIMIT_EXCEEDED` surfaced from the API (`frontend_api.md §6.1`) |
@@ -391,6 +392,50 @@ session switch resets pinned state, the initial-jump flag and the last-seen mess
 so nothing carries between sessions — `ChatPanel` takes a `sessionId` prop purely for
 this. The `ResizeObserver` is disconnected on unmount; the scroll handler is a React
 `onScroll` and needs no manual teardown.
+
+**Agent timeline auto-scroll.** `AgentEventsTimeline` keeps the newest processing step
+in view during a run. It shares the *policy* in `lib/followUpScroll.ts` with the
+follow-up thread, but the *container semantics differ* — see below.
+
+| | Follow-up thread | Agent timeline |
+|---|---|---|
+| Scroll container | its own `overflow-y-auto` div, `ChatPanel.tsx:117` | **none of its own** — resolved from the DOM at run time |
+| Initial jump | instant, `useLayoutEffect` | not applicable — mounts empty and fills as events arrive |
+| Own-message override | yes | no — every event is agent-authored |
+| Teardown | `ResizeObserver.disconnect()` | `removeEventListener` + reset container to top |
+
+**The timeline has no scroll container.** It is a card that grows inside the centre
+panel. The container is found by `findScrollableAncestor` (`lib/autoScroll.ts`), which
+walks up from the card's root and returns the first ancestor whose computed
+`overflow-y` is scrollable, stopping at `<body>` and returning `null` rather than ever
+falling back to the document.
+
+The ancestor it finds is `DashboardPage`'s centre wrapper — written as
+`h-full flex items-center justify-center p-4 sm:p-8 **overflow-x-hidden**`. That
+element declares no `overflow-y` utility at all, but CSS forces the other axis away
+from `visible` when one axis is not `visible`, so it **computes to `overflow-y: auto`**
+and silently is the scroll container. Measured in a browser against the real class
+chain: the centre column above it (`overflow-hidden`) is not scrollable, this wrapper
+is, and `document.documentElement` is not — the dashboard shell is
+`h-screen overflow-hidden`, so **the page itself never scrolls**. Resolving at run time
+also handles the three simultaneously-mounted layout trees without breakpoint logic:
+each copy finds its own ancestor.
+
+Policy matches the follow-up thread: smooth scroll on a new event, suppressed once the
+user is more than `AUTO_SCROLL_THRESHOLD_PX` from the bottom, resumed when they return,
+instant under `prefers-reduced-motion`. `decideAutoScroll` is called with
+`isOwnNewMessage: false` — the override has no analogue here, and passing the flag keeps
+one shared policy instead of a near-duplicate. On unmount (the run finishing, or a
+session switch) the resolved container is scrolled back to the top, so the result view
+that replaces the timeline does not inherit a scroll position that belonged to the
+timeline's height.
+
+> **Pre-existing, unrelated:** that same centre wrapper is `flex items-center`. When its
+> content is taller than the container, `align-items: center` pushes the content's top
+> above the scroll origin where it cannot be reached — measured at −225px in a browser
+> repro. During a long run the question card at the top is therefore unreachable.
+> Scrolling to the *bottom* is unaffected, so the timeline feature works regardless.
+> Not fixed here; it needs the centring replaced with an `auto`-margin approach.
 
 ---
 
