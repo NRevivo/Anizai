@@ -1,10 +1,22 @@
+import { useEffect, useRef } from 'react';
 import { ListTree } from 'lucide-react';
 import type { AgentEvent } from '../../types';
 import { StateMessage } from '../ui/StateMessage';
+import { findScrollableAncestor, prefersReducedMotion } from '../../lib/autoScroll';
+import {
+    decideAutoScroll,
+    getDistanceFromBottom,
+    isNearBottom,
+    resolveScrollBehavior,
+} from '../../lib/followUpScroll';
 
 interface AgentEventsTimelineProps {
     events: AgentEvent[];
     isLoading?: boolean;
+    // Resets scroll state when the active session changes. The timeline stays
+    // mounted across a switch between two in-flight sessions, so without this
+    // one run's scroll position would carry into the next.
+    sessionId?: string | null;
 }
 
 // Maps the canonical agentEvents status enum (pending | running | done |
@@ -60,9 +72,97 @@ function formatDuration(durationMs: number | null): string | null {
     return `${durationMs}ms`;
 }
 
-export function AgentEventsTimeline({ events, isLoading = false }: AgentEventsTimelineProps) {
+export function AgentEventsTimeline({
+    events,
+    isLoading = false,
+    sessionId = null,
+}: AgentEventsTimelineProps) {
+    // --- Keep the newest step in view -------------------------------------
+    // Unlike the follow-up thread, this component has NO scroll container of
+    // its own — it is a card that grows inside the dashboard's centre panel. So
+    // the container is resolved from the DOM at run time. That also covers the
+    // three simultaneously-mounted layout trees without any breakpoint logic:
+    // each copy finds its own ancestor.
+    const rootRef = useRef<HTMLDivElement | null>(null);
+    const scrollContainerRef = useRef<HTMLElement | null>(null);
+    // Where the user was BEFORE this update rendered — see followUpScroll's
+    // note on why this is tracked rather than measured inside the effect.
+    const isPinnedToBottomRef = useRef(true);
+    const lastSeenEventIdRef = useRef<string | null>(null);
+
+    // Resolve the container and follow the user's own scrolling. Re-runs on a
+    // session change so a fresh run starts from a clean pinned state.
+    useEffect(() => {
+        const container = findScrollableAncestor(rootRef.current);
+        scrollContainerRef.current = container;
+        isPinnedToBottomRef.current = true;
+        lastSeenEventIdRef.current = null;
+
+        if (!container) {
+            return;
+        }
+
+        const handleScroll = () => {
+            isPinnedToBottomRef.current = isNearBottom(getDistanceFromBottom(container));
+        };
+
+        container.addEventListener('scroll', handleScroll, { passive: true });
+
+        return () => container.removeEventListener('scroll', handleScroll);
+    }, [sessionId]);
+
+    // A new event arrived — bring it into view unless the user has scrolled up
+    // to read earlier steps.
+    useEffect(() => {
+        const container = scrollContainerRef.current;
+        const newestEvent = events.length > 0 ? events[events.length - 1] : null;
+
+        if (!container || newestEvent === null) {
+            return;
+        }
+
+        const isNewEvent = newestEvent.eventId !== lastSeenEventIdRef.current;
+        lastSeenEventIdRef.current = newestEvent.eventId;
+
+        if (!isNewEvent) {
+            return;
+        }
+
+        // `isOwnNewMessage` has no analogue here: every event is agent-authored,
+        // so nothing overrides the user's scroll position. Passing false keeps
+        // the one shared policy rather than duplicating a near-copy of it.
+        const decision = decideAutoScroll({
+            isPinnedToBottom: isPinnedToBottomRef.current,
+            isOwnNewMessage: false,
+        });
+
+        if (!decision.scroll) {
+            return;
+        }
+
+        // The timeline is the last block in the centre panel, so pinning the
+        // container to its bottom is what puts the newest step on screen.
+        container.scrollTo({
+            top: container.scrollHeight,
+            behavior: resolveScrollBehavior({
+                isInitial: false,
+                prefersReducedMotion: prefersReducedMotion(),
+            }),
+        });
+    }, [events]);
+
+    // The run finished (or the session changed) and this timeline is being
+    // replaced by the result view. Return the shared container to the top so
+    // the incoming content is not left scrolled to a position that belonged to
+    // the timeline's height.
+    useEffect(() => {
+        return () => {
+            scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+        };
+    }, []);
+
     return (
-        <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div ref={rootRef} className="rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-100 px-4 py-3 sm:px-5">
                 <h3 className="text-sm font-semibold text-gray-900">Agent timeline</h3>
                 <p className="mt-0.5 text-xs text-gray-500">Compact reasoning and follow-up activity for this session.</p>

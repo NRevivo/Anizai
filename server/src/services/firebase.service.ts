@@ -1,4 +1,4 @@
-import { Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { firestore } from '../lib/firebase.js';
 
 export const collections = {
@@ -23,6 +23,20 @@ export function toISOString(timestamp: FirebaseFirestore.Timestamp | null | unde
 
 export function now(): FirebaseFirestore.Timestamp {
     return Timestamp.now();
+}
+
+/**
+ * Firestore's own commit-time clock, as a write sentinel.
+ *
+ * Prefer this over `now()` for any field that is sorted against documents
+ * written by another process. `now()` reads *this* Node host's wall clock, so
+ * two writers with skewed clocks produce a sort key that does not reflect real
+ * ordering. The chat `messages` subcollection is exactly that case: the BFF
+ * writes user messages while the data-pipeline agent writes assistant replies
+ * with `firestore.SERVER_TIMESTAMP`, and both are ordered by `createdAt`.
+ */
+export function serverTimestamp(): FirebaseFirestore.FieldValue {
+    return FieldValue.serverTimestamp();
 }
 
 export function batch() {

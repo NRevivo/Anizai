@@ -3,7 +3,7 @@ import type {
     Evidence, SentimentDataPoint, SessionResult, ClarificationCandidate,
     CreateSessionInput, CreateMessageInput
 } from '../services/sessions.service.js';
-import { batch, collectionRef, now, toISOString } from '../services/firebase.service.js';
+import { batch, collectionRef, now, serverTimestamp, toISOString } from '../services/firebase.service.js';
 import { Timestamp } from 'firebase-admin/firestore';
 import { randomUUID } from 'node:crypto';
 
@@ -496,14 +496,20 @@ export const sessionRepository = {
         };
     },
 
+    // `createdAt` is written with Firestore's commit-time clock, NOT this host's
+    // wall clock. The `messages` subcollection has two writers — this BFF for
+    // user messages, and the data-pipeline agent for assistant replies, which
+    // uses `firestore.SERVER_TIMESTAMP` (agent/firestore_client.py). Both are
+    // ordered by `createdAt`, so writing `Timestamp.now()` here put two
+    // independent clocks into one sort key: whenever this host's clock ran ahead
+    // of Firestore's by more than the answer latency, the reply received a lower
+    // `createdAt` than the question it answered and sorted above it.
     async addMessage(sessionId: string, userId: string, input: CreateMessageInput): Promise<SessionMessage> {
-        const createdAt = now();
-
         const messageData = {
             userId,
             role: input.role,
             content: input.content,
-            createdAt,
+            createdAt: serverTimestamp(),
             status: 'sent' as const,
             meta: input.meta ?? null,
         };
@@ -514,16 +520,26 @@ export const sessionRepository = {
 
         writeBatch.set(messageRef, messageData);
         writeBatch.update(sessionRef, {
-            lastActivityAt: createdAt,
-            updatedAt: createdAt,
+            lastActivityAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
         });
 
         await writeBatch.commit();
 
+        // The sentinel carries no readable value, so the resolved timestamp is
+        // read back for the response. The client sorts the optimistic message by
+        // this value, so it has to be the real committed one — an empty or
+        // host-clock string would reintroduce the ordering bug in the reply.
+        const writtenMessage = await messageRef.get();
+
         return {
             id: messageRef.id,
-            ...messageData,
-            createdAt: createdAt.toDate().toISOString(),
+            userId,
+            role: input.role,
+            content: input.content,
+            status: 'sent' as const,
+            meta: input.meta ?? null,
+            createdAt: toISOString(writtenMessage.get('createdAt')) ?? new Date().toISOString(),
         };
     },
 

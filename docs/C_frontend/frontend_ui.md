@@ -252,9 +252,13 @@ spinner. It is used across the dashboard, chat, evidence, trending, and settings
 | Session selected, none active | ✅ | "Select a forecast" |
 | No search results | ✅ | `Sidebar` — "Try a different search term." |
 | No evidence / no filter match | ✅ | `EvidenceTimeline:355-360` |
-| No chat messages | ✅ | `ChatPanel:63` |
-| Awaiting assistant reply | ✅ | `ChatPanel:98`, `isAwaitingAssistantResponse` |
-| Send lock while busy | ✅ | `isSendDisabled` gates composer, send button, and suggested-action chips |
+| No chat messages | ✅ | `ChatPanel:81` |
+| Awaiting assistant reply | ✅ | `ChatPanel` `ThinkingIndicator`, driven by `followUpPendingState === 'thinking'` |
+| Pending follow-up overdue | ✅ | `followUpPendingState === 'stalled'` → static `StateMessage` warning |
+| Send lock while busy | ✅ | `isSendDisabled` gates the send button and the suggested-action chips |
+| Composer withheld until a result exists | ✅ | `shouldShowFollowUpComposer` (`lib/followUpComposer.ts`) → `DashboardPage:170`, consumed at `ChatPanel:151` |
+| Thread pinned to newest message | ✅ | `lib/followUpScroll.ts` + `threadRef` effects in `ChatPanel.tsx` |
+| Agent timeline pinned to newest step | ✅ | `findScrollableAncestor` (`lib/autoScroll.ts`) + effects in `AgentEventsTimeline.tsx` |
 | Failed session | ✅ | Status panel + retry |
 | Clarification | ✅ | Candidate picker |
 | Plan limit | ✅ | Structured `PLAN_LIMIT_EXCEEDED` surfaced from the API (`frontend_api.md §6.1`) |
@@ -266,8 +270,208 @@ per-status dot with label for all six statuses (`:47-61`). It displays probabili
 (`—` when null) but **not confidence** — see §7.
 
 **ChatPanel** renders assistant content through `react-markdown`, shows up to the
-provided `suggestedActions` as chips, and disables the composer, the send button, and
-the chips together while a send is in flight or the session is busy.
+provided `suggestedActions` as chips, and disables the send button and the chips
+together while a send is in flight or the session is busy.
+
+**Composer visibility gate.** The composer and the suggested-action chips are not
+rendered at all until the session has a completed forecast result — there is nothing
+to ask a follow-up about before then. The gate is `isComposerVisible`, derived in
+`DashboardPage.tsx:170` via the pure helper `shouldShowFollowUpComposer`
+(`src/lib/followUpComposer.ts`, 14 unit tests) as `status === 'done' &&
+hasForecastResult`, and passed to all three `ChatPanel` instances. The logic lives in a
+helper for the same reason Rule B's does: the dashboard sits behind auth, so the helper
+is the part of the gate provable without a signed-in session.
+
+Both halves are required, and neither substitutes for the other:
+
+- `hasForecastResult` comes from `App.tsx` as `activeSessionDetail?.result != null`.
+  It cannot be derived from `prediction` — `toPrediction` (`App.tsx:108-121`) returns
+  a **non-null** `Prediction` for any loaded session, defaulting probability and
+  confidence to `0` while the run is still in flight. `SessionDetail.result` is
+  `SessionResult | null` and the BFF returns `null` whenever `sessionResults/{id}` is
+  absent (`server/src/repositories/session.repository.ts:203-207`), independent of
+  session status.
+- `status === 'done'` is still needed because a result can outlive a re-queued run
+  (the clarification path re-queues an existing session).
+
+Per-state behaviour:
+
+| Session state | Message history | Composer + chips |
+|---|---|---|
+| New session, no result yet | visible (empty state) | hidden |
+| `queued` / `claimed` / `running` | visible | hidden |
+| `awaiting_clarification` | visible | hidden |
+| `failed` | visible | hidden — the session has no result to discuss; the recovery path is the **Retry forecast** button in the centre status panel, not a follow-up |
+| `done` with a result | visible | **visible** |
+| `done` but result doc missing | visible | hidden |
+| Reopened session with a prior thread | visible | visible (given `done` + result) |
+
+The history is never gated on `isComposerVisible` — only the input surface is.
+`isSendDisabled` also folds in `!isComposerVisible` defensively, so no stray handler
+can send without a result even if the markup gate is bypassed.
+
+**Pending follow-up indicator.** A follow-up awaiting its answer renders
+`ThinkingIndicator` (local to `ChatPanel.tsx`): three staggered dots in an
+assistant-side bubble, so it sits where the answer will land. It replaced a static
+"Waiting for response" notice.
+
+- **Motion** — the `thinking-dot` keyframes and `animate-thinking-dot` utility are
+  defined in `tailwind.config.js` (the repo's only custom animation). Delays are
+  `0 / 160 / 320 ms` via inline `animationDelay`, since no arbitrary
+  animation-delay utility is configured. Both opacity and offset live entirely in
+  the keyframes, so the un-animated base state is three solid, fully visible dots.
+- **Reduced motion** — `motion-reduce:animate-none` on each dot, backed by the
+  global `prefers-reduced-motion` rule in `index.css`. Verified in the built CSS:
+  the `motion-reduce` block follows the base utility, so `animation: none` wins and
+  the fallback is three static dots at full opacity.
+- **Accessibility** — the dot row is `aria-hidden`; the wrapper is
+  `role="status" aria-live="polite"` carrying an `sr-only` sentence, so the state is
+  announced as prose rather than as decorative bullets.
+
+**How the indicator clears.** `followUpPendingState` is derived from the trailing
+user message via `lib/followUpPending.ts` (`findPendingFollowUp` +
+`resolveFollowUpPendingState`, 15 unit tests). All exit paths were traced in source:
+
+| Path | Mechanism | Clears? |
+|---|---|---|
+| Success | Hub writes the reply and flips the user message `sent → answered` in one batch; `subscribeToSessionMessages` pushes both | ✅ |
+| Hub gives up | Hub marks the user message `failed`; preserved through `toChatMessage` | ✅ |
+| `POST /messages` rejects | `App.tsx` rolls the optimistic `pending` message out of `pendingMessages` | ✅ |
+| Hub never answers | Message stays `sent` in Firestore forever — the documented deployed-image gap | ⚠️ Ages out to `stalled` after `FOLLOW_UP_STALL_MS` (90 s) |
+
+The last row is why `stalled` exists: without it the animation would spin forever,
+and would keep spinning across a reload because the unanswered `sent` status is
+persisted. Age is measured from the **message timestamp**, not from mount, so
+reopening a session with a long-abandoned follow-up reports `stalled` immediately
+instead of animating for another full grace period. `DashboardPage` ticks a 5 s
+interval only while something is pending.
+
+Note that `stalled` changes the **indicator only**. `isSendLocked` still derives from
+`isAwaitingAssistantResponse`, so the composer's send button stays locked for that
+session — the permanent-send-lock caveat in `sprint-24-25-frontend-tasks.md` is
+unchanged and remains a separate contract decision.
+
+**Thread auto-scroll.** The follow-up thread keeps itself pinned to the newest
+message. Policy lives in `lib/followUpScroll.ts` (19 unit tests); the effects live in
+`ChatPanel.tsx`.
+
+The scroll target is **the thread container itself** — the single `overflow-y-auto`
+div at `ChatPanel.tsx:117`, held by `threadRef`. It is deliberately *not*
+`scrollIntoView`: this panel is nested in the dashboard grid, and scrolling an element
+into view walks up every scrollable ancestor and drags the whole page. Verified in a
+browser that `container.scrollTo(...)` leaves `window.scrollY` untouched.
+
+| Trigger | Behaviour |
+|---|---|
+| Opening / switching to a session with existing follow-ups | instant, in `useLayoutEffect` — no scroll-from-top flash |
+| New message (user or assistant) | smooth |
+| Thinking indicator appearing | smooth |
+| Indicator replaced by the answer | smooth |
+| Composer or suggested chips mounting | instant re-pin (layout correction, not a new message) |
+
+Three details that are easy to get wrong and are load-bearing here:
+
+- **Pinned-ness is tracked, not measured.** `isPinnedToBottomRef` is updated by the
+  container's `onScroll`. Measuring inside the effect would be wrong: by then the new
+  content has already pushed the bottom away, so every update after the first would
+  read as "user scrolled up" and suppress itself.
+- **The initial jump waits on `isLoading`.** `App.tsx` clears `sessionMessages` on a
+  session switch but the previous session's messages stay rendered until the new
+  snapshot lands. Without the gate the one instant jump would be spent on the outgoing
+  thread and the real content would animate in from the top.
+- **`useLayoutEffect` runs without a dependency array** so it re-checks each render
+  until content exists; `hasPerformedInitialJumpRef` makes it a no-op thereafter.
+
+Suppression: if the user has scrolled more than `AUTO_SCROLL_THRESHOLD_PX` (64px,
+under one bubble height) from the bottom, auto-scroll is suppressed — they are reading
+history. It resumes as soon as they return to the bottom. **The one exception is their
+own just-sent message**, which always scrolls regardless of position.
+
+`prefers-reduced-motion` downgrades smooth to instant (`resolveScrollBehavior`). A
+session switch resets pinned state, the initial-jump flag and the last-seen message id,
+so nothing carries between sessions — `ChatPanel` takes a `sessionId` prop purely for
+this. The `ResizeObserver` is disconnected on unmount; the scroll handler is a React
+`onScroll` and needs no manual teardown.
+
+**Agent timeline auto-scroll.** `AgentEventsTimeline` keeps the newest processing step
+in view during a run. It shares the *policy* in `lib/followUpScroll.ts` with the
+follow-up thread, but the *container semantics differ* — see below.
+
+| | Follow-up thread | Agent timeline |
+|---|---|---|
+| Scroll container | its own `overflow-y-auto` div, `ChatPanel.tsx:117` | **none of its own** — resolved from the DOM at run time |
+| Initial jump | instant, `useLayoutEffect` | not applicable — mounts empty and fills as events arrive |
+| Own-message override | yes | no — every event is agent-authored |
+| Teardown | `ResizeObserver.disconnect()` | `removeEventListener` + reset container to top |
+
+**The timeline has no scroll container.** It is a card that grows inside the centre
+panel. The container is found by `findScrollableAncestor` (`lib/autoScroll.ts`), which
+walks up from the card's root and returns the first ancestor whose computed
+`overflow-y` is scrollable, stopping at `<body>` and returning `null` rather than ever
+falling back to the document.
+
+The ancestor it finds is `DashboardPage`'s centre wrapper — written as
+`h-full flex items-center justify-center p-4 sm:p-8 **overflow-x-hidden**`. That
+element declares no `overflow-y` utility at all, but CSS forces the other axis away
+from `visible` when one axis is not `visible`, so it **computes to `overflow-y: auto`**
+and silently is the scroll container. Measured in a browser against the real class
+chain: the centre column above it (`overflow-hidden`) is not scrollable, this wrapper
+is, and `document.documentElement` is not — the dashboard shell is
+`h-screen overflow-hidden`, so **the page itself never scrolls**. Resolving at run time
+also handles the three simultaneously-mounted layout trees without breakpoint logic:
+each copy finds its own ancestor.
+
+Policy matches the follow-up thread: smooth scroll on a new event, suppressed once the
+user is more than `AUTO_SCROLL_THRESHOLD_PX` from the bottom, resumed when they return,
+instant under `prefers-reduced-motion`. `decideAutoScroll` is called with
+`isOwnNewMessage: false` — the override has no analogue here, and passing the flag keeps
+one shared policy instead of a near-duplicate. On unmount (the run finishing, or a
+session switch) the resolved container is scrolled back to the top, so the result view
+that replaces the timeline does not inherit a scroll position that belonged to the
+timeline's height.
+
+**Centring in the centre panel — use `my-auto`, never `items-center`.** All three
+`renderCenterPanel` wrappers (`DashboardPage.tsx:497`, `:520`, `:547`) are
+`h-full flex justify-center …` with the child carrying `my-auto`. The wrappers are
+`flex-direction: row` (never declared, so the default), which makes the **vertical**
+axis the cross axis — hence `my-auto`, not `mx-auto`.
+
+They previously used `align-items: center` on the wrapper. Cross-axis centring has no
+concept of a scroll origin: when the content is taller than the container it is centred
+*around* the container, so the overflow above the top edge sits at a negative offset
+that no amount of scrolling can reach. During a long run the "Active forecast" question
+card was simply unreachable. An auto cross-axis margin gives the same centred result
+when there is free space and collapses to `0` when there is not, so the top stays
+reachable.
+
+Measured in a browser across all three layout trees, before → after:
+
+| Tree | Long content, child top at `scrollTop: 0` | Short content, child top |
+|---|---|---|
+| xl (`:651`) | **−132 → +16** (reachable) | 160 → **160** (unchanged) |
+| tablet (`:675`) | **−132 → +16** | 160 → **160** (unchanged) |
+| mobile (`:710`) | **−164 → +16** | 128 → **128** (unchanged) |
+
+`+16` is the wrapper's `p-4` padding — i.e. fully visible. With short content the
+computed `margin-top` resolves to 144px/112px (the auto margin absorbing free space) and
+the rendered position is **identical to before**, so the centred look is preserved.
+Content at exactly container height produced no jump and no second scrollbar, and
+scroll-to-bottom still lands at `distanceFromBottom: 0` in every case — so neither
+`4b06c12` (follow-up scroll) nor `5627a08` (timeline scroll) regresses, and
+`findScrollableAncestor` still resolves to the same wrapper.
+
+> One Tailwind trap worth recording: `.my-auto` did not exist in the generated CSS
+> before this change, because JIT only emits classes it finds in source. An early
+> measurement using `my-auto` in an injected DOM probe was silently inert and produced a
+> false "short content regresses to top-aligned" reading. Verify a utility is actually
+> emitted before trusting a probe that uses it.
+
+This applies to every state that shares those wrappers — the loading panel, the
+"no forecasts yet" / "select a forecast" empty states, and everything
+`renderStatusPanel()` returns into `:520`, which includes the **clarification
+candidate picker** and the **failed/retry** panel. The clarification picker with several
+candidates is the other case that could exceed the viewport, and it is fixed by the same
+change. The result view (`<Dashboard>`) does not use these wrappers and is unaffected.
 
 ---
 

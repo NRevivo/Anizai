@@ -46,6 +46,19 @@ module.exports = {
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
       },
+      keyframes: {
+        // Staggered "thinking" dots for a pending follow-up answer. Opacity and
+        // offset are driven entirely from the keyframes so the un-animated base
+        // state is a fully visible, static dot — which is exactly what the
+        // global prefers-reduced-motion rule in index.css falls back to.
+        'thinking-dot': {
+          '0%, 80%, 100%': { opacity: '0.25', transform: 'translateY(0)' },
+          '40%': { opacity: '1', transform: 'translateY(-2px)' },
+        },
+      },
+      animation: {
+        'thinking-dot': 'thinking-dot 1.4s ease-in-out infinite',
+      },
     },
   },
   plugins: [],

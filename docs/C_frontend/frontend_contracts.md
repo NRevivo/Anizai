@@ -377,8 +377,33 @@ docs, so this is cheap.
 - `'answered'` is written by the **hub**, which flips the triggering user message
   `sent → answered` in the same write batch as the assistant reply.
 - `replyToMessageId` is written by the hub on assistant messages only. The BFF's
-  `addMessage` never writes it (`session.repository.ts:497-503` writes `userId`, `role`,
-  `content`, `createdAt`, `status: 'sent'`, `meta` — nothing else).
+  `addMessage` never writes it (it writes `userId`, `role`, `content`, `createdAt`,
+  `status: 'sent'`, `meta` — nothing else).
+
+**`createdAt` must be Firestore's commit clock — both writers, no exceptions.**
+The `messages` subcollection has **two independent writers** and is ordered by this
+one field:
+
+| Writer | Message role | How `createdAt` is stamped |
+|---|---|---|
+| BFF `addMessage` | `user` | `serverTimestamp()` → `FieldValue.serverTimestamp()` |
+| Pipeline agent | `assistant` | `firestore.SERVER_TIMESTAMP` (`agent/firestore_client.py`) |
+
+The BFF previously used `now()` (`Timestamp.now()`), which reads the **Node host's
+wall clock**. That put two unsynchronised clocks into a single sort key: whenever the
+BFF host ran ahead of Firestore by more than the follow-up answer latency — seconds —
+the assistant reply was written with a *lower* `createdAt` than the question it
+answered and rendered **above** it. Fixed 2026-07-26; the ordering is only correct
+while both writers stay on the Firestore clock, so `now()` must never come back here.
+
+Because the sentinel has no client-readable value, `addMessage` re-reads the document
+after the batch commits to return a resolved ISO string. Reading before the commit
+would yield `null`. Covered by four tests in `server/tests/sessions.repository.test.ts`.
+
+**The optimistic message is a third clock.** `handleSendMessage` stamps its
+pre-POST placeholder with `new Date()` — the *browser's* clock. `App.tsx` therefore
+sorts only the persisted messages and **appends** unreconciled optimistic ones, since
+they are newest by construction. Do not fold them back into the sort.
 
 ### §3.7 `SentimentDataPoint`
 
@@ -520,6 +545,18 @@ Listener on `sessions/{sessionId}/messages`, ordered by `createdAt` ascending. M
 the same `SessionMessage` shape as §3.6. `status` is narrowed explicitly — only
 `'failed'`, `'answered'`, `'sent'` pass through; anything else becomes `null`
 (`session.service.ts:214-221`).
+
+Ordering is requested explicitly at **every** layer — this listener's
+`orderBy('createdAt', 'asc')`, the BFF's `getMessages` server-side `orderBy`, and
+`App.tsx`'s client-side re-sort of the merged set. The clock discipline in §3.6 is what
+makes those three agree; see that section before changing any of them.
+
+Two remaining soft spots, both defensive-only today and deliberately left alone:
+`toDateValue` (`session.service.ts:170-183`) falls back to `new Date()` for an
+unreadable `createdAt`, which would make such a message shift position on every
+snapshot; and `byDateAsc` returns `NaN` when `createdAt` is `''`, which makes the
+comparator non-deterministic. Neither is reachable while both writers stamp a real
+server timestamp.
 
 ### §4.4 Collection map and access rules
 

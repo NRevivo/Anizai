@@ -15,6 +15,7 @@ import { CookiesPage } from './pages/CookiesPage';
 import { StateMessage } from './components/ui/StateMessage';
 import { ApiError } from './lib/api';
 import { selectCurrentRunEvents } from './lib/agentEvents';
+import { findPendingFollowUp } from './lib/followUpPending';
 import {
   describeAuthError,
   signInWithEmail,
@@ -789,6 +790,12 @@ function App() {
   );
   const activeSessionState = useMemo(() => toActiveSessionState(activeSessionDetail), [activeSessionDetail]);
   const prediction = useMemo(() => toPrediction(activeSessionDetail), [activeSessionDetail]);
+  // Authoritative "a forecast result exists" signal. `prediction` cannot stand
+  // in for this: toPrediction returns a non-null Prediction for any non-null
+  // detail, filling probability/confidence with 0 while the run is still in
+  // flight. `detail.result` is null whenever sessionResults/{id} is absent
+  // (server getSessionResult), independent of session status.
+  const hasForecastResult = activeSessionDetail?.result != null;
   const sentimentData = useMemo(() => toSentimentPoints(activeSessionDetail), [activeSessionDetail]);
   const timelineEvents = useMemo(() => toTimelineEvents(activeSessionDetail), [activeSessionDetail]);
   const messages = useMemo(() => {
@@ -801,23 +808,25 @@ function App() {
       ));
     });
 
-    return [...persistedMessages, ...unreconciledPending].sort(
+    // Persisted messages all carry Firestore's clock, so sorting them against
+    // each other is sound. Optimistic pending messages carry the *browser's*
+    // clock (handleSendMessage stamps `new Date()`), which is a different clock
+    // again — sorting the two together let a browser running even slightly
+    // behind place a just-typed message above older history. They are the
+    // newest messages by construction, so append them instead of sorting them in.
+    const sortedPersisted = [...persistedMessages].sort(
       (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
     );
+
+    return [...sortedPersisted, ...unreconciledPending];
   }, [activeSessionDetail, pendingMessages, sessionMessages]);
-  const isAwaitingAssistantResponse = useMemo(() => {
-    // The hub flips the triggering user message sent -> answered in the same
-    // batch as the assistant reply, so a trailing user message still in
-    // 'sent' (or an optimistic 'pending') means the hub is still working.
-    // 'answered' / 'failed' means it's done.
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
-      if (message.role === 'user') {
-        return message.status === 'pending' || message.status === 'sent';
-      }
-    }
-    return false;
-  }, [messages]);
+  // The trailing user message still waiting on the hub, if any. Extracted into
+  // lib/followUpPending.ts so the scan is unit-tested; the timestamp is exposed
+  // alongside the boolean because the chat panel needs the message's age to
+  // decide between an animated indicator and a stalled notice.
+  const pendingFollowUp = useMemo(() => findPendingFollowUp(messages), [messages]);
+  const isAwaitingAssistantResponse = pendingFollowUp !== null;
+  const awaitingSinceMs = pendingFollowUp?.timestamp.getTime() ?? null;
   const trendingItems = useMemo(() => toTrendingView(trending), [trending]);
 
   if (isHydratingAuth) {
@@ -938,6 +947,7 @@ function App() {
         activeSessionId={activeSessionId}
         activeSessionState={activeSessionState}
         prediction={prediction}
+        hasForecastResult={hasForecastResult}
         sentimentData={sentimentData}
         timelineEvents={timelineEvents}
         agentEvents={filteredAgentEvents}
@@ -945,6 +955,7 @@ function App() {
         isMessagesLoading={isMessagesLoading}
         isSendingMessage={isSendingMessage}
         isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+        awaitingSinceMs={awaitingSinceMs}
         trendingForecasts={trendingItems}
         userDisplayName={userProfile?.displayName}
         userPlan={userProfile?.plan}

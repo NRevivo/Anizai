@@ -8,6 +8,8 @@ import { StateMessage } from '../components/ui/StateMessage';
 import { CreateForecastView } from '../components/CreateForecastView';
 import { TrendingContext } from '../components/CreateForecastContext';
 import { SettingsModal, type SettingsSection } from '../components/SettingsModal';
+import { shouldShowFollowUpComposer } from '../lib/followUpComposer';
+import { resolveFollowUpPendingState } from '../lib/followUpPending';
 import type { UserProfile } from '../services/user.service';
 import type {
     ChatMessage,
@@ -43,6 +45,9 @@ interface DashboardPageProps {
         clarificationCandidates: ClarificationCandidate[] | null;
     } | null;
     prediction: Prediction | null;
+    /** True only when the session's sessionResults doc exists. Not derivable
+     *  from `prediction`, which is non-null for any loaded session. */
+    hasForecastResult: boolean;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
     agentEvents: AgentEvent[];
@@ -50,6 +55,9 @@ interface DashboardPageProps {
     isMessagesLoading?: boolean;
     isSendingMessage?: boolean;
     isAwaitingAssistantResponse?: boolean;
+    /** Epoch ms of the follow-up currently awaiting an answer, or null. Drives
+     *  the switch from an animated indicator to a stalled notice. */
+    awaitingSinceMs?: number | null;
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
     onCreateSession: (question: string, idempotencyKey: string) => Promise<void>;
@@ -102,6 +110,7 @@ export function DashboardPage({
     activeSessionId,
     activeSessionState,
     prediction,
+    hasForecastResult,
     sentimentData,
     timelineEvents,
     agentEvents,
@@ -109,6 +118,7 @@ export function DashboardPage({
     isMessagesLoading = false,
     isSendingMessage = false,
     isAwaitingAssistantResponse = false,
+    awaitingSinceMs = null,
     trendingForecasts,
     onSessionSelect,
     onCreateSession,
@@ -155,6 +165,33 @@ export function DashboardPage({
         activeSessionState?.status === 'claimed' ||
         activeSessionState?.status === 'running';
     const isSendLocked = isSessionProcessing || isAwaitingAssistantResponse;
+
+    // There is nothing to ask a follow-up about until a forecast result exists,
+    // so the composer is not rendered at all before then. Extracted into a pure,
+    // unit-tested helper (lib/followUpComposer.ts) because the dashboard sits
+    // behind auth — the helper is the piece of this gate provable without a
+    // signed-in session. This gates the composer only; the message history
+    // stays visible always.
+    const isComposerVisible = shouldShowFollowUpComposer(activeSessionState?.status, hasForecastResult);
+
+    // Advance a coarse clock only while a follow-up is actually pending, so the
+    // indicator can age out of 'thinking' into 'stalled' without a timer running
+    // for the whole session. Cleared as soon as the pending message resolves —
+    // by an answer, by a failure, or by the optimistic message being rolled back.
+    const [nowMs, setNowMs] = useState(() => Date.now());
+
+    useEffect(() => {
+        if (awaitingSinceMs === null) {
+            return;
+        }
+
+        setNowMs(Date.now());
+        const interval = window.setInterval(() => setNowMs(Date.now()), 5000);
+
+        return () => window.clearInterval(interval);
+    }, [awaitingSinceMs]);
+
+    const followUpPendingState = resolveFollowUpPendingState(awaitingSinceMs, nowMs);
 
     useEffect(() => {
         setSelectedClarificationId('none');
@@ -457,8 +494,8 @@ export function DashboardPage({
 
         if (isLoading) {
             return (
-                <div className="h-full flex items-center justify-center p-4 sm:p-6 overflow-x-hidden">
-                    <div className="w-full max-w-sm">
+                <div className="h-full flex justify-center p-4 sm:p-6 overflow-x-hidden">
+                    <div className="w-full max-w-sm my-auto">
                         <StateMessage
                             variant="loading"
                             align="center"
@@ -473,9 +510,15 @@ export function DashboardPage({
         if (activeSessionState && activeSessionState.status !== 'done') {
             const statusPanel = renderStatusPanel();
 
+            // Centred with `my-auto` on the child rather than `items-center` on the
+            // wrapper. An auto cross-axis margin absorbs free space when there is
+            // spare room (identical centred look) but collapses to zero when there
+            // is not, so the top of a long run stays reachable. `items-center`
+            // instead pushes the overflow above the scroll origin, where it cannot
+            // be scrolled to.
             return (
-                <div className="h-full flex items-center justify-center p-4 sm:p-8 overflow-x-hidden">
-                    <div className="w-full max-w-2xl space-y-4">
+                <div className="h-full flex justify-center p-4 sm:p-8 overflow-x-hidden">
+                    <div className="w-full max-w-2xl space-y-4 my-auto">
                         <div className="rounded-lg border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Active forecast</p>
                             <h1 className="mt-2 text-lg sm:text-xl font-semibold text-gray-900 break-words">
@@ -488,7 +531,11 @@ export function DashboardPage({
                             awaiting_clarification still show the status panel above,
                             but never the agent timeline. */}
                         {['queued', 'claimed', 'running'].includes(activeSessionState.status) && (
-                            <AgentEventsTimeline events={agentEvents} isLoading={isAgentEventsLoading} />
+                            <AgentEventsTimeline
+                                events={agentEvents}
+                                isLoading={isAgentEventsLoading}
+                                sessionId={activeSessionId}
+                            />
                         )}
                     </div>
                 </div>
@@ -497,8 +544,8 @@ export function DashboardPage({
 
         if (!prediction) {
             return (
-                <div className="h-full flex items-center justify-center p-4 sm:p-8 overflow-x-hidden">
-                    <div className="w-full max-w-md">
+                <div className="h-full flex justify-center p-4 sm:p-8 overflow-x-hidden">
+                    <div className="w-full max-w-md my-auto">
                         <StateMessage
                             align="center"
                             title={sessions.length === 0 ? 'No forecasts yet' : 'Select a forecast'}
@@ -544,10 +591,12 @@ export function DashboardPage({
         return (
             <ChatPanel
                 messages={messages}
+                sessionId={activeSessionId}
                 isLoading={isMessagesLoading}
                 isSendingMessage={isSendingMessage}
                 isSendLocked={isSendLocked}
-                isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                followUpPendingState={followUpPendingState}
+                isComposerVisible={isComposerVisible}
                 onSendMessage={handleSendMessage}
                 suggestedActions={suggestedActions}
                 currentQuestion={prediction?.question}
@@ -644,10 +693,12 @@ export function DashboardPage({
                     <div className={`fixed inset-y-0 right-0 w-full max-w-[min(24rem,100vw)] z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                         <ChatPanel
                             messages={messages}
+                            sessionId={activeSessionId}
                             isLoading={isMessagesLoading}
                             isSendingMessage={isSendingMessage}
                             isSendLocked={isSendLocked}
-                            isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                            followUpPendingState={followUpPendingState}
+                            isComposerVisible={isComposerVisible}
                             suggestedActions={suggestedActions}
                             currentQuestion={prediction?.question}
                             currentAnswer={prediction?.explanation}
@@ -691,10 +742,12 @@ export function DashboardPage({
                 <div className={`fixed inset-y-0 right-0 w-full max-w-[min(24rem,100vw)] z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                     <ChatPanel
                         messages={messages}
+                        sessionId={activeSessionId}
                         isLoading={isMessagesLoading}
                         isSendingMessage={isSendingMessage}
                         isSendLocked={isSendLocked}
-                        isAwaitingAssistantResponse={isAwaitingAssistantResponse}
+                        followUpPendingState={followUpPendingState}
+                        isComposerVisible={isComposerVisible}
                         suggestedActions={suggestedActions}
                         currentQuestion={prediction?.question}
                         currentAnswer={prediction?.explanation}
