@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import pinoHttp from 'pino-http';
 import { logger } from './lib/logger.js';
 import { env, isDev, isProd } from './config/env.js';
@@ -30,6 +31,13 @@ export async function createApp() {
     // Request ID (must be first)
     app.use(requestIdMiddleware);
     app.disable('etag');
+
+    // gzip/deflate every response above the default 1 KB threshold. Added
+    // 2026-07-27: nothing compressed responses before, so `GET /trending` — a
+    // public endpoint the landing page hits unauthenticated on every visit —
+    // was crossing the wire uncompressed. Measured on that route: 3.6x smaller.
+    // Must sit ahead of the routes so it can wrap their `res.json`.
+    app.use(compression());
 
     // Request logging
     // @ts-expect-error - pino-http types are overly strict with logger generic

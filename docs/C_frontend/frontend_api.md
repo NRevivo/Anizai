@@ -96,9 +96,9 @@ to **20**, and any value is clamped to a maximum of **100**
 > `frontend_contracts.md §3.9`.
 
 > **Response weight (2026-07-27).** Each event now carries a `markets[]` array — the
-> full selectable field, uncapped — so `?limit=20` returns ~79 KB raw / ~22 KB gzipped
-> (was 7.0 KB / 2.0 KB). Budget for it on the landing page, which calls this
-> unauthenticated. Rationale and per-field shape: `frontend_contracts.md §3.9`.
+> full selectable field, uncapped — so `?limit=20` returns ~79 KB uncompressed
+> (was 7.0 KB). Budget for it on the landing page, which calls this unauthenticated.
+> Rationale and per-field shape: `frontend_contracts.md §3.9`.
 
 ### §3.2 User
 
@@ -183,16 +183,17 @@ Registration order in `createApp()` (`server/src/server.ts`) — order is load-b
 |---|---|---|
 | 1 | `requestIdMiddleware` | `crypto.randomUUID()` → `req.requestId` + `x-request-id` response header. **Must be first** so every downstream log and error envelope can reference it. |
 | 2 | `app.disable('etag')` | Prevents 304s on polled JSON |
-| 3 | `pinoHttp({ logger })` | Request logging |
-| 4 | `express.json()` / `express.urlencoded()` | Body parsing |
-| 5 | CORS (inline) | Allowlist check; short-circuits `OPTIONS` with **204** |
-| 6 | Public routers | root, health, trending |
-| 7 | Demo router | conditional (§3.4) |
-| 8 | Protected routers | me, sessions — each route applies `authMiddleware` itself |
-| 9 | `notFoundMiddleware` | 404 envelope |
-| 10 | `errorMiddleware` | Terminal error handler |
+| 3 | `compression()` | gzip/deflate above the default 1 KB threshold. Added 2026-07-27 — responses were previously uncompressed. Must precede the routers to wrap their `res.json`. Measured on `GET /trending?limit=12`: 59.7 KB → 16.8 KB (3.6×). |
+| 4 | `pinoHttp({ logger })` | Request logging |
+| 5 | `express.json()` / `express.urlencoded()` | Body parsing |
+| 6 | CORS (inline) | Allowlist check; short-circuits `OPTIONS` with **204** |
+| 7 | Public routers | root, health, trending |
+| 8 | Demo router | conditional (§3.4) |
+| 9 | Protected routers | me, sessions — each route applies `authMiddleware` itself |
+| 10 | `notFoundMiddleware` | 404 envelope |
+| 11 | `errorMiddleware` | Terminal error handler |
 
-**Auth is per-route, not chain-level.** Steps 6–8 register routers, but the Bearer check
+**Auth is per-route, not chain-level.** Steps 7–9 register routers, but the Bearer check
 is attached to individual handlers (`router.get('/sessions', authMiddleware, …)`). A new
 route added to `routes/sessions.ts` without `authMiddleware` is public by default.
 
