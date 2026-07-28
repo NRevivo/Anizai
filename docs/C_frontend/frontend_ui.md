@@ -83,9 +83,10 @@ DashboardPage.tsx                       ← shell: layout, drawers, modals, stat
 │   ├── cards/MarketComparison.tsx
 │   ├── cards/SentimentAnalysis.tsx
 │   └── cards/EvidenceTimeline.tsx      ← §3.3
+├── (center) CreateForecastView.tsx     ← §3.1a market-first new-forecast screen
+│   ├── MarketPicker.tsx                ← choose an outcome within an event
+│   └── FreeformQuestionModal.tsx       ← write-your-own question
 ├── (right) ChatPanel.tsx               ← follow-up conversation
-├── (right) CreateForecastContext.tsx   ← trending suggestions during creation
-│   └── MarketPicker.tsx                ← §3.1a market selection step
 ├── SettingsModal.tsx → settings/*      ← 6 sections
 └── ui/ConfirmDialog.tsx                ← delete confirmation
 ```
@@ -93,14 +94,63 @@ DashboardPage.tsx                       ← shell: layout, drawers, modals, stat
 `DashboardPage` holds 14 `useState` hooks covering drawers, modals, deletion,
 clarification submit, retry submit, and `currentView` (`'dashboard' | 'new-forecast'`).
 
-`TrendingContext` is rendered **twice** — once in the `hidden xl:grid` desktop shell
-(`DashboardPage.tsx:688`) and once in the `xl:hidden` mobile one (`:723`) — with
-identical props. Both mount; CSS decides which is visible, so picker state is
-per-instance and only the visible one can be opened.
+**The right rail is dropped on `new-forecast`.** The xl grid switches from
+`[252px_1fr_304px]` to `[252px_1fr]` and the third column is not rendered
+(`DashboardPage.tsx`, the `currentView === 'new-forecast'` ternaries around the xl
+grid). The markets that column used to hold are now the centre of the page, so
+keeping it would have the screen compete with itself.
 
-### §3.1a Market selection — `MarketPicker.tsx`
+`CreateForecastContext.tsx` (`TrendingContext`) **was deleted** in the 2026-07-28
+redesign — its three render sites (right rail, 2-col stack, mobile stack) are gone
+and its card rendering moved into `CreateForecastView`. Docs referring to it are stale.
 
-A trending card no longer submits on click. It resolves to **one market's real
+### §3.1a The new-forecast screen — `CreateForecastView.tsx`
+
+**Markets lead; free text is a peer, not the default.** Until 2026-07-28 this screen
+was a single empty textarea with the live markets demoted to a side rail (desktop) or
+pushed below the fold (mobile). That put the weakest path first: a self-written
+question resolves to no market and therefore can never carry a benchmark, while every
+card here does.
+
+Composition, top to bottom: header → **"Ask your own question"** button (opens
+`FreeformQuestionModal`) → **search field** → **"Trending on Polymarket"** grid of
+event cards (1 column, 2 from `md`). Both entry points open the same class of modal,
+so neither is the buried one. `isLoading` renders a six-card skeleton grid rather than
+flashing the empty state; an empty feed says so and still offers the free-text path.
+
+**Search** (`GET /trending/search`) replaces the grid in place: the section heading
+becomes `Results for "…"` with a match count, and a clear button restores trending.
+Queries debounce at 300 ms, require 2 characters, and a `cancelled` flag stops a slow
+earlier response overwriting a newer one. Three states are kept visually distinct —
+skeletons while searching, a **red** retryable panel on failure, and a neutral empty
+panel that explains the topic filter ("Sport and entertainment markets are excluded")
+plus a "Back to trending" action. Conflating the last two would make an on-topic-only
+search look broken. Browsing alone can only reach ~46 events; search reaches the whole
+catalogue.
+
+Card anatomy: event title; a single large percentage for a binary event, or the
+leading outcomes with their percentages for a field; then 24h volume, the
+**selectable** outcome count (`markets.length`, falling back to `marketCount` — see
+`frontend_contracts.md §3.9`), and a Choose/Forecast affordance.
+
+`FreeformQuestionModal` carries the whole question form — min/max length validation,
+timeframe and yes/no hints, character counter, plan-limit handling with the "Review
+plans" action, and the rotating placeholder. It states in one line at the point of
+entry that a self-written question has **no market benchmark**, and submits with
+`conditionId: null`.
+
+> **Never call `crypto.randomUUID()` directly — use `randomUUID()` from `lib/utils`.**
+> `crypto.randomUUID` exists only in a **secure context** (https or `localhost`), so it
+> is `undefined` when the dev server is opened from a phone on the LAN
+> (`http://192.168.x.x:5173`). This modal generates an idempotency key during render;
+> calling the missing API there threw and unmounted the React tree, producing a
+> **blank white screen on mobile and nowhere else**. The helper falls back to
+> `crypto.getRandomValues` (available on insecure origins) rather than `Math.random` —
+> these are idempotency keys, and a collision would return someone else's forecast.
+
+### §3.1b Market selection — `MarketPicker.tsx`
+
+A trending card does not submit on click. It resolves to **one market's real
 question**, because the event title is a display label: submitting "Fed Decision in
 July?" gives the pipeline nothing to match, while "Will there be no change in Fed
 interest rates after the July 2026 meeting?" is a market with a price behind it.
@@ -111,17 +161,22 @@ market question. **Display the short label; submit the full question.**
 |---|---|
 | Binary, inline market present | **Submits immediately, no picker, no round-trip** — the market ships inline on the list payload |
 | 2–8 selectable markets | Lists every market: short label, full question, current % |
-| > 8 selectable markets | Lists the 8 most likely, plus a separated free-text input |
+| > 8 selectable markets | Opens shortlisted to the 8 most likely, with a **"Show all N outcomes (+K more)"** expander |
 
 Branching is on **`markets[0]` existing**, not on `marketCount === 1`
-(`CreateForecastContext.tsx`, `handleUse`): a binary event whose only leg is inactive
+(`CreateForecastView.tsx`, `handleEventSelect`): a binary event whose only leg is inactive
 reports `marketCount: 1` with `markets: []`, and trusting the count there would submit
 `undefined`. That case falls through to the picker, which fetches and reports honestly.
 
-**Free text carries no benchmark.** A self-written question has no `conditionId` and
-therefore no market to compare against. The picker says so in one line at the point of
-entry, and passes `conditionId: null`. Nothing renders a placeholder benchmark or a
-loading state that never resolves.
+**The picker holds no free-text input** (removed 2026-07-28). It briefly offered one on
+shortlisted fields, which was wrong twice over: inside a dialog titled "Israel x Iran
+ceasefire continues through…?", a control labelled *"Ask your own question"* reads as
+"ask about **this** event in my own words", when it actually abandons the event for a
+question with no benchmark — and it duplicated the screen-level button added in the
+same redesign, under the same name with different behaviour. It also failed to solve
+the need it was there for: a user wanting the 9th of 11 outcomes needs *that market*,
+which free text cannot reach. The expander does. Free text now lives in exactly one
+place, `FreeformQuestionModal` (§3.1a).
 
 **Loading, error and empty are three distinct states.** `fetchTrendingMarkets` rethrows
 by design, so a failed fetch renders a red retryable "Couldn't load outcomes" — never
@@ -607,9 +662,10 @@ modal to **359 px** with 8 px margins. Both fit. The overflow risk
 > records "Fixed two-column modal body; no mobile-specific stacking." Superseded.
 
 > **What this pass did not cover:** `SubscriptionSettings` payment/cancel sub-flows,
-> `CreateForecastContext` (trending panel) at tablet width, and the
-> `awaiting_clarification` candidate picker — none had reachable state during the run.
-> Their responsive behavior remains source-verified only.
+> the trending panel at tablet width, and the `awaiting_clarification` candidate
+> picker — none had reachable state during the run. Their responsive behavior remains
+> source-verified only. (The trending panel itself was replaced on 2026-07-28; the
+> new-forecast screen that superseded it was browser-checked at 375 and desktop.)
 
 ---
 
@@ -627,4 +683,4 @@ modal to **359 px** with 8 px margins. Both fit. The overflow risk
 | Landing-page audit not re-verified | `../archive/audits/landing-audit.md` (dated 2026-05-20) inventories landing copy and layout. Component names still match, but **its copy-level claims were not re-checked** during this rewrite. |
 | Shared UI primitives are widely bypassed | `components/ui/` provides `Button`, `Card`, `Badge`, and `Input`, but many surfaces build the same affordances by hand with local Tailwind classes instead — raw `<button>` elements throughout the modals, settings, subscription/payment, landing and icon-button surfaces; card-like containers assembled manually in settings, plan cards, chat bubbles and evidence rows; and status/plan/confidence/source badges written as local `<span>`s despite `badge.tsx` existing. There is also no single radius or spacing scale: `Card` uses `rounded-lg`, settings surfaces `rounded-xl`, the modal `rounded-2xl`, and badges range across `rounded` / `rounded-md` / `rounded-lg` / `rounded-full`. The risk is not any individual style but the **number of one-off variants** — a change to a primitive does not propagate to the surfaces that reimplemented it. Carried forward from the Task-0.2 consistency audit; the design-system observations were re-read against current source, but a component-by-component re-audit was **not** performed. |
 | Three layout trees mount simultaneously | `DashboardPage` renders the wide-desktop grid, the tablet grid, and the mobile stack as three sibling subtrees, hidden from each other by `hidden`/`lg:hidden`/`xl:hidden`. All three are in the DOM at once — confirmed at runtime (every card heading appears three times) and corroborated by `sprint-24-25-frontend-tasks.md`, which describes passing props to "all three `ChatPanel` instances". Correct, and it keeps each layout independently readable, but it triples the mounted component count and means any per-instance state or effect runs three times. Known and intentional; recorded so it is not rediscovered as a bug. |
-| Responsive: three sub-surfaces still source-verified only | The 2026-07-18 browser pass (§6.2) cleared every major dashboard surface at 375/768/1280 with zero unclipped overflow and zero console errors. Not exercised: `SubscriptionSettings` payment/cancel sub-flows, `CreateForecastContext` at tablet width, and the `awaiting_clarification` candidate picker — no reachable state during the run. |
+| Responsive: three sub-surfaces still source-verified only | The 2026-07-18 browser pass (§6.2) cleared every major dashboard surface at 375/768/1280 with zero unclipped overflow and zero console errors. Not exercised: `SubscriptionSettings` payment/cancel sub-flows, the trending panel at tablet width, and the `awaiting_clarification` candidate picker — no reachable state during the run. (That trending panel was deleted on 2026-07-28; its replacement, the new-forecast screen, was browser-checked at 375 and desktop.) |

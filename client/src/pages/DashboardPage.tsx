@@ -6,7 +6,6 @@ import { AgentEventsTimeline } from '../components/cards/AgentEventsTimeline';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { StateMessage } from '../components/ui/StateMessage';
 import { CreateForecastView } from '../components/CreateForecastView';
-import { TrendingContext } from '../components/CreateForecastContext';
 import { SettingsModal, type SettingsSection } from '../components/SettingsModal';
 import type { TrendingMarket } from '../services/trending.service';
 import { shouldShowFollowUpComposer } from '../lib/followUpComposer';
@@ -496,7 +495,16 @@ export function DashboardPage({
 
     const renderCenterPanel = () => {
         if (currentView === 'new-forecast') {
-            return <CreateForecastView onSubmit={handleSubmitForecast} onOpenSubscription={() => openSettingsSection('subscription')} userPlan={userPlan} monthlyForecastsUsed={userProfile?.monthlyForecastsUsed ?? 0} />;
+            return (
+                <CreateForecastView
+                    onSubmit={handleSubmitForecast}
+                    onOpenSubscription={() => openSettingsSection('subscription')}
+                    userPlan={userPlan}
+                    monthlyForecastsUsed={userProfile?.monthlyForecastsUsed ?? 0}
+                    trendingEvents={trendingForecasts}
+                    isLoading={isLoading}
+                />
+            );
         }
 
         if (isLoading) {
@@ -584,17 +592,6 @@ export function DashboardPage({
     };
 
     const renderRightPanel = () => {
-        if (currentView === 'new-forecast') {
-            return (
-                <TrendingContext
-                    forecasts={trendingForecasts}
-                    onAnalyze={(question) => {
-                        void handleSubmitForecast(question, crypto.randomUUID()).catch(() => undefined);
-                    }}
-                />
-            );
-        }
-
         return (
             <ChatPanel
                 messages={messages}
@@ -649,7 +646,15 @@ export function DashboardPage({
                 </button>
             )}
 
-            <div className="hidden xl:grid xl:grid-cols-[252px_minmax(0,1fr)_304px] 2xl:grid-cols-[272px_minmax(0,1fr)_340px] h-full w-full min-w-0">
+            {/* The new-forecast screen drops the right rail: the markets it used to
+                hold are now the centre of the page, and a 304px column repeating
+                them would compete with itself. */}
+            <div
+                className={`hidden xl:grid h-full w-full min-w-0 ${currentView === 'new-forecast'
+                    ? 'xl:grid-cols-[252px_minmax(0,1fr)] 2xl:grid-cols-[272px_minmax(0,1fr)]'
+                    : 'xl:grid-cols-[252px_minmax(0,1fr)_304px] 2xl:grid-cols-[272px_minmax(0,1fr)_340px]'
+                    }`}
+            >
                 <div className="h-full overflow-hidden">
                     <Sidebar
                         activeSessionId={activeSessionId ?? ''}
@@ -667,9 +672,11 @@ export function DashboardPage({
                 <div className="h-full min-w-0 overflow-hidden border-x border-gray-200 bg-slate-50 relative">
                     {renderCenterPanel()}
                 </div>
-                <div className="h-full min-w-0 overflow-hidden bg-white">
-                    {renderRightPanel()}
-                </div>
+                {currentView === 'new-forecast' ? null : (
+                    <div className="h-full min-w-0 overflow-hidden bg-white">
+                        {renderRightPanel()}
+                    </div>
+                )}
             </div>
 
             <div className="hidden lg:grid xl:hidden lg:grid-cols-[264px_minmax(0,1fr)] h-full w-full min-w-0">
@@ -690,11 +697,6 @@ export function DashboardPage({
                 <div className="h-full min-w-0 overflow-hidden relative flex flex-col bg-slate-50">
                     <div className="flex-1 overflow-y-auto">
                         {renderCenterPanel()}
-                        {currentView === 'new-forecast' && (
-                            <div className="border-t border-gray-200">
-                                <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q, crypto.randomUUID()).catch(() => undefined)} />
-                            </div>
-                        )}
                     </div>
 
                     <div className={`fixed inset-y-0 right-0 w-full max-w-[min(24rem,100vw)] z-40 transform transition-transform duration-300 ease-in-out ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
@@ -725,11 +727,6 @@ export function DashboardPage({
             <div className="lg:hidden h-full w-full max-w-full flex flex-col overflow-x-hidden">
                 <div className="flex-1 overflow-y-auto pt-16">
                     {renderCenterPanel()}
-                    {currentView === 'new-forecast' && (
-                        <div className="border-t border-gray-200">
-                            <TrendingContext forecasts={trendingForecasts} onAnalyze={(q) => void handleSubmitForecast(q, crypto.randomUUID()).catch(() => undefined)} />
-                        </div>
-                    )}
                 </div>
 
                 <div className={`fixed inset-y-0 left-0 w-[min(20rem,calc(100vw-1rem))] z-40 transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>

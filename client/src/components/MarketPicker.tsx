@@ -5,8 +5,8 @@ import { Button } from './ui/button';
 
 /**
  * Above this many options the list becomes a scan-and-give-up wall (candidate
- * fields run to 128 legs), so we show the leading options and offer a free-text
- * escape hatch instead of paginating a list nobody reads.
+ * fields run to 128 legs), so it opens shortlisted to the leading options with an
+ * explicit expander. Everything stays reachable — nothing is hidden permanently.
  */
 const SHORTLIST_THRESHOLD = 8;
 
@@ -38,7 +38,7 @@ function formatPercent(probability: number): string {
  * real market with a price behind it. The user picks a leg; we submit its question.
  *
  * Binary events never open this — they carry their single market inline and submit
- * on click (see TrendingContext).
+ * on click (see CreateForecastView).
  */
 export function MarketPicker({
     eventId,
@@ -48,7 +48,7 @@ export function MarketPicker({
     onClose,
 }: MarketPickerProps) {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
-    const [freeText, setFreeText] = useState('');
+    const [showAll, setShowAll] = useState(false);
     const dialogRef = useRef<HTMLDivElement>(null);
 
     const load = useCallback(() => {
@@ -82,15 +82,10 @@ export function MarketPicker({
 
     const markets = state.kind === 'ready' ? state.markets : [];
     const isShortlisted = markets.length > SHORTLIST_THRESHOLD;
-    const visibleMarkets = isShortlisted ? markets.slice(0, SHORTLIST_THRESHOLD) : markets;
-
-    const submitFreeText = (event: React.FormEvent) => {
-        event.preventDefault();
-        const question = freeText.trim();
-        // No conditionId: a self-written question matches no market, so there is
-        // no benchmark to compare against. Said plainly in the hint below.
-        if (question) onSelect(question, null);
-    };
+    const visibleMarkets = isShortlisted && !showAll
+        ? markets.slice(0, SHORTLIST_THRESHOLD)
+        : markets;
+    const hiddenCount = markets.length - visibleMarkets.length;
 
     return (
         <>
@@ -210,51 +205,22 @@ export function MarketPicker({
                                     })}
                                 </ul>
 
-                                {isShortlisted ? (
-                                    <p className="mt-3 text-xs text-gray-400">
-                                        Showing the {SHORTLIST_THRESHOLD} most likely of{' '}
-                                        {markets.length} outcomes.
-                                    </p>
+                                {hiddenCount > 0 ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAll(true)}
+                                        className="mt-3 inline-flex min-h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-200 px-3 text-xs font-medium text-gray-500 transition-colors hover:border-anizai-teal-300 hover:bg-anizai-teal-50/40 hover:text-anizai-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anizai-blue-500"
+                                    >
+                                        Show all {markets.length} outcomes
+                                        <span className="text-gray-400">
+                                            (+{hiddenCount} more)
+                                        </span>
+                                    </button>
                                 ) : null}
                             </>
                         ) : null}
                     </div>
 
-                    {/* The free-text escape hatch only earns its space on a field too
-                        large to scan; below that, every outcome is already listed. */}
-                    {state.kind === 'ready' && isShortlisted ? (
-                        <div className="border-t border-gray-200 p-4 sm:p-5">
-                            <label
-                                htmlFor="market-picker-freetext"
-                                className="block text-sm font-medium text-gray-900"
-                            >
-                                Ask your own question
-                            </label>
-                            <p className="mt-1 text-xs text-gray-500">
-                                No market benchmark — a question you write yourself has no market
-                                price to compare against.
-                            </p>
-                            <form onSubmit={submitFreeText} className="mt-2 flex gap-2">
-                                <input
-                                    id="market-picker-freetext"
-                                    type="text"
-                                    value={freeText}
-                                    onChange={(event) => setFreeText(event.target.value)}
-                                    placeholder="Will …?"
-                                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-anizai-blue-500"
-                                />
-                                <Button
-                                    type="submit"
-                                    variant="primary"
-                                    size="sm"
-                                    disabled={!freeText.trim()}
-                                    className="shrink-0"
-                                >
-                                    Forecast
-                                </Button>
-                            </form>
-                        </div>
-                    ) : null}
                 </div>
             </div>
         </>
