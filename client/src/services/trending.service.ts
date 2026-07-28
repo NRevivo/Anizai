@@ -86,6 +86,30 @@ export async function fetchTrendingForecasts(limit = 20): Promise<TrendingForeca
 }
 
 /**
+ * Search Polymarket events by free text.
+ *
+ * Reaches the whole catalogue, unlike `fetchTrendingForecasts`, which can only see
+ * Gamma's first 100 events by 24h volume. Results carry the same shape and the same
+ * conditional `markets` rule, so they render through the identical card and picker.
+ *
+ * Restricted to the pipeline's forecastable topics, so an off-topic query (sport,
+ * entertainment) legitimately returns `[]` — the caller should say "no markets
+ * found", not treat it as an error.
+ *
+ * Rethrows like `fetchTrendingMarkets`: a search backs a direct user action, so the
+ * caller must distinguish "no matches" from "the request failed".
+ */
+export async function searchTrendingForecasts(
+    query: string,
+    limit = 20
+): Promise<TrendingForecast[]> {
+    return apiRequest<TrendingForecast[]>(
+        `/trending/search?q=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`,
+        { requireAuth: false }
+    );
+}
+
+/**
  * Fetch the full selectable field for one trending event.
  *
  * Needed because `TrendingForecast.markets` is only populated inline for binary

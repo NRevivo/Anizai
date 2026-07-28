@@ -80,6 +80,7 @@ Every response is wrapped. Defined in `server/src/types/api.ts`.
 | GET | `/` | — | — | 200 `{ ok: true, name: 'anizai-server' }` | `routes/root.ts` |
 | GET | `/health` | — | — | 200 `{ ok: true, timestamp }` | `routes/health.ts` |
 | GET | `/trending` | — | `?limit` parsed, clamped | 200 `TrendingForecast[]` | `routes/trending.ts` |
+| GET | `/trending/search` | — | `?q` free text, `?limit` clamped to 50 | 200 `TrendingForecast[]` | `routes/trending.ts` |
 | GET | `/trending/:id/markets` | — | — | 200 `TrendingMarket[]`, 404 `NOT_FOUND` | `routes/trending.ts` |
 
 `/trending` parses `limit` with `Number.parseInt`; non-finite or non-positive falls back
@@ -102,6 +103,20 @@ to **20**, and any value is clamped to a maximum of **100**
 > `?limit=12` at 59.9 KB against 4.5 KB, on an endpoint the landing page calls
 > unauthenticated on every visit. **An empty `markets` here means "not loaded", not
 > "none exist"** — see `frontend_contracts.md §3.9`.
+
+`GET /trending/search?q=` proxies Polymarket's `/public-search`, which reaches the
+**whole catalogue** — unlike `/trending`, which can only see Gamma's first 100 events
+by 24h volume (~46 after filtering). That ceiling is why browsing alone cannot reach
+most markets, including the Fed markets. The upstream payload is field-identical to
+`/events`, so `toTrendingForecast` / `toTrendingMarkets` are reused verbatim and
+results carry the same conditional `markets` rule as the list.
+
+Results pass through the **same `classifyEvent` topic filter** as `/trending`, so
+sport and entertainment markets are deliberately unfindable — forecasting one would
+produce a confident-looking answer the vault has no sources for. A query under 2
+characters returns `[]` without an upstream call. Cached per query for 2 minutes,
+capped at 50 entries (user input must not grow an unbounded map); `getEventMarkets`
+reads that cache too, so opening a picker from a search result costs no round-trip.
 
 `GET /trending/:id/markets` takes the Polymarket **event** id (`TrendingForecast.id`),
 not a market or condition id. It reuses the list's 5-minute cache — a click on a

@@ -107,6 +107,16 @@ const TTL_MS = 5 * 60 * 1000;
 let cache: { fetchedAt: number; limit: number; data: TrendingForecast[] } | null = null;
 let inflight: Promise<TrendingForecast[]> | null = null;
 
+// Search is keyed by query, so it cannot share the single-payload cache above.
+// A short TTL and a hard entry cap keep repeat/typo queries off the upstream API
+// without letting an unbounded map grow from user input.
+const SEARCH_TTL_MS = 2 * 60 * 1000;
+const SEARCH_CACHE_MAX = 50;
+const searchCache = new Map<string, { fetchedAt: number; data: TrendingForecast[] }>();
+
+/** Below this, a query matches too much to be useful and just burns API calls. */
+const MIN_QUERY_LENGTH = 2;
+
 /** How many leading legs to carry for a multi-outcome event. */
 const TOP_OUTCOMES = 3;
 
@@ -438,6 +448,71 @@ export const trendingRepository = {
     },
 
     /**
+     * Search Polymarket events by free text, same shape as the trending list.
+     *
+     * Why this exists: `/trending` can only ever see Gamma's first 100 events by
+     * 24h volume, of which roughly half survive the topic filter. Anything outside
+     * that slice — most of a ~2,100-market catalogue — is unreachable by browsing
+     * alone, including the Fed markets this feature was asked for. `/public-search`
+     * queries the whole catalogue.
+     *
+     * Results are put through the **same** `classifyEvent` topic filter as the
+     * trending feed, so search can only surface events the pipeline ingests sources
+     * for. A sport or entertainment market is therefore not findable here — that is
+     * deliberate, not a gap: forecasting one would produce a confident-looking answer
+     * with no evidence behind it.
+     *
+     * The upstream payload is field-identical to `/events`, so `toTrendingForecast`
+     * and `toTrendingMarkets` are reused verbatim — there is no second mapper to
+     * keep in sync. `forListResponse` applies too, so multi-outcome fields are
+     * stripped here and fetched per-event by the picker exactly as on the list.
+     */
+    async searchEvents(query: string, limit = 20): Promise<TrendingForecast[]> {
+        const normalized = query.trim().toLowerCase();
+        if (normalized.length < MIN_QUERY_LENGTH) {
+            return [];
+        }
+
+        const cacheKey = `${normalized}::${limit}`;
+        const hit = searchCache.get(cacheKey);
+        if (hit && Date.now() - hit.fetchedAt < SEARCH_TTL_MS) {
+            return hit.data.map(forListResponse);
+        }
+
+        // Over-fetch: the topic filter drops a large share of any result page, and
+        // the caller still expects up to `limit` rows.
+        const url =
+            `https://gamma-api.polymarket.com/public-search` +
+            `?q=${encodeURIComponent(query.trim())}` +
+            `&limit_per_type=${Math.min(limit * 3, 60)}`;
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(
+                `Polymarket API error: ${response.status} ${response.statusText}`
+            );
+        }
+
+        const body = (await response.json()) as { events?: unknown };
+        const events = Array.isArray(body?.events) ? body.events : [];
+
+        const rows = events
+            .filter((event: any) => event?.closed !== true && classifyEvent(event).kept)
+            .map(toTrendingForecast)
+            .filter((row): row is TrendingForecast => row !== null)
+            .slice(0, limit);
+
+        if (searchCache.size >= SEARCH_CACHE_MAX) {
+            // Map preserves insertion order, so the first key is the oldest.
+            const oldest = searchCache.keys().next().value;
+            if (oldest !== undefined) searchCache.delete(oldest);
+        }
+        searchCache.set(cacheKey, { fetchedAt: Date.now(), data: rows });
+
+        return rows.map(forListResponse);
+    },
+
+    /**
      * Every selectable market for one event, probability-descending.
      *
      * Served from the same in-process cache the list route uses, so the common
@@ -460,6 +535,15 @@ export const trendingRepository = {
         const now = Date.now();
         if (cache && now - cache.fetchedAt < TTL_MS) {
             const hit = cache.data.find((e) => e.id === eventId);
+            if (hit) return hit.markets;
+        }
+
+        // Also serve from the search cache: an event opened from a search result is
+        // not in the trending payload, and without this every such pick would pay an
+        // upstream round-trip for markets we already hold.
+        for (const entry of searchCache.values()) {
+            if (now - entry.fetchedAt >= SEARCH_TTL_MS) continue;
+            const hit = entry.data.find((e) => e.id === eventId);
             if (hit) return hit.markets;
         }
 

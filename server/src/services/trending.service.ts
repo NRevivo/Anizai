@@ -10,6 +10,16 @@ export async function getTopTrending(limit = 20): Promise<TrendingForecast[]> {
 }
 
 /**
+ * Free-text search across Polymarket events, filtered to the pipeline's topics.
+ *
+ * A query shorter than the repository's minimum resolves to `[]` rather than an
+ * error — an empty or one-character box is a normal UI state, not a failure.
+ */
+export async function searchTrending(query: string, limit = 20): Promise<TrendingForecast[]> {
+    return trendingRepository.searchEvents(query, limit);
+}
+
+/**
  * Every selectable market for one trending event.
  *
  * Throws 404 when the event does not exist upstream. An event that exists but has
