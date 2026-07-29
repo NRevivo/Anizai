@@ -49,10 +49,20 @@ COPY ingestion/__init__.py /app/ingestion/__init__.py
 ENV PYTHONPATH=/app
 
 # Python block-buffers stdout when it is not a TTY, and the producer logs to
-# stdout (`polymarket_producer.py`, main()). Buffered INFO lines are lost when
-# the container is killed at main-pool scale-down, which is why a run that
-# ingested 1,100 rows on 2026-07-27 emitted no application logs at all — and why
-# four separate investigations concluded ingestion was dead when it was not.
+# stdout (`polymarket_producer.py`, main()), so without this a killed container
+# can lose whatever is still sitting in the buffer.
+#
+# It is NOT, however, why the producer's logs look absent. That is
+# `INFO_SAMPLE_RATE = 0.01` in `utils/logging_config.py:64` — INFO records are
+# deliberately 1% sampled (ERROR and above are kept in full). "Market discovery"
+# appearing three times in thirty days is exactly 1% of ~288 sweeps/day, and a
+# run that ingested 1,100 rows while logging almost nothing is the expected
+# behaviour, not a fault. Several earlier investigations concluded ingestion was
+# dead on that evidence; it was not.
+#
+# Consequence for anyone verifying a run: set LOG_INFO_SAMPLE_RATE=1.0 on the
+# producer for the window, or the per-sweep emitted/skipped/total counters will
+# themselves be sampled away.
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "-m", "ingestion.polymarket_producer"]
