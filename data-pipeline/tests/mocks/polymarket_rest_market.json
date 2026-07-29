@@ -1,0 +1,27 @@
+{
+  "_comment": "Realistic mock of a Polymarket Gamma REST market object, captured live on 2026-07-28. This is the shape _fetch_market_prices() receives. NOTE: outcomes/outcomePrices/clobTokenIds are JSON-ENCODED STRINGS, not arrays - that is the real API shape and the reason the price was never extracted. Companion to polymarket_price_update.json, which mocks the WebSocket path.",
+  "id": "2937524",
+  "question": "US x Iran Effective Ceasefire by July 24?",
+  "conditionId": "0x58180f4a69651f67c23ac92845721b2320cc0c76effeb5e79db5288d8d8e6b28",
+  "slug": "us-x-iran-effective-ceasfire-by-july-24-20260715194822044",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "outcomePrices": "[\"0.0795\", \"0.9205\"]",
+  "clobTokenIds": "[\"113410960838036610177054042201506207817797370827970598802492258356512540837137\", \"86061825988167227130786985582830419834226509797189675226118388137342919202672\"]",
+  "volume": "3399339.5047339993",
+  "volume24hr": 1212435.0863629999,
+  "liquidity": "80473.2411",
+  "endDate": "2026-07-24T23:59:00Z",
+  "endDateIso": "2026-07-24",
+  "startDate": "2026-07-15T19:54:39.33912Z",
+  "active": true,
+  "closed": false,
+  "archived": false,
+  "negRisk": false,
+  "events": [
+    {
+      "id": "707496",
+      "slug": "us-x-iran-effective-ceasfire-byptptpt-2-week-pause-20260715194822042",
+      "title": "US x Iran Effective Ceasefire by...? (2 week pause)"
+    }
+  ]
+}

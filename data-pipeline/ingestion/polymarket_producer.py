@@ -31,6 +31,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -53,6 +54,12 @@ setup_logging()
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 
 # CLOB API: order book, price history, recent trades
+# Retained after T2 removed the per-market CLOB price call: the price-history
+# endpoint lives on this same host —
+#   GET {CLOB_API_BASE}/prices-history?market=<token_id>&interval=max
+# — and it is the data source for the frontend's price chart. The token ids it
+# needs are the `clob_token_ids` preserved in the REST payload. Verified live
+# 2026-07-28: 712 points over a market's life, ~10-minute granularity.
 CLOB_API_BASE = "https://clob.polymarket.com"
 
 # CLOB WebSocket: real-time price_change / book / last_trade events
@@ -86,6 +93,61 @@ WS_BATCH_SIZE = 100
 # Canonical source identifier used in every Bronze envelope
 SOURCE_NAME = "polymarket"
 
+# The outcome label whose price becomes the market's probability. Selected by
+# LABEL, never by position — Gamma does not guarantee outcome order, and reading
+# index 0 blindly reports the complement for any market listed ["No", "Yes"].
+AFFIRMATIVE_LABEL = "Yes"
+
+
+def _parse_json_array(raw) -> list:
+    """
+    Gamma returns `outcomes`, `outcomePrices` and `clobTokenIds` as
+    JSON-encoded STRINGS, not arrays — verified against the live API on
+    2026-07-28 across 100/100 active markets:
+
+        outcomes       '["Yes", "No"]'
+        outcomePrices  '["0.505", "0.495"]'
+        clobTokenIds   '["98022490…", "53831553…"]'
+
+    Every one of them therefore needs decoding before use. Accepts a real list
+    too, so the helper survives an upstream shape change without breaking.
+    Returns [] rather than raising: the caller treats an unreadable market as
+    unpriceable and skips it (T3), which is the honest outcome.
+    """
+    if isinstance(raw, list):
+        return raw
+    if not isinstance(raw, str):
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _extract_outcome_prices(market: dict) -> Optional[dict]:
+    """
+    Map outcome label -> price for one Gamma market.
+
+    Returns None when the market cannot be priced — mismatched label/price
+    lengths, an unparseable price, or an empty outcome list. None means "skip
+    this market entirely" (T3); it never degrades to a zero, because a zero here
+    is indistinguishable from a market the world genuinely prices at 0.
+    """
+    labels = [str(label).strip() for label in _parse_json_array(market.get("outcomes"))]
+    prices = _parse_json_array(market.get("outcomePrices"))
+
+    if not labels or len(labels) != len(prices):
+        return None
+
+    resolved: dict = {}
+    for label, price in zip(labels, prices):
+        try:
+            resolved[label] = float(price)
+        except (TypeError, ValueError):
+            return None
+    return resolved
+
 
 # ==========================================================
 # Producer
@@ -115,6 +177,11 @@ class PolymarketProducer:
         self._active_markets: list[dict] = []
         self._token_ids: list[str] = []
         self._lock = asyncio.Lock()
+        # T3: markets dropped this sweep because they could not be priced.
+        # Counted so a skipped market is distinguishable from one that was never
+        # fetched — without it the two look identical in the logs, which is the
+        # ambiguity that made the original zero-price bug invisible for 79 days.
+        self._skipped_markets = 0
 
     # ----------------------------------------------------------
     # Market Discovery (Gamma REST API)
@@ -164,41 +231,77 @@ class PolymarketProducer:
 
     def _fetch_market_prices(self, market: dict) -> Optional[dict]:
         """
-        Fetch current order book snapshot for a market via CLOB REST.
+        Build a price snapshot for one market from the Gamma market object.
 
-        Why REST alongside WebSocket: REST snapshots serve as a reconciliation
-        fallback and fill any ticks missed during WebSocket reconnects. They
-        also provide structured liquidity_pool_tvl and bid_ask_spread values
-        needed by the Silver structured_metrics schema (Section C.2).
+        T2 — why there is no longer a CLOB call here:
+            The Gamma object already carries `outcomePrices` (verified live
+            2026-07-28: present on 100/100 active markets, alongside
+            `lastTradePrice`/`bestBid`/`bestAsk`). The previous implementation
+            spent one CLOB round-trip per market to read `tokens`, then never
+            extracted a price from it — so every REST row reached Silver with
+            `current_value = 0.0`, because `map_price_update_to_silver` reads
+            `raw.get("price", 0.0)` (`processing/silver_job.py:170`) and no REST
+            payload ever carried that key. Emitting `price` is the whole fix:
+            the Silver mapper is unchanged and Flink is not resubmitted.
 
-        Returns None on 404 (market expired) or transient network errors — the
-        producer skips silently rather than flooding DLQ with expected 404s.
+            Dropping the CLOB call also removes ~2,100 HTTP requests per sweep
+            once pagination lands (T5), which is what made the 21x load concern
+            moot rather than merely survivable.
+
+        T3 — a market whose outcomes we cannot read emits NOTHING.
+            No sentinel (`0.0`, `null`, `-1`): a sentinel is a default served as
+            a measurement, which is precisely the bug being fixed. No DLQ: this
+            is an unsupported market shape, not a malformed message, and replay
+            cannot help. WARNING + a skip counter instead, so a skipped market is
+            distinguishable from one that was never fetched.
+
+        Returns None when the market cannot be priced (caller skips it).
         """
         condition_id = market.get("conditionId") or market.get("condition_id", "")
         if not condition_id:
-            return None
-
-        url = f"{CLOB_API_BASE}/markets/{condition_id}"
-        try:
-            response, duration_ms = timed_request(
-                lambda: requests.get(url, headers=_auth_headers(), timeout=10)
-            )
-            if response.status_code == 404:
-                return None  # market closed/expired — expected, not an error
-            response.raise_for_status()
-            clob_data = response.json()
-        except requests.RequestException as exc:
             logger.warning(
-                "[polymarket] Price fetch failed for %s: %s", condition_id, exc
+                "[polymarket] Skipping market with no conditionId: id=%s question=%r",
+                market.get("id", ""), str(market.get("question", ""))[:80],
             )
+            self._skipped_markets += 1
             return None
 
-        tokens = clob_data.get("tokens", [])
+        outcome_prices = _extract_outcome_prices(market)
+        if outcome_prices is None or AFFIRMATIVE_LABEL not in outcome_prices:
+            logger.warning(
+                "[polymarket] Skipping market %s — unsupported outcome labels %r "
+                "(need %r); question=%r",
+                condition_id,
+                _parse_json_array(market.get("outcomes")),
+                AFFIRMATIVE_LABEL,
+                str(market.get("question", ""))[:80],
+            )
+            self._skipped_markets += 1
+            return None
 
-        # Whale detection on REST snapshot: a token with one-sided price near 0
-        # or 1 combined with large volume suggests a large position sweep.
+        # D3: select by LABEL, never by index. Outcome order is not guaranteed,
+        # and reading the wrong index silently reports the complement — a 3%
+        # market as 97%.
+        price = outcome_prices[AFFIRMATIVE_LABEL]
+
         volume_24h = float(market.get("volume24hr", 0) or 0)
-        whale_alert = volume_24h >= WHALE_THRESHOLD
+
+        # T7 — preserve what the catalog needs. `endDate` was already fetched and
+        # then dropped; `status` was hardcoded "active" downstream regardless of
+        # real state, which would let the agent forecast a resolved market.
+        parent_event_id = ""
+        events = market.get("events")
+        if isinstance(events, list) and events and isinstance(events[0], dict):
+            parent_event_id = str(events[0].get("id", ""))
+
+        if market.get("closed") is True:
+            market_status = "closed"
+        elif market.get("archived") is True:
+            market_status = "archived"
+        elif market.get("active") is False:
+            market_status = "inactive"
+        else:
+            market_status = "active"
 
         return {
             "payload_type":    "price_update",
@@ -206,11 +309,27 @@ class PolymarketProducer:
             "market_id":       market.get("id", ""),
             "condition_id":    condition_id,
             "question":        market.get("question", ""),
-            "tokens":          tokens,
+            # T2: the key silver_job has always read and never found. 0-1
+            # probability — see the plan's §2.2 on scale.
+            "price":           price,
+            # Both sides survive: NO is not 1 - YES once a spread exists.
+            "outcome_prices":  outcome_prices,
+            # Replaces the CLOB `tokens` list. Kept because a WebSocket revival
+            # and the catalog both need the token ids.
+            "clob_token_ids":  [str(t) for t in _parse_json_array(market.get("clobTokenIds"))],
+            "parent_event_id": parent_event_id,
+            "end_date_iso":    str(market.get("endDateIso", "") or ""),
+            "market_status":   market_status,
             "volume_24h_usd":  volume_24h,
             "liquidity_usd":   float(market.get("liquidity", 0) or 0),
             "end_date":        market.get("endDate", ""),
-            "whale_alert":     whale_alert,
+            # T4 — REST cannot detect a whale. The documented meaning is a single
+            # trade over $100k (see WHALE_THRESHOLD); this path only ever saw
+            # total 24h market volume, so it fired on essentially every active
+            # market on every observation. `volume24hr` is present on 100/100
+            # live markets, so that branch was live, not dormant. Real whale
+            # detection exists only on the WebSocket path.
+            "whale_alert":     False,
             "fetched_at":      datetime.now(timezone.utc).isoformat(),
         }
 
@@ -463,15 +582,20 @@ class PolymarketProducer:
 
     async def _price_poll_loop(self) -> None:
         """
-        Poll REST price snapshots every 5 min for all active markets.
+        Emit a price snapshot every 5 min for every active market.
 
-        Why REST alongside WebSocket: WebSocket is the primary stream but REST
-        snapshots serve as a reconciliation check and cover any ticks missed
-        during reconnects. They also provide structured fields (liquidity,
-        bid_ask_spread) that CLOB WebSocket events do not always include.
+        Since T2 this loop makes **no per-market HTTP call** — the price comes
+        from the Gamma object already held in `_active_markets`, so a sweep is a
+        pure transform over the cached list. The executor hop is kept only
+        because the list can be large enough for the transform to be worth
+        yielding on.
+
+        T8 — every sweep reports emitted / skipped / total. The old loop logged
+        nothing at all, so a market dropped by `_fetch_market_prices` looked
+        exactly like a market that was never in the list.
 
         A 30-second startup delay gives the market refresh loop time to populate
-        _active_markets before the first REST sweep.
+        _active_markets before the first sweep.
         """
         await asyncio.sleep(30)
 
@@ -479,17 +603,31 @@ class PolymarketProducer:
             async with self._lock:
                 markets = list(self._active_markets)
 
+            self._skipped_markets = 0
+            emitted = 0
+            started = time.monotonic()
+
             loop = asyncio.get_running_loop()
             for market in markets:
                 price_payload = await loop.run_in_executor(
                     None, self._fetch_market_prices, market
                 )
                 if price_payload:
-                    condition_id = market.get("conditionId", "")
                     self._emit(
                         price_payload,
-                        source_endpoint=f"{CLOB_API_BASE}/markets/{condition_id}",
+                        source_endpoint=f"{GAMMA_API_BASE}/markets",
                     )
+                    emitted += 1
+
+            # C7: the loop sleeps AFTER the sweep, so the real cadence is
+            # "sweep duration + PRICE_POLL_SEC". Logging the duration makes that
+            # visible instead of letting the cadence drift silently.
+            logger.info(
+                "[polymarket] Price sweep: %d emitted, %d skipped, %d total "
+                "in %.1fs (next sweep in %ds)",
+                emitted, self._skipped_markets, len(markets),
+                time.monotonic() - started, PRICE_POLL_SEC,
+            )
 
             await asyncio.sleep(PRICE_POLL_SEC)
 

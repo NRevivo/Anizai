@@ -48,4 +48,11 @@ COPY ingestion/__init__.py /app/ingestion/__init__.py
 # PYTHONPATH makes `from config.settings import ...` resolve correctly.
 ENV PYTHONPATH=/app
 
+# Python block-buffers stdout when it is not a TTY, and the producer logs to
+# stdout (`polymarket_producer.py`, main()). Buffered INFO lines are lost when
+# the container is killed at main-pool scale-down, which is why a run that
+# ingested 1,100 rows on 2026-07-27 emitted no application logs at all — and why
+# four separate investigations concluded ingestion was dead when it was not.
+ENV PYTHONUNBUFFERED=1
+
 CMD ["python", "-m", "ingestion.polymarket_producer"]

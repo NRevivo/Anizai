@@ -25,3 +25,8 @@
 
 # Local dev tooling state — per-machine (SQLite DB, agent/job scratch dirs).
 /dev/
+
+# Generated pipeline report — regenerated per run, never reviewed as source.
+# Ignored rather than relying on "remember not to stage it": a safeguard that
+# depends on remembering fails the first time anyone runs `git add -A`.
+/data-pipeline/PIPELINE_REPORT.md
