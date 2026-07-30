@@ -283,10 +283,19 @@ class TestTransformCorrectness:
         _, record = process_polymarket_message(price_update_envelope)
         assert isinstance(record["data_point"]["current_value"], float)
 
-    def test_price_unit_is_usd(self, price_update_envelope):
-        """data_point.unit must be 'USD' for Polymarket market prices."""
+    def test_price_unit_is_probability(self, price_update_envelope):
+        """
+        data_point.unit must be 'probability' for Polymarket market prices (S3).
+
+        This asserted 'USD' until 2026-07-30. A Polymarket price is a
+        probability in [0, 1] — never dollars — and labelling 0.0135 as USD
+        invites a reader, or a future consumer, to treat it as a price in cents.
+        Verified before the change: the only non-test reader of this field is
+        market_bridge._build_linked_sources, which passes it through for display
+        and never compares it to a literal.
+        """
         _, record = process_polymarket_message(price_update_envelope)
-        assert record["data_point"]["unit"] == "USD"
+        assert record["data_point"]["unit"] == "probability"
 
     def test_comment_bronze_ref_matches_envelope(self, comment_envelope):
         """
@@ -347,7 +356,13 @@ class TestQuestionPropagationSprint22:
             "market_id":       "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
             "condition_id":    "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
             "question":        "Will the Federal Reserve cut rates before June 2026?",
-            "tokens":          [],
+            # `price` added 2026-07-30 (S5). This fixture previously carried no
+            # price at all — the pre-fix REST shape — and passed, because the
+            # mapper defaulted `raw.get("price", 0.0)`. That default is the
+            # mechanism behind 93,607 zero rows, and the Silver price guard now
+            # DLQs a priceless price_update instead of inventing a zero.
+            # `tokens` was removed with it: F11 — the key never existed on Gamma.
+            "price":           0.62,
             "volume_24h_usd":  285_400.0,
             "liquidity_usd":   128_900.0,
             "whale_alert":     False,
@@ -385,7 +400,7 @@ class TestQuestionPropagationSprint22:
             "market_id":       "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
             "condition_id":    "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
             "question":        "Will BTC reach $150K by year-end 2026?",
-            "tokens":          [],
+            "price":           0.41,   # see the note above (S5 / F11)
             "volume_24h_usd":  50_000.0,
             "liquidity_usd":   25_000.0,
             "whale_alert":     False,
@@ -646,7 +661,7 @@ class TestNonTradeEventFiltering:
             "market_id":      "0x87ae1d3e2aec7cbf6b7f01781f741c82ae9bd08a",
             "condition_id":   "0x1234",
             "question":       "Will X happen?",
-            "tokens":         [],
+            "price":          0.55,   # see the note above (S5 / F11)
             "volume_24h_usd": 50000.0,
             "liquidity_usd":  120000.0,
             "end_date":       "2026-06-30T23:59:00+00:00",
