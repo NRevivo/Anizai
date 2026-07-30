@@ -106,8 +106,14 @@ def run(state: dict, *, now: Optional[datetime] = None) -> dict:
         future_pulse = pool.submit(pulse_analyst.run, query_embedding, now=now)
         future_market = pool.submit(
             market_bridge.run,
-            polymarket_slug=None,        # forward-compat: QU auto-pick (Future Enhancement 4)
-            canonical_event_id=None,     # ditto — populated by Phase 7
+            # A1: the picker's conditionId when the queue doc carried one, else
+            # "" — which market_bridge reads as "no deterministic identity" and
+            # falls through to the pg_trgm resolver, exactly as before. This
+            # parameter was the Sprint 19 forward-compat hook for a QU auto-pick
+            # (Future Enhancement 4) and has been None on every run since; the
+            # picker supplies a real identifier, so the hook is now live.
+            polymarket_slug=state.get("condition_id") or None,
+            canonical_event_id=None,     # populated by Phase 7
             entities=entities,
             now=now,
             # Sprint 22 T22.2: pg_trgm fuzzy match against the user's

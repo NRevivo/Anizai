@@ -46,6 +46,23 @@ class ForecastState(TypedDict, total=False):
     session_id: str
     user_id: str
 
+    # --- Deterministic market identity (A1) ---
+    # The Polymarket `conditionId` of the market the user picked, read by
+    # claim_session off the claimed forecastQueries doc. It is the SAME value the
+    # pipeline stores as momentum_vault.external_reference_id for REST-snapshot
+    # rows, which makes it an exact join key rather than a similarity guess.
+    #
+    # OPTIONAL BY DESIGN, and nothing may gate on it. The market picker
+    # (client/src/components/MarketPicker.tsx) already selects a conditionId, but
+    # it is dropped at the CreateForecastView call site and never reaches the BFF
+    # or Firestore, so today this is always absent. When absent, resolution falls
+    # through to the existing pg_trgm question resolver exactly as before — the
+    # receiving end is built ahead of the partner's change so that landing it is
+    # a client+BFF edit with no agent release.
+    #
+    # Read defensively via state.get("condition_id") (total=False semantics).
+    condition_id: str
+
     # --- Delivery-path identity (Sprint 26 T26.11 — closes KG-B-18) ---
     # The forecastQueries doc id this run actually claimed and processed.
     # SINGLE-WRITER: set once by process_query._build_initial_state (in BOTH the
