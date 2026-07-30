@@ -65,6 +65,25 @@ export interface SentimentDataPoint {
     publicSentiment: number; // 0-1 float
 }
 
+/**
+ * One point of the market's own price history, mapped from a
+ * `sessions/{id}/predictionSeries` document.
+ *
+ * Deliberately narrower than the wire type `PredictionPoint`. The pipeline writes
+ * `confidence: 1.0`, `reasonType: 'market'` and `evidenceIds: []` as fixed
+ * constants on every document — they exist to fill a shared shape, they are not
+ * measurements. `confidence` in particular must never be plotted or turned into a
+ * band: it would render a constant as if it carried information. Dropping the
+ * fields here rather than carrying and ignoring them makes that structural.
+ */
+export interface MarketPricePoint {
+    /** Epoch milliseconds. Numeric so the x-axis can scale by real elapsed time
+     *  rather than treating unevenly spaced samples as equal steps. */
+    t: number;
+    /** The market's YES price at that instant, 0–1. */
+    probability: number;
+}
+
 export interface TimelineEvent {
     id: string;
     evidenceId?: string | null;

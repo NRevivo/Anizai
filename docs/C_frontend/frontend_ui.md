@@ -82,6 +82,7 @@ DashboardPage.tsx                       ← shell: layout, drawers, modals, stat
 │   ├── cards/predictionOverview/       ← §3.2
 │   ├── cards/MarketComparison.tsx
 │   ├── cards/SentimentAnalysis.tsx
+│   ├── cards/MarketPriceHistory.tsx    ← §3.4
 │   └── cards/EvidenceTimeline.tsx      ← §3.3
 ├── (center) CreateForecastView.tsx     ← §3.1a market-first new-forecast screen
 │   ├── MarketPicker.tsx                ← choose an outcome within an event
@@ -236,6 +237,40 @@ Month-only matches resolve to the last day of that month. Returns `null` on no m
 classes are unavailable, so every element is styled by hand (`index.tsx:14-30`).
 Summaries longer than `SUMMARY_COLLAPSE_THRESHOLD = 400` characters collapse into a
 `<details>` disclosure.
+
+### §3.4 `MarketPriceHistory.tsx`
+
+The market's own YES price over the life of the market, from
+`sessions/{id}/predictionSeries`. Full width, placed directly under the
+MarketComparison/SentimentAnalysis row and above the evidence feed: it extends the
+market benchmark rather than competing with it — `MarketComparison` shows our number
+against one market price, this shows whether that price was stable or moving
+underneath it.
+
+- **Absent vs. empty are worded differently.** Both reach the card as `points: []`,
+  so it branches on `tier`: `tier_2` says the forecast is freeform and resolves to no
+  market; anything else says no price history was recorded. Neither is a loading
+  state — the card only mounts inside `Dashboard`, which requires a finished forecast.
+- **Density.** ~712 points at ~10-minute resolution is the expected contract volume,
+  rendered in full with **no downsampling** — it is a single SVG path, and
+  downsampling would erase exactly the spikes a bettor is looking for. `dot={false}`
+  above 3 points and `isAnimationActive={false}` keep that cheap.
+- **`confidence` is never plotted.** The pipeline writes a constant `1.0`; the field
+  is dropped at the mapper so no band can be derived from it (see contracts §6).
+- **Axis rules live in `lib/marketPriceChart.ts`** (19 unit tests) because a
+  mis-scaled axis still renders a plausible-looking line:
+  - `MIN_AXIS_SPAN_PCT = 20` — a market that traded 54–56% is genuinely flat, and an
+    auto-fitted axis would magnify that into a dramatic swing. The floor keeps small
+    moves honest; a large move still fills the chart. The domain also snaps outward
+    to multiples of 5 so ticks are round numbers.
+  - The Anizai reference line joins the domain extent, or it can land outside the
+    plot area and silently vanish — the one comparison the card exists to make.
+  - `buildTimeTicks` guarantees **distinct** x labels. Date-only labels repeat as
+    soon as two ticks share a day (a 2.1-day series rendered "Jun 15" five times,
+    which reads as a rendering fault), so the clock takes over on repeat.
+- **The reference line is unlabelled in-plot.** An in-plot label sits on top of the
+  data whenever the forecast lands near the market's range — the common case — so
+  the value is carried by a legend below the chart instead.
 
 ### §3.3 `EvidenceTimeline.tsx`
 

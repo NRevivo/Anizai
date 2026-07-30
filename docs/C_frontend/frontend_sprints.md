@@ -112,7 +112,7 @@ KG-C-13, KG-C-14 and KG-C-15 also closed the same day, and KG-C-10 closed
 |---|---|---|---|
 | Market comparison card (live data) | Slice 13 | Agent emits `marketProbability: null` and `marketComparison: []` | Agent populates them; shapes specified in `../backend-specs/market-sentiment-spec.md` |
 | Sentiment time series | Slice 13 | Agent writes no points | As above |
-| `predictionSeries` feature | Task 10 | Plumbed end-to-end but agent writes nothing and no client mapper reads it | A product decision to build probability-over-time; otherwise delete the plumbing |
+| `predictionSeries` feature | Task 10 | **Closed on the client side.** The product decision was made: `cards/MarketPriceHistory.tsx` renders the market's own price history against the Anizai forecast, with pure geometry in `lib/marketPriceChart.ts` (19 unit tests). Remaining dependency is Domain B actually writing the documents | — |
 | Tracking / follow feature | — | `followEnabled` / `isFollowing` written `false`, never updated, read by no UI | Product decision |
 | Router adoption | — | No router library; navigation is a `useState` union. Costs deep links, history, shareable URLs | A deliberate routing sprint — not a local fix |
 | Reasoning-trace retention | Sprint 25 | Rule A drops the agent timeline at `done`; events persist in Firestore but are never shown again | Product decision on whether a finished forecast should show how it was produced |

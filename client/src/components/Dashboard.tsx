@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
-import type { Prediction, SentimentDataPoint, TimelineEvent } from '../types';
+import type { MarketPricePoint, Prediction, SentimentDataPoint, TimelineEvent } from '../types';
 import { PredictionOverview } from './cards/predictionOverview';
 import { MarketComparison } from './cards/MarketComparison';
+import { MarketPriceHistory } from './cards/MarketPriceHistory';
 import { SentimentAnalysis } from './cards/SentimentAnalysis';
 import { EvidenceTimeline } from './cards/EvidenceTimeline';
 
@@ -9,11 +10,17 @@ interface DashboardProps {
     prediction: Prediction;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
+    marketPricePoints: MarketPricePoint[];
 }
 
 const HIGHLIGHT_DURATION_MS = 3500;
 
-export function Dashboard({ prediction, sentimentData, timelineEvents }: DashboardProps) {
+export function Dashboard({
+    prediction,
+    sentimentData,
+    timelineEvents,
+    marketPricePoints,
+}: DashboardProps) {
     // Evidence IDs to highlight when a Drivers/Headwinds factor is clicked.
     const [highlightedEvidenceIds, setHighlightedEvidenceIds] = useState<string[]>([]);
     const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,6 +77,19 @@ export function Dashboard({ prediction, sentimentData, timelineEvents }: Dashboa
                             insight={prediction.marketComparisonInsight}
                         />
                         <SentimentAnalysis data={sentimentData} insight={prediction.sentimentAnalysisInsight} />
+                    </div>
+
+                    {/* Full width, and directly under the market benchmark it
+                        extends: MarketComparison shows our number against one
+                        market price, this shows whether that price has been
+                        stable or moving. A time series with ~712 points needs
+                        the horizontal room, so it does not join the 2-up row. */}
+                    <div className="w-full">
+                        <MarketPriceHistory
+                            points={marketPricePoints}
+                            anizaiProbability={prediction.probability}
+                            tier={prediction.tier}
+                        />
                     </div>
 
                     <div className="w-full">
