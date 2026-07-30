@@ -82,7 +82,7 @@ export function Dashboard({
                     {/* Full width, and directly under the market benchmark it
                         extends: MarketComparison shows our number against one
                         market price, this shows whether that price has been
-                        stable or moving. A time series with ~712 points needs
+                        stable or moving. A time series with ~683 points needs
                         the horizontal room, so it does not join the 2-up row. */}
                     <div className="w-full">
                         <MarketPriceHistory

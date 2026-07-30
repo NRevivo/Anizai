@@ -32,13 +32,19 @@ function formatPercent(probability: number): string {
 }
 
 /**
- * The market's own price over the life of the market.
+ * The market's own recent price history.
  *
  * This is the benchmark's history, not a forecast history: every point is
  * Polymarket's YES price at an instant, written by the pipeline on the Tier-1
  * path only. It answers the question `MarketComparison` raises but cannot settle —
  * whether our number disagrees with a stable market or with one that has been
  * moving underneath it.
+ *
+ * ⚠ It is a **rolling ~30-day window at hourly resolution (~683 points), not the
+ * market's lifetime.** Nothing here may imply "full history" or "since
+ * inception" — a market open for a year shows only its last month. The footer
+ * states the actual range present rather than naming a window, so the card stays
+ * truthful if the pipeline retunes the window or the market is younger than it.
  */
 export function MarketPriceHistory({
     points,
@@ -173,7 +179,7 @@ export function MarketPriceHistory({
                                 strokeWidth={2}
                                 fill="url(#marketPriceGradient)"
                                 name="Market price"
-                                // ~712 points is the expected density. Per-point dots
+                                // ~683 points is the expected density. Per-point dots
                                 // would add that many DOM nodes for no signal, and the
                                 // entry animation re-tweens every vertex on each render.
                                 dot={data.length < DOT_THRESHOLD}

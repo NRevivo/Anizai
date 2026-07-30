@@ -14,7 +14,7 @@ const T0 = Date.UTC(2026, 6, 1, 12, 0, 0);
 
 function series(...probabilities: number[]): MarketPricePoint[] {
     return probabilities.map((probability, index) => ({
-        t: T0 + index * 10 * 60_000, // 10-minute resolution, the real cadence
+        t: T0 + index * HOUR, // hourly resolution, the real cadence
         probability,
     }));
 }
@@ -40,7 +40,7 @@ describe('buildMarketPriceChart', () => {
         const chart = buildMarketPriceChart(series(0.3, 0.4, 0.5), 0.5);
         expect(chart?.first.pct).toBe(30);
         expect(chart?.last.pct).toBe(50);
-        expect(chart?.spanMs).toBe(20 * 60_000);
+        expect(chart?.spanMs).toBe(2 * HOUR);
     });
 
     it('keeps a flat market from looking volatile', () => {
@@ -91,11 +91,39 @@ describe('buildMarketPriceChart', () => {
     });
 
     it('handles the expected production density', () => {
-        // ~712 points at 10-minute resolution is the stated contract volume.
-        const probabilities = Array.from({ length: 712 }, (_, i) => 0.3 + (i / 712) * 0.4);
+        // ~683 points at hourly resolution over a rolling ~30-day window — NOT
+        // the market's lifetime. A market open for a year still shows one month.
+        const probabilities = Array.from({ length: 683 }, (_, i) => 0.3 + (i / 683) * 0.4);
         const chart = buildMarketPriceChart(series(...probabilities), 0.5);
-        expect(chart?.data).toHaveLength(712);
-        expect(chart?.spanMs).toBe(711 * 10 * 60_000);
+        expect(chart?.data).toHaveLength(683);
+        expect(chart?.spanMs).toBe(682 * HOUR);
+        // ~28.4 days — the window, not an inception-to-now span.
+        expect(chart!.spanMs / DAY).toBeGreaterThan(27);
+        expect(chart!.spanMs / DAY).toBeLessThan(31);
+    });
+
+    it('produces a legible axis at the real 30-day hourly shape', () => {
+        // Re-checking both previously-fixed axis bugs at the corrected shape,
+        // since both were found at 10-minute spacing over ~5 days.
+        const probabilities = Array.from({ length: 683 }, (_, i) => 0.42 + Math.sin(i / 90) * 0.06);
+        const chart = buildMarketPriceChart(series(...probabilities), 0.5)!;
+
+        const labels = chart.xTicks.map((tick) => tick.label);
+        expect(new Set(labels).size).toBe(labels.length);
+
+        const gaps = chart.yTicks.slice(1).map((v, i) => v - chart.yTicks[i]);
+        expect(new Set(gaps).size).toBe(1);
+        expect(chart.yTicks.every((v) => Number.isInteger(v))).toBe(true);
+    });
+
+    it('keeps labels distinct for a market younger than the window', () => {
+        // The window is a ceiling, not a guarantee: a market opened 3 days ago
+        // yields ~72 points over 3 days. That is just past the 2-day clock
+        // threshold, so several ticks share a date and the dedupe must engage.
+        const probabilities = Array.from({ length: 72 }, (_, i) => 0.5 + i * 0.001);
+        const chart = buildMarketPriceChart(series(...probabilities), 0.5)!;
+        const labels = chart.xTicks.map((tick) => tick.label);
+        expect(new Set(labels).size).toBe(labels.length);
     });
 });
 

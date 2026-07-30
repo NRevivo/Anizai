@@ -240,8 +240,11 @@ Summaries longer than `SUMMARY_COLLAPSE_THRESHOLD = 400` characters collapse int
 
 ### §3.4 `MarketPriceHistory.tsx`
 
-The market's own YES price over the life of the market, from
-`sessions/{id}/predictionSeries`. Full width, placed directly under the
+The market's own recent YES price history, from `sessions/{id}/predictionSeries`.
+**A rolling ~30-day window at hourly resolution — not the market's lifetime.** A
+market open for a year shows only its last month, so nothing in the card may imply
+"full history" or "since inception"; the footer states the actual range present
+rather than naming a window. Full width, placed directly under the
 MarketComparison/SentimentAnalysis row and above the evidence feed: it extends the
 market benchmark rather than competing with it — `MarketComparison` shows our number
 against one market price, this shows whether that price was stable or moving
@@ -251,7 +254,7 @@ underneath it.
   so it branches on `tier`: `tier_2` says the forecast is freeform and resolves to no
   market; anything else says no price history was recorded. Neither is a loading
   state — the card only mounts inside `Dashboard`, which requires a finished forecast.
-- **Density.** ~712 points at ~10-minute resolution is the expected contract volume,
+- **Density.** ~683 points at hourly resolution is the expected contract volume,
   rendered in full with **no downsampling** — it is a single SVG path, and
   downsampling would erase exactly the spikes a bettor is looking for. `dot={false}`
   above 3 points and `isAnimationActive={false}` keep that cheap.
