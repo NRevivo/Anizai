@@ -70,9 +70,143 @@ CLOB_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 # Ingestion Parameters (Section B.8)
 # ==========================================================
 
-# SNR filter: only markets with cumulative volume above this threshold
-# are ingested. Prevents low-liquidity noise from entering Bronze.
-MIN_VOLUME_USD = 10_000         # $10k minimum market volume (Section 2.2)
+# SNR filter — applied at the EVENT level on CUMULATIVE volume (plan D1/F2).
+#
+# Why the event and not the market (D2): measured 2026-07-30, 17 of the top 25
+# markets above $1M were individual candidate legs of two 2028 nomination events
+# (LeBron James, Oprah Winfrey, MrBeast) — cheap perpetual longshots in 128-outcome
+# fields, near-worthless as forecasting signal, and each one severed from its
+# parent event's context. The event is the coherent forecasting unit.
+#
+# Why $500k and not $1M (D1): the $500k→$1M band carries substantive questions
+# (Trump impeachment, India–Pakistan strike, Iran enrichment, BoJ decision) while
+# $1M's floor is dominated by repetitive per-settlement Ukraine-map markets.
+#
+# `volume_min` filters on cumulative `volume`, server-side, and is genuinely
+# honoured (F2) — unlike `active`, which is silently ignored on /events (F7).
+EVENT_VOLUME_MIN_USD = 500_000
+
+# F3 — Gamma hard-caps `limit` at 100 on both /events and /markets regardless of
+# the value sent. The original defect asked for 500 and silently received 100.
+# Asking for more than the cap does not fail; it lies.
+GAMMA_PAGE_LIMIT = 100
+
+# F5 — plain offset paging works to offset 2000; ~2050+ returns HTTP 422 pointing
+# at /events/keyset. The keyset cursor (`after_cursor`) is honoured ONLY on the
+# /keyset routes — on plain /events it is silently ignored and re-returns page 1.
+# The target set is ~386 events, so this ceiling is headroom, not a constraint.
+GAMMA_MAX_OFFSET = 2_000
+
+# Run-over-run shrinkage beyond this fraction is reported as a WARNING (P3).
+# Sized against D6's measured churn (~8%/day, 90%+ day-over-day overlap): at an
+# hourly cadence an ordinary sweep moves by well under 1%, so 20% cannot be
+# resolution churn — it is a filter that stopped matching.
+EVENT_SET_SHRINK_WARN_RATIO = 0.20
+
+# ==========================================================
+# TARGET tag set (plan §1.1 — the D3 artifact)
+# ==========================================================
+# An event is IN if it carries >=1 TARGET tag, then dropped if it carries any
+# EXCLUDE tag. Tags live on the EVENT, never on the market (F10).
+#
+# Verified live 2026-07-30 against the 386-event >=$500k non-closed set:
+#   386 raw -> 253 after this include pass -> 240 after EXCLUDE -> 192 after the
+#   endDate filter -> 2,421 live nested markets -> 1,396 priceable.
+#
+# 13 of these ids matched zero events in that set (Earnings, Earnings Calls,
+# House Elections, India, North Korea, Nov 4 Elections, Pakistan, Trade War,
+# defense, eu, gpt, interest rates, monetary policy). They are RETAINED
+# deliberately: each carries a large active-event count platform-wide and is
+# merely below the $500k floor today, membership is re-derived every run (D6),
+# and a tag that matches nothing costs nothing.
+#
+# The 19 tags marked (tail) below were found by that same sweep and are NOT in
+# the plan's §1.1 list. Adding them nets ZERO events today — every one currently
+# co-occurs with Politics/Geopolitics/Elections — and they are included anyway,
+# as tail insurance. The failure they guard against is an event tagged ONLY
+# `Fed Rates` or ONLY `Strait of Hormuz`, carrying neither `Fed` nor `Iran`:
+# under the include set alone that event is invisible, and its absence looks
+# exactly like it not existing. A tag that matches nothing costs nothing, so the
+# asymmetry is entirely one-sided.
+TARGET_TAGS: dict[str, str] = {
+    # --- Geopolitics / wars: umbrella ---
+    "100265": "Geopolitics",     "101970": "World",         "101794": "Foreign Policy",
+    "464":    "Military Actions", "1289":   "Nuclear",       "101761": "Trade War",
+    "193":    "military",        "793":    "defense",
+    # --- Geopolitics: regions and named conflicts (D4 — subscribe by REGION,
+    #     never by conflict noun; `war`/`conflict`/`invasion`/`Sanctions` and the
+    #     rest all carry zero active events, re-confirmed 2026-07-30) ---
+    "78":     "Iran",            "95":     "Russia",        "180":    "Israel",
+    "154":    "Middle East",     "102486": "Ukraine Map",   "96":     "Ukraine",
+    "303":    "China",           "270":    "putin",         "104010": "Iran Ceasefire",
+    "246":    "Venezuela",       "734":    "UK",            "61":     "Gaza",
+    "192":    "NATO",            "103027": "Ukraine Peace Deal", "452": "zelensky",
+    "297":    "Hezbollah",       "101270": "Turkey",        "102305": "US-Iran",
+    "582":    "Houthis",         "867":    "Taiwan",        "102475": "Russia Capture",
+    "1476":   "eu",              "114":    "Syria",         "518":    "India",
+    "102498": "Trump-Zelenskyy", "351":    "North Korea",   "102477": "Trump-Putin",
+    "102824": "Trump x al-Sharaa", "1383": "Poland",        "872":    "Pakistan",
+    "104039": "U.S. x Iran",     "415":    "Peace Deal",    "104005": "Iran Regime",      # (tail)
+    "262":    "Strait of Hormuz", "104064": "Israel x Iran", "849":   "Lebanon",          # (tail)
+    "102304": "Khamenei",        "216":    "zelenskyy",     "103996": "Reza Pahlavi",     # (tail)
+    "102868": "Cuba",            "101569": "Greenland",                                   # (tail)
+    # --- Politics ---
+    "2":      "Politics",        "126":    "Trump",         "514":    "Congress",
+    "100199": "Senate",          "1628":   "Courts",        "102886": "President",
+    "101191": "Trump Presidency", "165":   "United States",                               # (tail)
+    # --- Elections ---
+    "144":    "Elections",       "1101":   "US Election",   "102289": "Midterms",
+    "103899": "House Elections", "102786": "Nov 4 Elections", "1597": "Global Elections",
+    "264":    "Primaries",       "902":    "primary elections", "104743": "Main Election",
+    "105438": "Intl Election Props",
+    "101206": "World Elections",                                                          # (tail)
+    # --- Macro & economy (Hit Price / Pre-Market deliberately omitted: the
+    #     substantive ladder markets arrive via Finance without the tick noise) ---
+    "120":    "Finance",         "102676": "Equities",      "100328": "Economy",
+    "1013":   "Earnings",        "102000": "Macro Indicators", "702":  "Inflation",
+    "101800": "Economic Policy", "159":    "Fed",           "370":    "GDP",
+    "103339": "Fed Chair",       "131":    "interest rates", "132":   "monetary policy",
+    "309":    "Oil",             "100196": "Fed Rates",     "101550": "Jerome Powell",    # (tail)
+    "101031": "Commodities",                                                              # (tail)
+    # --- Business ---
+    "107":    "Business",        "600":    "IPOs",          "102599": "IPO",
+    "102451": "Earnings Calls",  "105048": "OpenAI IPO",                                  # (tail)
+    # --- Technology ---
+    "1401":   "Tech",            "439":    "AI",            "101999": "Big Tech",
+    "537":    "OpenAI",          "285":    "sam altman",    "662":    "llm",
+    "473":    "gpt",             "102464": "GPT-5",
+}
+
+# Applied AFTER the include pass — an event carrying any of these is dropped even
+# if it also carries a TARGET tag. Verified 2026-07-30: this removes 13 of 253
+# events, and ZERO sports-family events (MLB/NFL/UFC/mma/Basketball/football)
+# survive into the final set, because `1` Sports catches them all upstream.
+#
+# Health and Science are absent by design (D3): Polymarket has effectively no
+# coverage (23 and 91 events; no general health tag exists), and what exists
+# arrives incidentally through Politics/Geopolitics.
+#
+# NOT included, and deliberately so: `101757` Recurring, `102127` Up or Down,
+# `102892` 5M, `102467` 15M, `102175` 1H, `84` Weather. §1.1g flagged these as
+# candidate exclusions to VERIFY before applying. Measured against the target
+# set they each touch ZERO events — they would neither drop the legitimate
+# periodic macro events that were the stated worry (Fed decisions, CPI) nor
+# remove any noise. Six inert filters are worse than none.
+EXCLUDE_TAGS: dict[str, str] = {
+    # --- Crypto (D3): more events than all target categories combined, but
+    #     overwhelmingly 1-market recurring price ticks. Only 41 events carry
+    #     both a target tag and a crypto tag, so excluding it costs almost
+    #     nothing. ---
+    "21":     "Crypto",          "1312":   "Crypto Prices", "336":    "token launch",
+    "100171": "Stablecoins",     "136":    "Airdrops",      "235":    "Bitcoin",
+    "39":     "Ethereum",        "101267": "XRP",           "818":    "Solana",
+    "101312": "Ripple",          "100178": "Dogecoin",      "102716": "BNB",
+    # --- Platform internals: a Polymarket display flag, not a topic ---
+    "102169": "Hide From New",
+    # --- Sports / games (only reachable when a target tag co-occurs) ---
+    "1":      "Sports",          "100639": "Games",         "100350": "Soccer",
+    "64":     "Esports",         "65":     "league of legends",
+}
 
 # "Whale" trade threshold — any single position exceeding this value
 # gets flagged in raw_payload so the Silver/Gold jobs can escalate
@@ -80,9 +214,20 @@ MIN_VOLUME_USD = 10_000         # $10k minimum market volume (Section 2.2)
 WHALE_THRESHOLD = 100_000       # $100k single-position whale alert
 
 # Polling intervals
-PRICE_POLL_SEC    = 300         # 5-min REST price snapshot (Section B.8: 5-10 min)
-COMMENT_POLL_SEC  = 1_200       # 20-min discussion sync    (Section B.8)
-MARKET_REFRESH_SEC = 300        # 5-min active market list refresh
+#
+# D7 — hourly, not 5-minutely, for both the price sweep and the market-list
+# refresh. Dense sampling bought density in our own time-series, and the frontend
+# price-history chart is not served from that series: it comes from the CLOB
+# prices-history endpoint (F12), which carries a market's full life at ~10-minute
+# granularity regardless of when we started collecting. So 5-minutely sampling
+# paid 12x the write volume for a chart that does not read it.
+#
+# At 1,396 collectable markets (measured 2026-07-30) hourly is ~33.5k rows/day,
+# ~235k over a week-long run — against the 93,607 rows that measured 415 ms on
+# the agent's resolver, so this stays well inside the 15 s PER_AGENT_TIMEOUT_S.
+PRICE_POLL_SEC    = 3_600       # hourly REST price snapshot (D7)
+COMMENT_POLL_SEC  = 1_200       # 20-min discussion sync     (Section B.8)
+MARKET_REFRESH_SEC = 3_600      # hourly active market list refresh (D7)
 
 # WebSocket reconnect delay on disconnect
 WS_RECONNECT_DELAY = 5          # seconds
@@ -125,6 +270,30 @@ def _parse_json_array(raw) -> list:
     return parsed if isinstance(parsed, list) else []
 
 
+def _pair_by_outcome_label(market: dict, value_field: str) -> Optional[dict]:
+    """
+    Pair each outcome LABEL with its corresponding entry in `value_field`.
+
+    Returns None when the two arrays cannot be aligned (mismatched lengths or no
+    outcomes at all), which every caller reads as "this market is unreadable".
+
+    Why this alignment lives in exactly one place:
+        Gamma returns `outcomes`, `outcomePrices` and `clobTokenIds` as three
+        separate, index-aligned, JSON-encoded arrays (F8). Any consumer that
+        reaches into one of them by POSITION is one reordering away from
+        silently reporting the complement — a 3% market published as 97%, or the
+        NO token charted as the YES line. Neither failure raises; both just look
+        like data. Doing the pairing once, by label, means that trap has a single
+        site to get right rather than one per caller.
+    """
+    labels = [str(label).strip() for label in _parse_json_array(market.get("outcomes"))]
+    values = _parse_json_array(market.get(value_field))
+
+    if not labels or len(labels) != len(values):
+        return None
+    return dict(zip(labels, values))
+
+
 def _extract_outcome_prices(market: dict) -> Optional[dict]:
     """
     Map outcome label -> price for one Gamma market.
@@ -134,19 +303,213 @@ def _extract_outcome_prices(market: dict) -> Optional[dict]:
     this market entirely" (T3); it never degrades to a zero, because a zero here
     is indistinguishable from a market the world genuinely prices at 0.
     """
-    labels = [str(label).strip() for label in _parse_json_array(market.get("outcomes"))]
-    prices = _parse_json_array(market.get("outcomePrices"))
-
-    if not labels or len(labels) != len(prices):
+    paired = _pair_by_outcome_label(market, "outcomePrices")
+    if paired is None:
         return None
 
     resolved: dict = {}
-    for label, price in zip(labels, prices):
+    for label, price in paired.items():
         try:
             resolved[label] = float(price)
         except (TypeError, ValueError):
             return None
     return resolved
+
+
+def _extract_clob_token_ids(market: dict) -> dict:
+    """
+    Map outcome label -> CLOB token id, e.g. {"Yes": "97186…", "No": "81470…"}.
+
+    P8 — why a dict and not the positional list this used to emit:
+        The CLOB price-history call that feeds the frontend chart
+        (`prices-history?market=<token_id>`) needs the YES token specifically.
+        A positional list forces every consumer to pick `[0]` and hope, which
+        reproduces the D3 label-not-index defect one level down: the chart would
+        render the NO side's history as the market's probability, inverting a 7%
+        market into 93%. The label is the only thing that identifies which token
+        is which, so the label travels with it.
+
+    Returns {} — not None — when the arrays cannot be aligned. An unreadable
+    token map degrades the chart; it does not invalidate the price, which is the
+    primary signal and is extracted independently. Skipping an otherwise
+    perfectly priceable market because its token ids were malformed would trade a
+    real measurement for a missing one.
+    """
+    paired = _pair_by_outcome_label(market, "clobTokenIds")
+    if paired is None:
+        return {}
+    return {label: str(token_id) for label, token_id in paired.items()}
+
+
+# ==========================================================
+# Event selection helpers (P1) — pure functions, no HTTP
+# ==========================================================
+# Kept module-level and side-effect free so the selection rules can be tested
+# against a captured /events response without a producer instance or a network
+# stub (plan G3).
+
+def _event_tag_ids(event: dict) -> set:
+    """
+    The set of tag ids carried by one Gamma event, as strings.
+
+    Tags live on the EVENT, never on the market (F10) — this is the whole
+    reason discovery moved to /events. Gamma returns tag ids as ints in some
+    responses and strings in others; normalising to str here means the
+    TARGET_TAGS / EXCLUDE_TAGS lookups cannot miss on type alone, which under
+    F6 would fail silently as "this event has no tags" rather than as an error.
+    """
+    ids = set()
+    for tag in event.get("tags") or []:
+        if isinstance(tag, dict) and tag.get("id") is not None:
+            ids.add(str(tag["id"]))
+    return ids
+
+
+def _event_passes_tag_filter(event: dict) -> bool:
+    """
+    D3: keep events carrying >=1 TARGET tag, then drop any carrying an EXCLUDE
+    tag. Exclusion wins over inclusion — a market tagged both `Politics` and
+    `Crypto` is a crypto price tick that mentions politics, not the reverse.
+    """
+    tag_ids = _event_tag_ids(event)
+    if not tag_ids & set(TARGET_TAGS):
+        return False
+    return not (tag_ids & set(EXCLUDE_TAGS))
+
+
+def _event_end_date_passed(event: dict, now: datetime) -> bool:
+    """
+    D5: True when the event's `endDate` is already in the past.
+
+    Measured 2026-07-30: 48 of 240 tag-passing events (20%) have an `endDate`
+    behind us while still reporting `closed=false`. Relying on `closed` alone
+    therefore means collecting — and forecasting — questions that have already
+    ended. `closed=false` is necessary but not sufficient.
+
+    An absent or unparseable `endDate` returns False (keep the event). A market
+    is not evidence of having ended just because Gamma omitted a field; the
+    agent-side resolved-market guard (A4) is the second line of defence.
+    """
+    raw = event.get("endDate") or ""
+    if not isinstance(raw, str) or not raw:
+        return False
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed < now
+
+
+def _market_skip_reason(market: dict) -> Optional[str]:
+    """
+    Why one nested market is not worth emitting a Bronze record for, or None
+    when it is collectable.
+
+    Two rejections, both quiet by design:
+      - "closed"       — the event is open but this leg has settled.
+      - "never_traded" — no `outcomePrices`. F9: a missing key means "never
+        traded", NOT an error. Every market lacking it has cumulative volume of
+        exactly $0 (n=7,224, max $0, zero exceptions).
+
+    Why quiet matters: 1,025 of the 2,421 live markets in the target set (42%)
+    are never-traded legs of large candidate fields. Routing those through
+    `_fetch_market_prices` would emit a WARNING per market per sweep — 24,600
+    warnings a day describing entirely normal data. A log that cries wolf 42%
+    of the time is a log nobody reads, which is how the original zero-price
+    defect survived 79 days. They are counted in the funnel instead (P2).
+
+    Returning the reason rather than a bare bool is what lets the funnel
+    distinguish "settled" from "never traded" — two very different signals if
+    either count moves unexpectedly.
+    """
+    if market.get("closed") is True:
+        return "closed"
+    if not _parse_json_array(market.get("outcomePrices")):
+        return "never_traded"
+    return None
+
+
+def _market_is_collectable(market: dict) -> bool:
+    """Predicate form of `_market_skip_reason` (plan G3 reads it this way)."""
+    return _market_skip_reason(market) is None
+
+
+def _verify_server_side_filters(events: list[dict]) -> list[str]:
+    """
+    Confirm the server-side query parameters actually took effect, by inspecting
+    the returned set — never by the absence of an HTTP error.
+
+    This exists because of F6: **Gamma silently accepts unknown query params and
+    returns HTTP 200.** A renamed or typo'd filter therefore looks exactly like a
+    working one. `volume_min`, `closed` and `order` are the three parameters this
+    producer's entire coverage story rests on, so each is re-derived from the
+    payload we got back:
+
+      - `volume_min` — no event may sit below the threshold (F2).
+      - `closed=false` — no event may report `closed=true` (F7: `active` is NOT
+        a functioning filter on /events, so `closed` carries the whole load).
+      - `order=volume24hr&ascending=false` — `volume24hr` must be non-increasing.
+        A silent revert to Gamma's oldest-first default is the exact shape of the
+        original defect.
+
+    Returns a list of human-readable complaints; empty means every filter held.
+    """
+    complaints: list[str] = []
+    if not events:
+        return complaints
+
+    below = [
+        e for e in events
+        if float(e.get("volume") or 0) < EVENT_VOLUME_MIN_USD
+    ]
+    if below:
+        complaints.append(
+            f"volume_min={EVENT_VOLUME_MIN_USD} did not hold: {len(below)} of "
+            f"{len(events)} events are below it (min "
+            f"${min(float(e.get('volume') or 0) for e in below):,.0f})"
+        )
+
+    still_closed = [e for e in events if e.get("closed") is True]
+    if still_closed:
+        complaints.append(
+            f"closed=false did not hold: {len(still_closed)} of {len(events)} "
+            f"events report closed=true"
+        )
+
+    volumes = [float(e.get("volume24hr") or 0) for e in events]
+    inversions = sum(
+        1 for earlier, later in zip(volumes, volumes[1:]) if later > earlier
+    )
+    if inversions:
+        complaints.append(
+            f"order=volume24hr&ascending=false did not hold: {inversions} "
+            f"descending-order violations across {len(events)} events"
+        )
+
+    return complaints
+
+
+def _attach_parent_event(market: dict, event: dict) -> dict:
+    """
+    Return a shallow copy of `market` carrying its parent event's identity.
+
+    Why explicit attachment rather than reading `market["events"][0]`: that
+    back-reference exists on markets fetched from /markets (F10, the other
+    direction) but is not guaranteed on markets arrived at by nesting from
+    /events. Carrying the parent forward explicitly means the payload builder
+    never has to care which endpoint the market came from, and `event_title` —
+    the picker's headline, and the only thing downstream that can NAME the
+    parent question — has a single source.
+
+    Underscore-prefixed keys mark these as ours, not Gamma's, so a future
+    reader does not mistake them for API fields.
+    """
+    enriched = dict(market)
+    enriched["_parent_event_id"] = str(event.get("id", "") or "")
+    enriched["_parent_event_title"] = str(event.get("title", "") or "")
+    return enriched
 
 
 # ==========================================================
@@ -182,48 +545,218 @@ class PolymarketProducer:
         # fetched — without it the two look identical in the logs, which is the
         # ambiguity that made the original zero-price bug invisible for 79 days.
         self._skipped_markets = 0
+        # P3: size of the previous sweep's event set, for shrinkage detection.
+        # None on the first sweep — there is nothing to compare against yet.
+        self._last_event_count: Optional[int] = None
 
     # ----------------------------------------------------------
     # Market Discovery (Gamma REST API)
     # ----------------------------------------------------------
 
-    def _fetch_active_markets(self) -> list[dict]:
+    def _fetch_events_page(self, offset: int) -> Optional[list[dict]]:
         """
-        Fetch active markets from the Gamma API and apply the $10k volume filter.
+        Fetch one page of the >=$500k non-closed event set.
 
-        Why filter at source: Section 2.2 mandates SNR optimisation. Only
-        high-conviction markets (volume > $10k) carry useful forecasting signal.
-        Low-liquidity markets are dominated by noise and would inflate downstream
-        processing costs.
+        Returns the page's events, or None when Gamma refuses the offset
+        (HTTP 422 — the F5 ceiling), which the caller treats as end-of-set
+        rather than as an error.
 
-        Returns:
-            List of market dicts enriched with: id, question, volume, liquidity,
-            conditionId, and tokens (each with tokenId and outcome label).
+        Parameter notes, all measured (plan §1):
+          - `closed=false` is the parameter that actually filters. `active` does
+            NOT exist on /events: true / false / absent return byte-identical
+            lists (F7). Sending it would look like a filter and be a no-op.
+          - `limit` is capped at 100 (F3). We send the cap rather than a larger
+            number so the request states what it will really get.
+          - `order=volume24hr&ascending=false` is honoured, and an invalid order
+            field returns HTTP 422 — so a typo here fails loudly rather than
+            silently reverting to oldest-first, which is precisely how the
+            original defect collected novelty contracts (F4).
         """
-        url = f"{GAMMA_API_BASE}/markets"
-        params = {"active": "true", "closed": "false", "limit": 500}
-        headers = _auth_headers()
-
-        response, duration_ms = timed_request(
-            lambda: requests.get(url, params=params, headers=headers, timeout=15)
+        params = {
+            "closed":     "false",
+            "limit":      GAMMA_PAGE_LIMIT,
+            "volume_min": EVENT_VOLUME_MIN_USD,
+            "order":      "volume24hr",
+            "ascending":  "false",
+            "offset":     offset,
+        }
+        response, _ = timed_request(
+            lambda: requests.get(
+                f"{GAMMA_API_BASE}/events",
+                params=params,
+                headers=_auth_headers(),
+                timeout=15,
+            )
         )
+        if response.status_code == 422:
+            return None
         response.raise_for_status()
 
-        markets = response.json()
-        if isinstance(markets, dict):
+        events = response.json()
+        if isinstance(events, dict):
             # Some API versions wrap in {"data": [...]}
-            markets = markets.get("data", [])
+            events = events.get("data", [])
+        return events if isinstance(events, list) else []
 
-        filtered = [
-            m for m in markets
-            if float(m.get("volume", 0) or 0) >= MIN_VOLUME_USD
-        ]
+    def _fetch_target_events(self) -> list[dict]:
+        """
+        Page the full >=$500k non-closed event set (D1), de-duplicated.
 
+        Why de-duplicate across pages: the set is ordered by `volume24hr`, which
+        changes between requests. A market rising or falling mid-sweep shifts the
+        window under us and can hand back an event we already hold. Keying on
+        event id makes the sweep idempotent regardless.
+
+        Why re-derive membership every run rather than pinning a list (D6):
+        cumulative volume cannot decrease, so entry is one-way (~+3/day) and exit
+        happens only on resolution (~-11/day) — roughly 8%/day churn against
+        90%+ day-over-day overlap. A pinned list would go stale in one direction
+        only, silently, which is the worst shape for a coverage bug.
+        """
+        events: list[dict] = []
+        seen: set = set()
+        truncated_by: Optional[str] = None
+        last_offset = 0
+
+        for offset in range(0, GAMMA_MAX_OFFSET + GAMMA_PAGE_LIMIT, GAMMA_PAGE_LIMIT):
+            last_offset = offset
+            if offset > GAMMA_MAX_OFFSET:
+                # We asked for more than plain offset paging can serve and the
+                # previous page was still full — the set is larger than we can
+                # reach this way.
+                truncated_by = "offset_ceiling"
+                break
+
+            page = self._fetch_events_page(offset)
+            if page is None:
+                truncated_by = "http_422"
+                break
+            if not page:
+                break
+
+            for event in page:
+                event_id = str(event.get("id", "") or "")
+                if event_id and event_id not in seen:
+                    seen.add(event_id)
+                    events.append(event)
+
+            # A short page is the natural end of the set (F3: full pages are
+            # exactly GAMMA_PAGE_LIMIT).
+            if len(page) < GAMMA_PAGE_LIMIT:
+                break
+
+        # P3 — a bound that truncates silently is the original defect with a
+        # bigger number. The first version of this producer asked for 500 markets,
+        # received Gamma's cap of 100, and said nothing; everything downstream then
+        # reasoned confidently about a fifth of the data. Any bound that stops the
+        # sweep early must therefore say so, with the actual figures.
+        if truncated_by is not None:
+            logger.warning(
+                "[polymarket] Event sweep TRUNCATED by %s at offset=%d after %d "
+                "events — the >=$%s set is larger than plain offset paging can "
+                "reach (F5). Coverage is incomplete; migrate to /events/keyset "
+                "with after_cursor if this persists.",
+                truncated_by, last_offset, len(events), f"{EVENT_VOLUME_MIN_USD:,}",
+            )
+
+        # A set that shrinks materially between runs is either real resolution
+        # churn or a filter that has quietly stopped working. D6 measured ~8%/day
+        # churn (~+3 entries, ~-11 exits per day) against 90%+ day-over-day
+        # overlap, so at an hourly cadence a normal run moves by well under 1%.
+        # Warning on ANY decrease would fire on ordinary churn and train the reader
+        # to ignore it — the threshold is what keeps this signal worth reading.
+        previous = self._last_event_count
+        if previous and len(events) < previous * (1.0 - EVENT_SET_SHRINK_WARN_RATIO):
+            logger.warning(
+                "[polymarket] Event set SHRANK from %d to %d (-%.0f%%) between "
+                "sweeps — beyond the %.0f%% churn threshold. Expect resolution "
+                "churn of well under 1%% per hour; a drop this size points at a "
+                "filter that stopped matching, not at markets closing.",
+                previous, len(events),
+                100.0 * (previous - len(events)) / previous,
+                100.0 * EVENT_SET_SHRINK_WARN_RATIO,
+            )
+        self._last_event_count = len(events)
+
+        return events
+
+    def _fetch_active_markets(self) -> list[dict]:
+        """
+        Discover the markets worth collecting: the >=$500k event set (D1),
+        filtered to the TARGET topic set (D3) and to events that have not
+        already ended (D5), flattened to their nested markets.
+
+        Why /events and not /markets — the defect this replaces:
+            The previous implementation asked /markets for
+            `{"active": "true", "closed": "false", "limit": 500}` with no
+            ordering, no pagination, and no topic filter. Gamma silently capped
+            that at 100 (F3) and defaults to oldest-first, so the collected
+            universe was novelty contracts ("Will Jesus Christ return before
+            GTA VI?"). Every downstream fix — real prices included — was
+            operating on the wrong markets.
+
+        Why the event is the selection unit: tags live on the event (F10), event
+        volume is the exact arithmetic sum of its nested markets (F1), and
+        market-level filtering severs each leg from its parent's context (D2).
+
+        Returns:
+            Nested market dicts, each carrying its parent event's identity via
+            `_parent_event_id` / `_parent_event_title`. Never-traded and settled
+            legs are already removed, so every element is priceable.
+        """
+        events = self._fetch_target_events()
+
+        # F6 defence — confirm the server-side params took effect before trusting
+        # the set they produced. A silently-ignored filter is indistinguishable
+        # from a working one at the HTTP layer.
+        for complaint in _verify_server_side_filters(events):
+            logger.warning("[polymarket] Gamma filter not honoured — %s", complaint)
+
+        collectable: list[dict] = []
+        now = datetime.now(timezone.utc)
+
+        tag_passed = 0
+        date_passed = 0
+        markets_seen = 0
+        skipped: dict = {"closed": 0, "never_traded": 0}
+
+        for event in events:
+            if not _event_passes_tag_filter(event):
+                continue
+            tag_passed += 1
+            if _event_end_date_passed(event, now):
+                continue
+            date_passed += 1
+
+            for market in event.get("markets") or []:
+                if not isinstance(market, dict):
+                    continue
+                markets_seen += 1
+                reason = _market_skip_reason(market)
+                if reason is not None:
+                    skipped[reason] += 1
+                    continue
+                collectable.append(_attach_parent_event(market, event))
+
+        # The funnel. Every stage is reported, every run — the previous
+        # implementation logged only a fetched/filtered pair, so a market lost to
+        # the topic filter looked identical to one that was never returned, and a
+        # collapse at any single stage was invisible. Read left to right, a
+        # healthy sweep looks like ~386 -> ~253 -> ~192 -> ~2,421 -> ~1,396
+        # (measured 2026-07-30); a zero anywhere is the alarm.
         logger.info(
-            "[polymarket] Market discovery: %d total fetched, %d pass $%dk filter",
-            len(markets), len(filtered), MIN_VOLUME_USD // 1_000,
+            "[polymarket] Discovery funnel: %d events fetched -> %d passed tags "
+            "-> %d passed endDate -> %d nested markets -> %d collectable "
+            "(skipped %d closed, %d never-traded)",
+            len(events), tag_passed, date_passed, markets_seen, len(collectable),
+            skipped["closed"], skipped["never_traded"],
+            # P5: exempt from 1% INFO sampling. This fires once per hourly
+            # refresh (24/day), and it is the only evidence that discovery ran
+            # and what it selected — at 1% it would surface roughly once every
+            # five days, which is indistinguishable from not logging it.
+            extra={"always_emit": True},
         )
-        return filtered
+        return collectable
 
     # ----------------------------------------------------------
     # Price Snapshots (CLOB REST API)
@@ -289,10 +822,19 @@ class PolymarketProducer:
         # T7 — preserve what the catalog needs. `endDate` was already fetched and
         # then dropped; `status` was hardcoded "active" downstream regardless of
         # real state, which would let the agent forecast a resolved market.
-        parent_event_id = ""
-        events = market.get("events")
-        if isinstance(events, list) and events and isinstance(events[0], dict):
-            parent_event_id = str(events[0].get("id", ""))
+        #
+        # P1: prefer the parent attached during the /events flatten. The
+        # `market["events"][0]` back-reference is the /markets-direction view of
+        # the same link (F10) and is kept as a fallback so this function still
+        # works on a standalone Gamma market object — which is exactly how the
+        # regression tests exercise it.
+        parent_event_id = str(market.get("_parent_event_id", "") or "")
+        event_title = str(market.get("_parent_event_title", "") or "")
+        if not parent_event_id or not event_title:
+            events = market.get("events")
+            if isinstance(events, list) and events and isinstance(events[0], dict):
+                parent_event_id = parent_event_id or str(events[0].get("id", ""))
+                event_title = event_title or str(events[0].get("title", "") or "")
 
         if market.get("closed") is True:
             market_status = "closed"
@@ -316,12 +858,24 @@ class PolymarketProducer:
             "outcome_prices":  outcome_prices,
             # Replaces the CLOB `tokens` list. Kept because a WebSocket revival
             # and the catalog both need the token ids.
-            "clob_token_ids":  [str(t) for t in _parse_json_array(market.get("clobTokenIds"))],
+            # P8: keyed by outcome label, mirroring `outcome_prices`. The CLOB
+            # history call needs the YES token by name, not by position.
+            "clob_token_ids":  _extract_clob_token_ids(market),
             "parent_event_id": parent_event_id,
+            # P1: without the event title nothing downstream can NAME the parent
+            # question — the picker's headline and the catalog's human label.
+            "event_title":     event_title,
             "end_date_iso":    str(market.get("endDateIso", "") or ""),
             "market_status":   market_status,
             "volume_24h_usd":  volume_24h,
-            "liquidity_usd":   float(market.get("liquidity", 0) or 0),
+            # F8: on MARKET objects `volume` and `liquidity` arrive as strings;
+            # `volumeNum` / `liquidityNum` are the float fields. (On EVENT objects
+            # `volume` is already a float — which is what the server-side
+            # `volume_min` threshold filters on.) Falling back to the string form
+            # keeps this correct against either shape.
+            "liquidity_usd":   float(
+                market.get("liquidityNum") or market.get("liquidity", 0) or 0
+            ),
             "end_date":        market.get("endDate", ""),
             # T4 — REST cannot detect a whale. The documented meaning is a single
             # trade over $100k (see WHALE_THRESHOLD); this path only ever saw
@@ -605,6 +1159,7 @@ class PolymarketProducer:
 
             self._skipped_markets = 0
             emitted = 0
+            zero_priced = 0
             started = time.monotonic()
 
             loop = asyncio.get_running_loop()
@@ -618,6 +1173,25 @@ class PolymarketProducer:
                         source_endpoint=f"{GAMMA_API_BASE}/markets",
                     )
                     emitted += 1
+                    if price_payload["price"] == 0.0:
+                        zero_priced += 1
+
+            # The zero-price tripwire. A single market at 0.0 is ordinary — a
+            # resolved-NO leg prices there honestly, which is why the Silver
+            # range guard accepts it. An ENTIRE sweep at 0.0 is not a market
+            # state, it is an extraction failure: exactly the shape of the defect
+            # that put 93,607 rows of zeros into the vault over 79 days while
+            # every component reported success. Checking the population rather
+            # than the individual value is what separates the two, and it costs
+            # one counter.
+            if emitted and zero_priced == emitted:
+                logger.warning(
+                    "[polymarket] ALL %d emitted prices this sweep are 0.0 — "
+                    "that is an extraction failure, not a market state. Check "
+                    "that Gamma still returns `outcomePrices` and that the "
+                    "affirmative outcome is still labelled %r.",
+                    emitted, AFFIRMATIVE_LABEL,
+                )
 
             # C7: the loop sleeps AFTER the sweep, so the real cadence is
             # "sweep duration + PRICE_POLL_SEC". Logging the duration makes that
@@ -627,6 +1201,9 @@ class PolymarketProducer:
                 "in %.1fs (next sweep in %ds)",
                 emitted, self._skipped_markets, len(markets),
                 time.monotonic() - started, PRICE_POLL_SEC,
+                # P5: same reasoning as the discovery funnel — one record per
+                # hourly sweep, and the only place emitted-vs-skipped is visible.
+                extra={"always_emit": True},
             )
 
             await asyncio.sleep(PRICE_POLL_SEC)
@@ -654,6 +1231,14 @@ class PolymarketProducer:
         exits early so the producer doesn't spam ~100 422 warnings every
         20-min cycle. Re-enable via `POLYMARKET_COMMENTS_ENABLED=true`
         once the API call signature is repaired.
+
+        LOAD WARNING before re-enabling (P1 blast radius): this loop makes one
+        HTTP call PER MARKET per cycle, and P1 grew `_active_markets` from the
+        ~100 markets Gamma silently returned to ~1,396. Re-enabling as-is takes
+        this from ~100 calls per 20-min cycle to ~1,396 — roughly 100k requests
+        a day. The enum fix must therefore land together with a bound (top-N
+        markets by volume, a longer cadence, or both). It is no longer the
+        one-line re-enable the paragraph above implies.
         """
         from config.settings import POLYMARKET_COMMENTS_ENABLED
         if not POLYMARKET_COMMENTS_ENABLED:

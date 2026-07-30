@@ -41,6 +41,8 @@ import pytest
 
 from ingestion.polymarket_producer import (
     AFFIRMATIVE_LABEL,
+    PolymarketProducer,
+    _extract_clob_token_ids,
     _extract_outcome_prices,
     _parse_json_array,
 )
@@ -58,25 +60,37 @@ def rest_market() -> dict:
         return json.load(f)
 
 
-def _payload_from(market: dict) -> dict:
+@pytest.fixture()
+def producer() -> PolymarketProducer:
     """
-    The REST payload `_fetch_market_prices` produces, rebuilt here without the
-    producer's network/asyncio scaffolding. Mirrors the emitted keys the Silver
-    mapper reads.
+    A producer with no Kafka connection.
+
+    `__init__` opens a Kafka producer, which these tests neither have nor need —
+    `_fetch_market_prices` is a pure transform over a Gamma object. Bypassing
+    __init__ and setting only the counters it touches keeps the REAL function
+    under test instead of a re-implementation of it (G1).
     """
-    prices = _extract_outcome_prices(market)
-    assert prices is not None, "fixture must be priceable"
-    return {
-        "payload_type": "price_update",
-        "ingestion_mode": "rest_snapshot",
-        "market_id": market.get("id", ""),
-        "condition_id": market.get("conditionId", ""),
-        "question": market.get("question", ""),
-        "price": prices[AFFIRMATIVE_LABEL],
-        "volume_24h_usd": float(market.get("volume24hr", 0) or 0),
-        "liquidity_usd": float(market.get("liquidity", 0) or 0),
-        "whale_alert": False,
-    }
+    p = PolymarketProducer.__new__(PolymarketProducer)
+    p._skipped_markets = 0
+    p._last_event_count = None
+    return p
+
+
+def _payload_from(producer: PolymarketProducer, market: dict) -> dict:
+    """
+    The REST payload the producer actually emits — obtained by CALLING
+    `_fetch_market_prices`, not by rebuilding it.
+
+    G1: this helper used to hand-assemble the payload dict. That made every
+    assertion below a test of `_extract_outcome_prices` → mapper, and left the
+    seam that matters — `_fetch_market_prices` → mapper — completely uncovered.
+    Renaming the `price` key in the producer would have kept this file green
+    while putting zeros back into the vault, which is the exact class of defect
+    the file exists to catch.
+    """
+    payload = producer._fetch_market_prices(market)
+    assert payload is not None, "fixture must be priceable"
+    return payload
 
 
 # ==========================================================
@@ -105,14 +119,14 @@ def test_parse_json_array_returns_empty_on_garbage():
 # [1] The regression guard for the original bug
 # ==========================================================
 
-def test_rest_snapshot_yields_non_zero_current_value(rest_market):
+def test_rest_snapshot_yields_non_zero_current_value(producer, rest_market):
     """
     THE assertion that was missing for 79 days.
 
     A real REST market must reach Silver with a real probability, not the
     `raw.get("price", 0.0)` default.
     """
-    payload = _payload_from(rest_market)
+    payload = _payload_from(producer, rest_market)
     envelope = build_bronze_message("polymarket", GAMMA_ENDPOINT, payload)
     silver = map_price_update_to_silver(payload, envelope)
 
@@ -121,17 +135,51 @@ def test_rest_snapshot_yields_non_zero_current_value(rest_market):
     assert 0.0 < current_value <= 1.0, f"probability out of range: {current_value}"
 
 
-def test_price_matches_the_yes_outcome(rest_market):
+def test_price_matches_the_yes_outcome(producer, rest_market):
     """The stored value is the YES price, not the NO price."""
     labels = _parse_json_array(rest_market["outcomes"])
     prices = [float(p) for p in _parse_json_array(rest_market["outcomePrices"])]
     expected = prices[labels.index(AFFIRMATIVE_LABEL)]
 
-    payload = _payload_from(rest_market)
+    payload = _payload_from(producer, rest_market)
     envelope = build_bronze_message("polymarket", GAMMA_ENDPOINT, payload)
     silver = map_price_update_to_silver(payload, envelope)
 
     assert silver["data_point"]["current_value"] == pytest.approx(expected)
+
+
+def test_producer_emits_the_key_the_mapper_reads(producer, rest_market):
+    """
+    G1's seam, asserted directly: the producer's output key and the mapper's
+    input key are the same string.
+
+    The two tests above would both survive a coordinated rename. This one
+    pins the contract itself, so renaming `price` on either side fails here
+    with an obvious message rather than silently reintroducing zeros.
+    """
+    payload = producer._fetch_market_prices(rest_market)
+    assert "price" in payload, (
+        "the Silver mapper reads raw['price'] — renaming this key in the "
+        "producer puts 0.0 back into momentum_vault silently"
+    )
+    assert payload["price"] == pytest.approx(payload["outcome_prices"]["Yes"])
+
+
+def test_unpriceable_market_emits_nothing_through_the_real_function(producer):
+    """
+    T3's contract, exercised through `_fetch_market_prices` rather than through
+    `_extract_outcome_prices` alone: a market with no Yes outcome produces no
+    payload at all, and is counted as skipped.
+    """
+    before = producer._skipped_markets
+    result = producer._fetch_market_prices({
+        "conditionId": "0xabc",
+        "question": "Team A vs Team B",
+        "outcomes": '["Team A", "Team B"]',
+        "outcomePrices": '["0.6", "0.4"]',
+    })
+    assert result is None
+    assert producer._skipped_markets == before + 1
 
 
 # ==========================================================
@@ -203,8 +251,9 @@ def test_missing_outcomes_is_unpriceable():
 
 def test_catalog_fields_available_on_the_gamma_object(rest_market):
     """
-    T7 preserves these in the payload. Asserting they exist upstream guards the
-    fixture against silently losing them.
+    Fixture guard only: these keys must exist UPSTREAM for the payload assertions
+    below to mean anything. This is deliberately not the catalog contract test —
+    see the next one.
     """
     assert rest_market.get("endDateIso"), "end date needed to refuse resolved markets"
     assert isinstance(rest_market.get("closed"), bool)
@@ -212,3 +261,59 @@ def test_catalog_fields_available_on_the_gamma_object(rest_market):
     events = rest_market.get("events")
     assert isinstance(events, list) and events, "parent event link must survive"
     assert events[0].get("id"), "parent event id is the catalog key"
+
+
+def test_catalog_fields_survive_onto_the_emitted_payload(producer, rest_market):
+    """
+    G2: the catalog contract, asserted where it actually matters.
+
+    The test above checks the GAMMA OBJECT carries these fields — which proves
+    nothing about what we emit. The producer could drop every one of them and
+    stay green. This asserts the emitted payload.
+    """
+    payload = _payload_from(producer, rest_market)
+
+    assert payload["parent_event_id"] == rest_market["events"][0]["id"]
+    assert payload["event_title"] == rest_market["events"][0]["title"]
+    assert payload["end_date_iso"] == rest_market["endDateIso"]
+    assert payload["market_status"] == "active"
+    assert payload["outcome_prices"] == {"Yes": 0.0795, "No": 0.9205}
+    assert payload["whale_alert"] is False, "REST cannot detect a whale (T4)"
+    assert payload["fetched_at"], "the Silver timestamp fallback reads this key"
+
+
+def test_clob_token_ids_are_keyed_by_outcome_label(producer, rest_market):
+    """
+    P8: token ids arrive as a dict keyed by outcome label, not a positional list.
+
+    The CLOB price-history call needs the YES token specifically. A positional
+    list forces the consumer to take `[0]` and hope, which charts the NO side and
+    inverts a 7% market into 93% — the D3 label-not-index trap one level down.
+    """
+    payload = _payload_from(producer, rest_market)
+    tokens = payload["clob_token_ids"]
+
+    assert isinstance(tokens, dict), "must be label-keyed, not positional"
+    assert set(tokens) == {"Yes", "No"}
+    assert set(tokens) == set(payload["outcome_prices"]), (
+        "token labels and price labels must agree — otherwise the YES price "
+        "and the YES token could describe different outcomes"
+    )
+
+    raw_ids = _parse_json_array(rest_market["clobTokenIds"])
+    raw_labels = _parse_json_array(rest_market["outcomes"])
+    assert tokens["Yes"] == raw_ids[raw_labels.index("Yes")]
+
+
+@pytest.mark.parametrize("market,expected", [
+    ({"outcomes": '["Yes","No"]', "clobTokenIds": '["a"]'}, {}),
+    ({"outcomes": '["Yes","No"]'}, {}),
+    ({"outcomes": "not json", "clobTokenIds": "not json"}, {}),
+    ({}, {}),
+])
+def test_unalignable_token_ids_degrade_to_empty_dict(market, expected):
+    """
+    An unreadable token map costs a chart, not a measurement. It must NOT skip
+    the market — the price is extracted independently and is the primary signal.
+    """
+    assert _extract_clob_token_ids(market) == expected
