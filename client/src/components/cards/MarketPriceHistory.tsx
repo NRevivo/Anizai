@@ -19,13 +19,60 @@ interface MarketPriceHistoryProps {
     /** The Anizai forecast, 0–1. Drawn as a reference line so the user can read
      *  our answer against where the market has actually traded. */
     anizaiProbability: number;
-    /** Distinguishes "freeform, no series was ever written" from "market forecast
-     *  whose series came back empty". Both arrive as `points: []`. */
+    /**
+     * Splits the empty case three ways — an empty `points` array on its own is
+     * ambiguous. See `emptyStateFor`.
+     */
     tier?: 'tier_1' | 'tier_2' | null;
 }
 
 /** Below this, a line has too few vertices to read as a line — show the points. */
 const DOT_THRESHOLD = 3;
+
+/**
+ * What an empty series means, which is NOT one thing.
+ *
+ * `points: []` conflates outcomes that differ for the user, and rendering one
+ * message for all of them — or worse, an empty chart frame — tells them nothing
+ * about whether anything went wrong:
+ *
+ *  - **tier_2** — freeform question, resolves to no market. Nothing was ever
+ *    written and nothing ever will be. Entirely expected; not a degradation.
+ *  - **tier_1** — the market WAS matched, so a series was expected. Its absence
+ *    means the price-history fetch degraded independently of the match (timeout,
+ *    budget exhausted). The forecast and the benchmark above are still valid,
+ *    which the copy has to say, or an absent chart reads as a broken forecast.
+ *  - **tier unknown** — no result tier to reason from. Claiming "market matched"
+ *    here would assert something unverified, so the copy stays neutral.
+ *
+ * Styling stays neutral for all three rather than warning-amber on the tier_1
+ * case: a degraded fetch is expected to happen sometimes, and amber on an
+ * expected outcome trains people to ignore amber. The wording carries it.
+ */
+export function emptyStateFor(tier: 'tier_1' | 'tier_2' | null): {
+    title: string;
+    description: string;
+} {
+    if (tier === 'tier_2') {
+        return {
+            title: 'No market benchmark',
+            description:
+                'This is a freeform forecast, so it resolves to no market and there is no price history to show.',
+        };
+    }
+    if (tier === 'tier_1') {
+        return {
+            title: 'Market matched, history unavailable',
+            description:
+                "This forecast is matched to a market, but its price history could not be retrieved. The forecast and the market benchmark above are unaffected — only the chart is missing.",
+        };
+    }
+    return {
+        title: 'No price history',
+        description:
+            'No price history is available for this forecast.',
+    };
+}
 
 function formatPercent(probability: number): string {
     return `${Math.round(probability * 100)}%`;
@@ -56,7 +103,10 @@ export function MarketPriceHistory({
         [points, anizaiProbability]
     );
 
+    // No chart frame in the empty case — an empty set of axes looks like a
+    // failed render and says nothing about which of the three outcomes occurred.
     if (!chart) {
+        const empty = emptyStateFor(tier);
         return (
             <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm">
                 <CardHeader className="p-4 sm:p-5 pb-2">
@@ -68,15 +118,7 @@ export function MarketPriceHistory({
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="p-4 sm:p-5 pt-2">
-                    <StateMessage
-                        compact
-                        title="No price history"
-                        description={
-                            tier === 'tier_2'
-                                ? 'This is a freeform forecast, so it resolves to no market and there is no price history to show.'
-                                : 'No price history was recorded for this market. The forecast above is unaffected.'
-                        }
-                    />
+                    <StateMessage compact title={empty.title} description={empty.description} />
                 </CardContent>
             </Card>
         );

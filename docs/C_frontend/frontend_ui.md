@@ -250,10 +250,20 @@ market benchmark rather than competing with it — `MarketComparison` shows our 
 against one market price, this shows whether that price was stable or moving
 underneath it.
 
-- **Absent vs. empty are worded differently.** Both reach the card as `points: []`,
-  so it branches on `tier`: `tier_2` says the forecast is freeform and resolves to no
-  market; anything else says no price history was recorded. Neither is a loading
-  state — the card only mounts inside `Dashboard`, which requires a finished forecast.
+- **An empty series is THREE outcomes, not two** (`emptyStateFor`). `points: []`
+  conflates cases that differ for the user, and one message for all of them — or an
+  empty chart frame — says nothing about whether anything went wrong:
+  | `tier` | Copy | Meaning |
+  |---|---|---|
+  | `tier_2` | "No market benchmark" | Freeform question, resolves to no market. Nothing was ever written; expected, not a degradation. |
+  | `tier_1` | "Market matched, history unavailable" | The market **was** matched, so a series was expected. Its absence means the price-history fetch degraded independently of the match (timeout, budget exhausted). The copy must say the forecast and benchmark still stand, or an absent chart reads as a broken forecast. |
+  | `null` | "No price history" | No result tier to reason from; claiming "market matched" would assert something unverified. |
+
+  Styling stays neutral for all three rather than warning-amber on the `tier_1` case:
+  a degraded fetch is expected to happen sometimes, and amber on an expected outcome
+  trains people to ignore amber. No chart frame is rendered in any of them. None is a
+  loading state — the card only mounts inside `Dashboard`, which requires a finished
+  forecast.
 - **Density.** ~683 points at hourly resolution is the expected contract volume,
   rendered in full with **no downsampling** — it is a single SVG path, and
   downsampling would erase exactly the spikes a bettor is looking for. `dot={false}`
