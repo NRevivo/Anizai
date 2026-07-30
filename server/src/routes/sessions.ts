@@ -17,6 +17,12 @@ const createSessionSchema = z.object({
     question: z.string().min(1).max(1000),
     title: z.string().max(200).optional(),
     idempotencyKey: z.string().trim().min(1).uuid(),
+    // Polymarket condition id, present only when the question came from a market
+    // pick. `nullish` rather than `optional`: the client sends `undefined` on the
+    // freeform path but an explicit `null` is equally valid, and rejecting either
+    // would break freeform submission — which has no market and never will.
+    // Not `.uuid()`; a condition id is a 0x-prefixed 32-byte hash, not a UUID.
+    conditionId: z.string().trim().min(1).max(200).nullish(),
 });
 
 const createMessageSchema = z.object({

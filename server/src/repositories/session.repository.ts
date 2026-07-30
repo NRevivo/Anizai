@@ -28,6 +28,7 @@ function mapSessionDoc(doc: FirebaseFirestore.QueryDocumentSnapshot): Session {
         followEnabled: data.followEnabled ?? false,
         isFollowing: data.isFollowing ?? false,
         canonicalKey: data.canonicalKey ?? null,
+        conditionId: data.conditionId ?? null,
         errorCode: data.errorCode ?? null,
         errorMessage: data.errorMessage ?? null,
         clarificationCandidates: (data.clarificationCandidates ?? null) as ClarificationCandidate[] | null,
@@ -187,6 +188,7 @@ export const sessionRepository = {
             followEnabled: data.followEnabled ?? false,
             isFollowing: data.isFollowing ?? false,
             canonicalKey: data.canonicalKey ?? null,
+            conditionId: data.conditionId ?? null,
             errorCode: data.errorCode ?? null,
             errorMessage: data.errorMessage ?? null,
             clarificationCandidates: (data.clarificationCandidates ?? null) as ClarificationCandidate[] | null,
@@ -420,6 +422,7 @@ export const sessionRepository = {
             followEnabled: false,
             isFollowing: false,
             canonicalKey: null,
+            conditionId: input.conditionId ?? null,
             errorCode: null,
             errorMessage: null,
             clarificationCandidates: null,
@@ -433,6 +436,11 @@ export const sessionRepository = {
             sessionId: sessionRef.id,
             userId,
             question: input.question,
+            // The market this question is a verbatim copy of, or null for
+            // freeform. Lets the pipeline join on
+            // `momentum_vault.external_reference_id` instead of text-matching
+            // the question. Always written, so consumers can read one shape.
+            conditionId: input.conditionId ?? null,
             status: 'pending' as const,
             createdAt,
             claimedAt: null,
@@ -477,6 +485,9 @@ export const sessionRepository = {
             sessionId: session.id,
             userId: session.userId,
             question: session.question,
+            // Carried forward from the session. Clarification refines the
+            // question's wording, not which market it refers to.
+            conditionId: session.conditionId ?? null,
             status: 'pending' as const,
             createdAt: updatedAt,
             claimedAt: null,

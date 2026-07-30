@@ -24,7 +24,12 @@ interface TrendingEvent {
 }
 
 interface CreateForecastViewProps {
-    onSubmit: (question: string, idempotencyKey: string) => Promise<void>;
+    /** `conditionId` is null for freeform questions, which resolve to no market. */
+    onSubmit: (
+        question: string,
+        idempotencyKey: string,
+        conditionId?: string | null
+    ) => Promise<void>;
     onOpenSubscription?: () => void;
     userPlan?: 'free' | 'premium';
     monthlyForecastsUsed?: number;
@@ -133,8 +138,8 @@ export function CreateForecastView({
         };
     }, [trimmedQuery, isSearchActive]);
 
-    const submit = (question: string) => {
-        void onSubmit(question, randomUUID()).catch(() => undefined);
+    const submit = (question: string, conditionId: string | null) => {
+        void onSubmit(question, randomUUID(), conditionId).catch(() => undefined);
     };
 
     /**
@@ -149,7 +154,7 @@ export function CreateForecastView({
     const handleEventSelect = (event: TrendingEvent) => {
         const inlineMarket = event.markets[0];
         if (event.marketCount === 1 && inlineMarket) {
-            submit(inlineMarket.question);
+            submit(inlineMarket.question, inlineMarket.conditionId);
             return;
         }
         setPickerFor(event);
@@ -287,9 +292,9 @@ export function CreateForecastView({
                     eventId={pickerFor.id}
                     eventTitle={pickerFor.question}
                     mutuallyExclusive={pickerFor.mutuallyExclusive}
-                    onSelect={(question) => {
+                    onSelect={(question, conditionId) => {
                         setPickerFor(null);
-                        submit(question);
+                        submit(question, conditionId);
                     }}
                     onClose={() => setPickerFor(null)}
                 />

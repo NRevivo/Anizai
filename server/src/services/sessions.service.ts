@@ -31,6 +31,16 @@ export interface Session {
     followEnabled: boolean;
     isFollowing: boolean;
     canonicalKey: string | null;
+    /**
+     * Polymarket condition id for the market this session's question came from,
+     * or null for a freeform question.
+     *
+     * Persisted on the session — not only on the queue document — so that
+     * `requeueClarifiedSession` can carry it onto the new `forecastQueries` doc.
+     * Without it here, any session that went through clarification would requeue
+     * with a null id and silently lose the deterministic join.
+     */
+    conditionId: string | null;
     errorCode: string | null;
     errorMessage: string | null;
     clarificationCandidates: ClarificationCandidate[] | null;
@@ -177,6 +187,8 @@ export interface CreateSessionInput {
     question: string;
     title?: string;
     idempotencyKey: string;
+    /** Polymarket condition id; absent/null for freeform questions. See Session. */
+    conditionId?: string | null;
 }
 
 export interface CreateMessageInput {

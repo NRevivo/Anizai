@@ -146,6 +146,16 @@ export interface CreateSessionInput {
     question: string;
     title?: string;
     idempotencyKey: string;
+    /**
+     * Polymarket condition id for the market this question came from.
+     *
+     * Optional, and genuinely so: a freeform question resolves to no market and
+     * sends nothing. Present only when the user picked a market, in which case
+     * `question` is that market's verbatim text — the id is the deterministic
+     * join key that spares the pipeline a text match against
+     * `momentum_vault.external_reference_id`.
+     */
+    conditionId?: string | null;
 }
 
 export interface CreateMessageInput {

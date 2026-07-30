@@ -151,7 +151,7 @@ All require auth. All enforce ownership before acting (§5).
 |---|---|---|---|---|
 | GET | `/sessions` | — | 200 `Session[]` | Default limit 50, `lastActivityAt` desc |
 | GET | `/sessions/:id` | — | 200 `SessionDetail` | Aggregate of 5 subcollection reads |
-| POST | `/sessions` | `question` 1–1000, `title?` ≤200, `idempotencyKey` UUID | **201** `Session` | Charges usage; writes session + queue doc |
+| POST | `/sessions` | `question` 1–1000, `title?` ≤200, `idempotencyKey` UUID, `conditionId?` 1–200 nullish | **201** `Session` | Charges usage; writes session + queue doc. `conditionId` is the Polymarket market id when the question came from a pick, absent/null for freeform — see contracts §2.2 |
 | POST | `/sessions/:id/messages` | `role` enum, `content` 1–50000, `meta?` | **201** `SessionMessage` | Also bumps `lastActivityAt` |
 | POST | `/sessions/:id/clarify` | `{ chosenCandidateId: string \| null }` | 200 `Session` | Requires status `awaiting_clarification` |
 | POST | `/sessions/:id/retry` | — | **201** `Session` | Requires status `failed` |

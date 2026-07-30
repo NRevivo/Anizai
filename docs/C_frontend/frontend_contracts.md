@@ -72,8 +72,21 @@ status fields. They are not interchangeable:
 | `forecastQueries/{id}` | `status` | `'pending'` | BFF (`session.repository.ts:436`) |
 
 `forecastQueries` documents also carry `queryId` (a fresh `randomUUID()`), `sessionId`,
-`userId`, `question`, `createdAt`, `claimedAt: null`, `claimedBy: null`. The agent
-claims by setting `claimedAt` / `claimedBy`.
+`userId`, `question`, `conditionId`, `createdAt`, `claimedAt: null`, `claimedBy: null`.
+The agent claims by setting `claimedAt` / `claimedBy`.
+
+**`conditionId`** (`string | null`) is the Polymarket condition id of the market the
+question came from — the deterministic join key against
+`momentum_vault.external_reference_id`, which spares the pipeline a text match. It is
+**always written**, so consumers read one shape; `null` is the freeform case, where the
+question resolves to no market and never will. An empty string is rejected at the route
+(`z.string().trim().min(1).max(200).nullish()`), so a broken id cannot masquerade as
+freeform. It is **not** a UUID — a condition id is a 0x-prefixed 32-byte hash.
+
+It is also persisted on `sessions/{id}`, not only on the queue document, because
+`requeueClarifiedSession` builds its queue doc from a `Session`. Without it there, any
+session that went through clarification would requeue with a null id and silently lose
+the join. Clarification refines the question's wording, not which market it refers to.
 
 ### §2.3 Queue-document creation paths
 

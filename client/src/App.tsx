@@ -676,11 +676,15 @@ function App() {
     }
   };
 
-  const handleCreateSession = async (question: string, idempotencyKey: string) => {
+  const handleCreateSession = async (
+    question: string,
+    idempotencyKey: string,
+    conditionId?: string | null
+  ) => {
     try {
       setAuthError(null);
       setIsDashboardLoading(true);
-      const created = await createSession({ question, idempotencyKey });
+      const created = await createSession({ question, idempotencyKey, conditionId });
       const sessionsData = await fetchSessions();
       setSessions(sessionsData);
       // Usage was just charged server-side, so refresh the profile to keep the
