@@ -1,7 +1,7 @@
 # frontend_contracts.md
 > Domain: C — Frontend / BFF
 > Type: Spec
-> Last updated: 2026-07-18
+> Last updated: 2026-07-30 (§2.2 gains the cross-domain `conditionId` status — written but unconsumed, and the camelCase/snake_case hop)
 > TL;DR: Every data shape crossing a boundary in Domain C — the session lifecycle, the REST wire types returned by `GET /sessions/:id`, the Firestore documents the client reads directly, and the mapping layer that turns both into view models. Open this for any question about what a field is called, what it holds, or who writes it.
 
 ## Navigation
@@ -106,6 +106,23 @@ than none.** The candidate's id still round-trips through `canonicalKey`, unchan
 ⚠️ `ClarificationCandidate.id` was annotated `// canonical market id` in
 `sessions.service.ts`. That comment was wrong and is what produced the carry-forward
 assumption in the first place; it now states what the field actually is.
+
+**Cross-domain status (verified 2026-07-30): the field is written but nothing reads
+it yet.** A `grep` for `condition_id` / `conditionId` across `data-pipeline/agent/`
+returns no reader of the queue document — only
+`agent/agents/market_bridge.py:223`, which refers to the *vault's*
+`external_reference_id`, a different thing one hop away. So writing it is currently
+inert: the pipeline still resolves by matching the question text, which works because
+the picker submits the market's verbatim `question` (§ above). This is expected — the
+field was added to light up the deterministic join *when* Domain B wires it, not to
+change behaviour now.
+
+**Two names for one value, one hop apart.** The queue document carries **camelCase
+`conditionId`** (BFF convention); the vault column it is meant to join against holds
+the **snake_case** `condition_id` written by `processing/silver_job.py`. Whoever wires
+the read must translate. This is the same shape as the evidence snake_case/camelCase
+trap in §3.5.1 — which the BFF already handles with a dual-read — and it is worth
+knowing before it costs someone an afternoon.
 
 ### §2.3 Queue-document creation paths
 

@@ -1,7 +1,8 @@
 # frontend_ui.md
 > Domain: C — Frontend / BFF
 > Type: Spec
-> Last updated: 2026-07-18
+> Last updated: 2026-07-30 (§3.4 density corrected against measured data + stale-zero
+> artefact recorded; §6.3 real-data verification added)
 > TL;DR: The React SPA's screens and components — the routerless `AppState` model, the 12 screens, the dashboard card composition, the two live-render rules that govern the agent timeline, and which UI states actually exist. Open this before changing a screen, adding a card, or reasoning about what renders during a run.
 
 ## Navigation
@@ -10,7 +11,8 @@
 - §3 — Dashboard Composition — shell → cards → subcomponents
 - §4 — Live Surfaces — Rule A and Rule B, the agent timeline
 - §5 — UI States — status, loading, empty, error, and their implementations
-- §6 — Styling — Tailwind, primitives, palettes, markdown
+- §6 — Styling — Tailwind, primitives, palettes, markdown; §6.2 responsive
+  verification, §6.3 real-data verification
 - §7 — Known Constraints
 
 ---
@@ -241,18 +243,19 @@ Summaries longer than `SUMMARY_COLLAPSE_THRESHOLD = 400` characters collapse int
 ### §3.4 `MarketPriceHistory.tsx`
 
 The market's own recent YES price history, from `sessions/{id}/predictionSeries`.
-**A rolling ~30-day window at hourly resolution — not the market's lifetime.** A
-market open for a year shows only its last month, so nothing in the card may imply
-"full history" or "since inception"; the footer states the actual range present
-rather than naming a window. Full width, placed directly under the
+**A rolling ~30-day window — not the market's lifetime.** A market open for a year
+shows only its last month, so nothing in the card may imply "full history" or "since
+inception"; the footer states the actual range present rather than naming a window.
+(Spacing inside that window is **not** hourly — see Density below.) Full width, placed directly under the
 MarketComparison/SentimentAnalysis row and above the evidence feed: it extends the
 market benchmark rather than competing with it — `MarketComparison` shows our number
 against one market price, this shows whether that price was stable or moving
 underneath it.
 
 - **Loads itself, lazily.** The card fetches `GET /sessions/:id/predictionSeries` when
-  it first comes within 300px of the viewport, not on mount — ~683 documents for a
-  card most readers never scroll to. Same split, and the same reasoning, as `markets[]`
+  it first comes within 300px of the viewport, not on mount — several hundred
+  documents (409 on the one real series measured) for a card most readers never
+  scroll to. Same split, and the same reasoning, as `markets[]`
   moving out of `/trending`. Note this **moves** the read cost rather than removing it:
   a reader who does scroll pays exactly what they paid before, just later and off the
   blocking path. Falls back to loading immediately where `IntersectionObserver` is
@@ -278,10 +281,37 @@ underneath it.
   trains people to ignore amber. No chart frame is rendered in any of them. None is a
   loading state — the card only mounts inside `Dashboard`, which requires a finished
   forecast.
-- **Density.** ~683 points at hourly resolution is the expected contract volume,
-  rendered in full with **no downsampling** — it is a single SVG path, and
-  downsampling would erase exactly the spikes a bettor is looking for. `dot={false}`
-  above 3 points and `isAnimationActive={false}` keep that cheap.
+- **Density — measured, and it does not match the contract.** The finalised contract
+  describes **~683 points at hourly resolution**. Real data does not. The only real
+  Tier-1 series measured (session `wZkTBugOtShtWhfIdC7a`, 2026-07-30) holds **409
+  points across 598 hours — ~88-minute average spacing, not hourly.**
+
+  The series appears to be built from the vault rows that exist, **with their gaps**,
+  rather than resampled onto a fixed cadence. So the point count tracks collection
+  coverage rather than elapsed time, and spacing is uneven. **Consumers must not
+  assume even spacing, hourly cadence, or a minimum point count.** The axis logic is
+  span-driven (`buildTimeTicks` derives ticks from first/last, not from an assumed
+  interval), so irregular spacing does not affect it — but anything that divides by an
+  assumed interval would be wrong.
+
+  Whatever the count, it renders in full with **no downsampling** — it is a single SVG
+  path, and downsampling would erase exactly the spikes a bettor is looking for.
+  `dot={false}` above 3 points and `isAnimationActive={false}` keep that cheap.
+- **⚠ Stale-zero artefact — the chart can show a jump that is not market movement.**
+  Every Polymarket vault row written before the 2026-07-29 price fix carries
+  `current_value = 0`: the producer never extracted a price, so Silver stored the
+  `0.0` default on all 93,607 rows. Those rows are still inside the 30-day window.
+
+  A series spanning that boundary therefore renders a **flat 0% line that jumps to the
+  real price at the moment of the fix** — which reads as a dramatic market move and is
+  nothing of the kind. It is an artefact of the old rows, not of the market.
+
+  **Treat any pre-2026-07-29 segment as unmeasured, not measured-zero.** The card
+  cannot detect this and no code change can: a stored zero from before the fix and a
+  genuine 0% market are byte-identical on the wire. It resolves only when those rows
+  age out of the window or are wiped. Until then it is the most likely way this card
+  misleads someone — a reader who does not know it will read a data migration as a
+  market repricing.
 - **`confidence` is never plotted.** The pipeline writes a constant `1.0`; the field
   is dropped at the mapper so no band can be derived from it (see contracts §6).
 - **Axis rules live in `lib/marketPriceChart.ts`** (19 unit tests) because a
@@ -728,6 +758,40 @@ modal to **359 px** with 8 px margins. Both fit. The overflow risk
 > picker — none had reachable state during the run. Their responsive behavior remains
 > source-verified only. (The trending panel itself was replaced on 2026-07-28; the
 > new-forecast screen that superseded it was browser-checked at 375 and desktop.)
+
+
+### §6.3 Real-data verification — 2026-07-30
+
+§6.2 proved the layout holds. This proves the two market surfaces render **real
+pipeline data** — which, until this date, they never had. Every Polymarket row in
+`momentum_vault` read `0`, so `MarketComparison` showed 0.0% and
+`MarketPriceHistory` had nothing to draw. Both had only ever been exercised against
+absent or zero data.
+
+Run immediately after the pipeline's Bronze → vault hop was verified in production
+for the first time (non-zero vault rows **0 → 700**).
+
+| Forecast | Tier | Market Benchmark | Price history | Result |
+|---|---|---|---|---|
+| Will JD Vance win the 2028 US Presidential Election? | `tier_1` | Anizai 20.0% vs market **20.1%** | renders | ✅ |
+| China invades Taiwan before GTA VI? | `tier_1` | Anizai 45% vs market **50.5%** | renders | ✅ |
+| Two freeform questions | `tier_2` | "No market benchmark" | "No market benchmark" | ✅ |
+
+**What this establishes.** A market-resolved forecast renders a real benchmark and a
+real series end to end, and the freeform path renders the correct empty state rather
+than a broken chart or an empty axis frame.
+
+**What it does not.** The `tier_1`-with-empty-series branch — "Market matched, history
+unavailable", the degraded-fetch case — had **no reachable state** during the run and
+remains **source-verified and unit-tested only**. Nor does this pass clear the
+stale-zero artefact (§3.4): it was present in both rendered charts by construction,
+since every point before 2026-07-29 is a stored zero.
+
+**Coverage is the limiting factor, not the code.** Markets in the vault render;
+markets never collected do not. Fed and Israel–Iran ceasefire forecasts were tried and
+correctly showed empty states — same code, same deployment, the only difference being
+what the producer had collected. Closing that is Domain A's ordering fix
+(`order=volume24hr&ascending=false`), not a client change.
 
 ---
 
