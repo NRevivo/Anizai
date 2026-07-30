@@ -13,7 +13,12 @@ import * as usersService from './users.service.js';
 // ─────────────────────────────────────────────────────────────
 
 export interface ClarificationCandidate {
-    id: string;                                  // canonical market id
+    // A freshly generated UUID4, NOT a market identifier — the agent has no
+    // canonical Polymarket id to offer pre-vector-index
+    // (`agent/nodes/query_understand.py:380`). It exists only to round-trip the
+    // user's choice back as `chosenCandidateId` into `canonicalKey`. Never put
+    // it in `conditionId`: it can never match a Polymarket condition id.
+    id: string;
     label: string;                               // human-readable
     source: 'polymarket' | 'kalshi';
     description: string;                         // resolution criteria / longer context
@@ -32,13 +37,14 @@ export interface Session {
     isFollowing: boolean;
     canonicalKey: string | null;
     /**
-     * Polymarket condition id for the market this session's question came from,
-     * or null for a freeform question.
+     * Polymarket condition id of the market this session is currently pinned to,
+     * or null when it is not pinned to one — a freeform question, or a session
+     * that has been through clarification.
      *
-     * Persisted on the session — not only on the queue document — so that
-     * `requeueClarifiedSession` can carry it onto the new `forecastQueries` doc.
-     * Without it here, any session that went through clarification would requeue
-     * with a null id and silently lose the deterministic join.
+     * **Cleared on clarification, never carried.** Clarification is market
+     * selection, not rewording, so the original id would pin the forecast to the
+     * wrong market. See `requeueClarifiedSession` for why the chosen candidate's
+     * id cannot replace it either.
      */
     conditionId: string | null;
     errorCode: string | null;

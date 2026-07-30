@@ -83,10 +83,29 @@ question resolves to no market and never will. An empty string is rejected at th
 (`z.string().trim().min(1).max(200).nullish()`), so a broken id cannot masquerade as
 freeform. It is **not** a UUID — a condition id is a 0x-prefixed 32-byte hash.
 
-It is also persisted on `sessions/{id}`, not only on the queue document, because
-`requeueClarifiedSession` builds its queue doc from a `Session`. Without it there, any
-session that went through clarification would requeue with a null id and silently lose
-the join. Clarification refines the question's wording, not which market it refers to.
+It is also persisted on `sessions/{id}`, where it records the market the session is
+**currently** pinned to.
+
+**Clarification clears it — on both documents — and never carries it forward.**
+Clarification *is* market selection, not rewording: the candidate list asks "which
+market did you mean?". Carrying the original id would pin the forecast to the first
+market while the user has just chosen a different one, producing a confident and
+silently wrong answer — real price, `tier_1`, a rendered chart, wrong market.
+
+The chosen candidate's id **cannot replace it either**. Candidate ids are freshly
+generated UUID4s, not market identifiers
+(`data-pipeline/agent/nodes/query_understand.py:380`); the agent has no canonical
+Polymarket id to offer, because that needs a vector index that does not exist yet.
+Writing one into `conditionId` would put a value in the join key that can never match
+`momentum_vault.external_reference_id`.
+
+Null is therefore the correct outcome on every clarification path: **no id falls back
+to question matching, against the text the user just corrected, and a stale id is worse
+than none.** The candidate's id still round-trips through `canonicalKey`, unchanged.
+
+⚠️ `ClarificationCandidate.id` was annotated `// canonical market id` in
+`sessions.service.ts`. That comment was wrong and is what produced the carry-forward
+assumption in the first place; it now states what the field actually is.
 
 ### §2.3 Queue-document creation paths
 

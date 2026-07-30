@@ -213,9 +213,9 @@ describe('sessionRepository.createSession', () => {
             conditionId: '0x723822eb2b143cee54c0bd7c1efba322b21f0051984c266df8879c394f1011c0',
         });
 
-        // Also persisted on the session, so requeueClarifiedSession can carry it
-        // forward. Without it there, a clarified session requeues with a null id
-        // and silently loses the join.
+        // Also persisted on the session, which records the market this session is
+        // currently pinned to. Explicitly NOT so that clarification can carry it
+        // forward — clarification clears it. See the requeue tests below.
         expect(sessionData).toMatchObject({
             conditionId: '0x723822eb2b143cee54c0bd7c1efba322b21f0051984c266df8879c394f1011c0',
         });
@@ -230,6 +230,61 @@ describe('sessionRepository.createSession', () => {
 
         expect(mocks.setMock.mock.calls[0][1]).toMatchObject({ conditionId: null });
         expect(mocks.setMock.mock.calls[1][1]).toMatchObject({ conditionId: null });
+    });
+
+    // ==========================================================
+    // Clarification is market SELECTION, not rewording. These two guard the
+    // silent-wrong-answer case: a forecast that renders green — real price,
+    // tier_1, a chart — about a market the user did not choose.
+    // ==========================================================
+
+    it('CLEARS conditionId on requeue when the user picked a candidate', async () => {
+        // The candidate id is a UUID4, not a market identifier
+        // (agent/nodes/query_understand.py:380), so it cannot replace the old id.
+        // Null is correct: it falls back to matching the corrected question text.
+        await sessionRepository.requeueClarifiedSession(
+            {
+                id: 'session-clarified',
+                userId: 'user-9',
+                question: 'Will the Fed hold rates in September?',
+                conditionId: '0x723822eb2b143cee54c0bd7c1efba322b21f0051984c266df8879c394f1011c0',
+                canonicalKey: null,
+            } as never,
+            {
+                id: 'b3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+                label: 'Fed Decision in December',
+                source: 'polymarket',
+                description: 'Forecast question about Fed rates',
+                matchConfidence: 0.81,
+            } as never
+        );
+
+        const forecastQueryData = mocks.setMock.mock.calls[0][1];
+        expect(forecastQueryData.conditionId).toBeNull();
+        // The candidate's UUID must never leak into the market join key.
+        expect(forecastQueryData.conditionId).not.toBe('b3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d');
+
+        // Cleared on the session too, so it never reads as the current market.
+        const [, sessionUpdate] = mocks.updateMock.mock.calls[0];
+        expect(sessionUpdate.conditionId).toBeNull();
+        // The candidate id still round-trips through canonicalKey, unchanged.
+        expect(sessionUpdate.canonicalKey).toBe('b3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d');
+    });
+
+    it('CLEARS conditionId on requeue when no candidate was selected', async () => {
+        await sessionRepository.requeueClarifiedSession(
+            {
+                id: 'session-clarified-2',
+                userId: 'user-9',
+                question: 'Will rates hold?',
+                conditionId: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+                canonicalKey: null,
+            } as never,
+            null
+        );
+
+        expect(mocks.setMock.mock.calls[0][1].conditionId).toBeNull();
+        expect(mocks.updateMock.mock.calls[0][1].conditionId).toBeNull();
     });
 
     it('queryId is a UUID v4 distinct from sessionId', async () => {
