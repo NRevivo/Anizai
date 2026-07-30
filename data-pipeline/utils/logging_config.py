@@ -233,6 +233,27 @@ class _SampledInfoFilter(logging.Filter):
     the LOG_INFO_SAMPLE_RATE environment variable (default 0.01).
     Set LOG_INFO_SAMPLE_RATE=1.0 in .env to see all INFO during dev.
 
+    Per-record exemption — `extra={"always_emit": True}`:
+        A once-per-sweep summary is not a per-message log. At the Polymarket
+        producer's hourly cadence its funnel line fires 24 times a day, so 1%
+        sampling gives it a ~21% chance of appearing even once in 24 hours —
+        which is why the coverage defect it describes stayed invisible.
+
+        The tempting remedy, LOG_INFO_SAMPLE_RATE=1.0, is the wrong lever and
+        was withdrawn after it took the pipeline down (KG-B-4): it unsamples
+        every INFO in the process, including the per-message ones this policy
+        exists to suppress. This flag opts in a specific, low-frequency,
+        operationally-load-bearing record instead.
+
+        Defaults to False via getattr, so no existing caller changes behaviour.
+        It does NOT bypass the root logger's level gate — an exempt INFO record
+        still requires INFO to be enabled.
+
+        Use it only for records that are (a) bounded in frequency by a sweep or
+        a cycle, not by message volume, and (b) the primary evidence that some
+        stage did or did not do its job. Marking a per-message record with this
+        re-creates the flood the policy prevents.
+
     References:
         - Section 7.2: Sampling-Based Logging (1% INFO, 100% ERROR)
     """
@@ -240,6 +261,8 @@ class _SampledInfoFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if record.levelno >= logging.WARNING:
             return True                          # WARNING / ERROR / CRITICAL
+        if getattr(record, "always_emit", False):
+            return True                          # per-record exemption
         if record.levelno == logging.INFO:
             return random.random() < INFO_SAMPLE_RATE
         return True                              # DEBUG — gate is upstream
