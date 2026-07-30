@@ -60,9 +60,20 @@ ENV PYTHONPATH=/app
 # behaviour, not a fault. Several earlier investigations concluded ingestion was
 # dead on that evidence; it was not.
 #
-# Consequence for anyone verifying a run: set LOG_INFO_SAMPLE_RATE=1.0 on the
-# producer for the window, or the per-sweep emitted/skipped/total counters will
-# themselves be sampled away.
+# Consequence for anyone verifying a run: nothing to set. The two records that
+# matter — the discovery funnel and the per-sweep emitted/skipped/total line —
+# now carry `extra={"always_emit": True}` and bypass sampling per-record
+# (`utils/logging_config.py`, _SampledInfoFilter). They are emitted in full at
+# the default 1% rate.
+#
+# Do NOT reach for LOG_INFO_SAMPLE_RATE=1.0, which an earlier revision of this
+# comment recommended. That flag is process-wide: it unsamples every INFO record
+# in the container, including the per-message ones the policy exists to suppress.
+# The same recommendation was applied to the agent and took the pipeline down; it
+# was withdrawn and reopened as a KG. The underlying OOM mechanism is still
+# unresolved (KG-A-17), so the safe assumption is that unsampling a high-volume
+# INFO stream in this cluster is load-bearing, not cosmetic. Exempt the specific
+# record instead.
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "-m", "ingestion.polymarket_producer"]
