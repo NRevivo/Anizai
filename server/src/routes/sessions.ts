@@ -87,6 +87,32 @@ router.get('/sessions/:id', async (req, res, next) => {
 });
 
 /**
+ * GET /sessions/:id/predictionSeries
+ * The market's price history for one session.
+ *
+ * Separate from `GET /sessions/:id` so ~683 documents stay off the blocking path
+ * of every session open — the chart is below the fold and most readers never
+ * reach it. Fetched when the card scrolls into view. See the service for the
+ * full rationale.
+ */
+router.get('/sessions/:id/predictionSeries', async (req, res, next) => {
+    try {
+        const user = req.user as AuthUser;
+        const sessionId = req.params.id as string;
+
+        const series = await sessionsService.getPredictionSeries(sessionId, user.uid);
+
+        const response: ApiSuccessResponse = {
+            data: series,
+        };
+
+        res.json(response);
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
  * POST /sessions
  * Create a new session
  */

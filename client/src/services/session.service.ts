@@ -136,7 +136,6 @@ export interface PredictionPoint {
 export interface SessionDetail {
     session: SessionListItem;
     messages: SessionMessage[];
-    predictionSeries: PredictionPoint[];
     evidence: Evidence[];
     result: SessionResult | null;
     sentimentTimeSeries: SentimentDataPoint[];
@@ -241,6 +240,23 @@ export async function fetchSessions(): Promise<SessionListItem[]> {
 
 export async function fetchSessionDetail(sessionId: string): Promise<SessionDetail> {
     return apiRequest<SessionDetail>(`/sessions/${sessionId}`);
+}
+
+/**
+ * The market's price history for one session.
+ *
+ * Deliberately NOT part of `fetchSessionDetail`: the series is ~683 documents,
+ * an order of magnitude more than anything else on that response, and the chart
+ * that renders it sits below the fold. Fetched when the card scrolls into view.
+ *
+ * **Rethrows**, like `fetchTrendingMarkets` and unlike `fetchTrendingForecasts`.
+ * It backs a visible card that must distinguish "still loading" from "failed"
+ * from "there is genuinely nothing" — three states the card words differently.
+ * Degrading to `[]` here would render a failed request as "no price history",
+ * which is the fabricated-certainty failure the whole card is built to avoid.
+ */
+export async function fetchPredictionSeries(sessionId: string): Promise<PredictionPoint[]> {
+    return apiRequest<PredictionPoint[]>(`/sessions/${sessionId}/predictionSeries`);
 }
 
 export async function createSession(input: CreateSessionInput): Promise<SessionListItem> {

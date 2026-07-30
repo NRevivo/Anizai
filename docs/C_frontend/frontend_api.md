@@ -7,7 +7,7 @@
 ## Navigation
 - §1 — Overview — what the BFF does and where it stops
 - §2 — Response Envelope — the `{ data }` / `{ error }` contract
-- §3 — Route Matrix — all 14 routes, auth, validation, status codes
+- §3 — Route Matrix — all 15 routes, auth, validation, status codes
 - §4 — Middleware Chain — registration order and why it matters
 - §5 — Auth & Ownership — token verification and the ownership check
 - §6 — Error Codes — the register, incl. `PLAN_LIMIT_EXCEEDED`
@@ -71,7 +71,7 @@ Every response is wrapped. Defined in `server/src/types/api.ts`.
 
 ## §3 — Route Matrix
 
-14 routes across 6 routers. `Auth` = requires the `authMiddleware` Bearer check.
+15 routes across 6 routers. `Auth` = requires the `authMiddleware` Bearer check.
 
 ### §3.1 Public
 
@@ -150,7 +150,8 @@ All require auth. All enforce ownership before acting (§5).
 | Method | Path | Validation | Success | Notes |
 |---|---|---|---|---|
 | GET | `/sessions` | — | 200 `Session[]` | Default limit 50, `lastActivityAt` desc |
-| GET | `/sessions/:id` | — | 200 `SessionDetail` | Aggregate of 5 subcollection reads |
+| GET | `/sessions/:id` | — | 200 `SessionDetail` | Aggregate of 4 subcollection reads. `predictionSeries` is **not** included — see the row below |
+| GET | `/sessions/:id/predictionSeries` | — | 200 `PredictionPoint[]` | The market's price history, ~683 docs. Split off the detail aggregate so it stays off the blocking path of every session open; the client fetches it when the chart scrolls into view. 404 unless the caller owns the session |
 | POST | `/sessions` | `question` 1–1000, `title?` ≤200, `idempotencyKey` UUID, `conditionId?` 1–200 nullish | **201** `Session` | Charges usage; writes session + queue doc. `conditionId` is the Polymarket market id when the question came from a pick, absent/null for freeform — see contracts §2.2 |
 | POST | `/sessions/:id/messages` | `role` enum, `content` 1–50000, `meta?` | **201** `SessionMessage` | Also bumps `lastActivityAt` |
 | POST | `/sessions/:id/clarify` | `{ chosenCandidateId: string \| null }` | 200 `Session` | Requires status `awaiting_clarification` |

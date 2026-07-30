@@ -183,7 +183,6 @@ export interface SentimentDataPoint {
 export interface SessionDetail {
     session: Session;
     messages: SessionMessage[];
-    predictionSeries: PredictionPoint[];
     evidence: Evidence[];
     result: SessionResult | null;
     sentimentTimeSeries: SentimentDataPoint[];
@@ -266,13 +265,11 @@ export async function getSessionDetail(sessionId: string, userId: string): Promi
 
     const [
         messages,
-        predictionSeries,
         evidence,
         sentimentTimeSeries,
         result
     ] = await Promise.all([
         sessionRepository.getMessages(sessionId),
-        sessionRepository.getPredictionSeries(sessionId),
         sessionRepository.getEvidence(sessionId),
         sessionRepository.getSentimentTimeSeries(sessionId),
         getSessionResult(sessionId, userId)
@@ -281,11 +278,37 @@ export async function getSessionDetail(sessionId: string, userId: string): Promi
     return {
         session,
         messages,
-        predictionSeries,
         evidence,
         result,
         sentimentTimeSeries,
     };
+}
+
+/**
+ * The market's price history for one session.
+ *
+ * Split out of `getSessionDetail`, which is a blocking `Promise.all` on the
+ * critical path of every session open. The series is ~683 documents — an order
+ * of magnitude larger than any other member of that set (evidence is capped at
+ * 50) — and the chart that consumes it sits below the fold, so a user who reads
+ * the verdict and leaves paid for pixels they never saw. It was also queried for
+ * `tier_2` sessions, where the subcollection is always empty.
+ *
+ * Same split, and the same reasoning, as `markets[]` moving out of `/trending`
+ * into `GET /trending/:id/markets` (`trending.repository.ts:396-414`).
+ *
+ * Note this moves the read cost rather than removing it: a user who does scroll
+ * to the chart pays exactly what they paid before, just later and off the
+ * blocking path.
+ */
+export async function getPredictionSeries(
+    sessionId: string,
+    userId: string
+): Promise<PredictionPoint[]> {
+    // Throws 404 unless the requester owns the session.
+    await getSession(sessionId, userId);
+
+    return sessionRepository.getPredictionSeries(sessionId);
 }
 
 /**

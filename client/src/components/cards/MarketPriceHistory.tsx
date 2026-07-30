@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Area,
     AreaChart,
@@ -11,11 +11,25 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { StateMessage } from '../ui/StateMessage';
+import { Button } from '../ui/button';
 import { buildMarketPriceChart, formatStamp } from '../../lib/marketPriceChart';
+import { fetchPredictionSeries } from '../../services/session.service';
 import type { MarketPricePoint } from '../../types';
 
+/**
+ * Load in when the card is this far from the viewport, so the fetch is usually
+ * finished by the time it is actually looked at.
+ */
+const PREFETCH_MARGIN = '300px';
+
+type LoadState =
+    | { kind: 'idle' }
+    | { kind: 'loading' }
+    | { kind: 'error' }
+    | { kind: 'ready'; points: MarketPricePoint[] };
+
 interface MarketPriceHistoryProps {
-    points: MarketPricePoint[];
+    sessionId: string;
     /** The Anizai forecast, 0–1. Drawn as a reference line so the user can read
      *  our answer against where the market has actually traded. */
     anizaiProbability: number;
@@ -94,20 +108,82 @@ function formatPercent(probability: number): string {
  * truthful if the pipeline retunes the window or the market is younger than it.
  */
 export function MarketPriceHistory({
-    points,
+    sessionId,
     anizaiProbability,
     tier = null,
 }: MarketPriceHistoryProps) {
+    const [state, setState] = useState<LoadState>({ kind: 'idle' });
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const load = useCallback(() => {
+        let cancelled = false;
+        setState({ kind: 'loading' });
+        fetchPredictionSeries(sessionId)
+            .then((series) => {
+                if (cancelled) return;
+                // `ts` is an ISO string the BFF derives from a Firestore
+                // Timestamp, falling back to '' when that conversion fails
+                // (session.repository.ts:282). '' parses to NaN, and a NaN x
+                // drags the axis to the epoch and flattens the real range into a
+                // vertical line — so those points are dropped rather than drawn.
+                const points = series
+                    .map((point) => ({
+                        t: new Date(point.ts).getTime(),
+                        probability: point.probability,
+                    }))
+                    .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.probability))
+                    .sort((a, b) => a.t - b.t);
+                setState({ kind: 'ready', points });
+            })
+            .catch(() => {
+                // fetchPredictionSeries rethrows by design: a failed request must
+                // render as a retryable error, never as "no price history".
+                if (!cancelled) setState({ kind: 'error' });
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [sessionId]);
+
+    // Fetch on first approach to the viewport, not on mount: ~683 documents for
+    // a card most readers never scroll to. One-shot — disconnects once fired.
+    useEffect(() => {
+        setState({ kind: 'idle' });
+        const element = containerRef.current;
+        if (!element) return;
+
+        // Without IntersectionObserver, load immediately rather than never.
+        if (typeof IntersectionObserver === 'undefined') {
+            return load();
+        }
+
+        let disposeLoad: (() => void) | undefined;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (!entries.some((entry) => entry.isIntersecting)) return;
+                observer.disconnect();
+                disposeLoad = load();
+            },
+            { rootMargin: PREFETCH_MARGIN }
+        );
+        observer.observe(element);
+
+        return () => {
+            observer.disconnect();
+            disposeLoad?.();
+        };
+    }, [load]);
+
+    const points = state.kind === 'ready' ? state.points : [];
     const chart = useMemo(
         () => buildMarketPriceChart(points, anizaiProbability),
         [points, anizaiProbability]
     );
 
-    // No chart frame in the empty case — an empty set of axes looks like a
-    // failed render and says nothing about which of the three outcomes occurred.
-    if (!chart) {
-        const empty = emptyStateFor(tier);
-        return (
+    // Every non-chart state renders through one frame, so the card never
+    // collapses and the observer target stays mounted.
+    const shell = (body: React.ReactNode) => (
+        <div ref={containerRef}>
             <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm">
                 <CardHeader className="p-4 sm:p-5 pb-2">
                     <CardTitle className="text-base font-semibold text-gray-900">
@@ -117,10 +193,48 @@ export function MarketPriceHistory({
                         How the market's own price moved over time
                     </CardDescription>
                 </CardHeader>
-                <CardContent className="p-4 sm:p-5 pt-2">
-                    <StateMessage compact title={empty.title} description={empty.description} />
-                </CardContent>
+                <CardContent className="p-4 sm:p-5 pt-2">{body}</CardContent>
             </Card>
+        </div>
+    );
+
+    // Distinct from every empty state, and deliberately so: StateMessage's
+    // `loading` variant carries a spinner and a blue tint, where the empty
+    // variants are flat grey. If "loading" and "no history" looked alike, lazy
+    // loading would reintroduce the exact ambiguity emptyStateFor removes.
+    if (state.kind === 'idle' || state.kind === 'loading') {
+        return shell(
+            <StateMessage
+                compact
+                variant="loading"
+                title="Loading price history"
+                description="Fetching the market's recent prices."
+            />
+        );
+    }
+
+    if (state.kind === 'error') {
+        return shell(
+            <StateMessage
+                compact
+                variant="error"
+                title="Couldn't load price history"
+                description="The price history didn't load. This is a loading failure, not an empty result."
+                action={
+                    <Button variant="outline" size="sm" onClick={load}>
+                        Try again
+                    </Button>
+                }
+            />
+        );
+    }
+
+    // No chart frame in the empty case — an empty set of axes looks like a
+    // failed render and says nothing about which of the three outcomes occurred.
+    if (!chart) {
+        const empty = emptyStateFor(tier);
+        return shell(
+            <StateMessage compact title={empty.title} description={empty.description} />
         );
     }
 
@@ -157,6 +271,7 @@ export function MarketPriceHistory({
     };
 
     return (
+        <div ref={containerRef}>
         <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm">
             <CardHeader className="p-4 sm:p-5 pb-2">
                 <CardTitle className="text-base font-semibold leading-tight text-gray-900 break-words">
@@ -274,5 +389,6 @@ export function MarketPriceHistory({
                 </div>
             </CardContent>
         </Card>
+        </div>
     );
 }

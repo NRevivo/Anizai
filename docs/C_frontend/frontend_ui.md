@@ -250,6 +250,20 @@ market benchmark rather than competing with it — `MarketComparison` shows our 
 against one market price, this shows whether that price was stable or moving
 underneath it.
 
+- **Loads itself, lazily.** The card fetches `GET /sessions/:id/predictionSeries` when
+  it first comes within 300px of the viewport, not on mount — ~683 documents for a
+  card most readers never scroll to. Same split, and the same reasoning, as `markets[]`
+  moving out of `/trending`. Note this **moves** the read cost rather than removing it:
+  a reader who does scroll pays exactly what they paid before, just later and off the
+  blocking path. Falls back to loading immediately where `IntersectionObserver` is
+  unavailable — degrade to eager, never to never.
+- **Four render states, all visually distinct.** Loading is `StateMessage`'s `loading`
+  variant (spinner, blue tint) and failure is the `error` variant (red, with a retry
+  button) — neither can be mistaken for the flat-grey empty states below. This is
+  load-bearing: if "loading" and "no history" looked alike, lazy loading would
+  reintroduce the ambiguity `emptyStateFor` exists to remove. `fetchPredictionSeries`
+  **rethrows** (like `fetchTrendingMarkets`, unlike `fetchTrendingForecasts`) so a
+  failed request can never render as "no price history".
 - **An empty series is THREE outcomes, not two** (`emptyStateFor`). `points: []`
   conflates cases that differ for the user, and one message for all of them — or an
   empty chart frame — says nothing about whether anything went wrong:

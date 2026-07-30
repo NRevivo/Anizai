@@ -15,7 +15,6 @@ import type {
     ChatMessage,
     ClarificationCandidate,
     AgentEvent,
-    MarketPricePoint,
     Prediction,
     PredictionSession,
     SessionStatus,
@@ -57,8 +56,6 @@ interface DashboardPageProps {
     hasForecastResult: boolean;
     sentimentData: SentimentDataPoint[];
     timelineEvents: TimelineEvent[];
-    /** Market price history for the active session; `[]` on the freeform path. */
-    marketPricePoints: MarketPricePoint[];
     agentEvents: AgentEvent[];
     messages: ChatMessage[];
     isMessagesLoading?: boolean;
@@ -127,7 +124,6 @@ export function DashboardPage({
     hasForecastResult,
     sentimentData,
     timelineEvents,
-    marketPricePoints,
     agentEvents,
     messages,
     isMessagesLoading = false,
@@ -596,7 +592,6 @@ export function DashboardPage({
                 prediction={prediction}
                 sentimentData={sentimentData}
                 timelineEvents={timelineEvents}
-                marketPricePoints={marketPricePoints}
             />
         );
     };

@@ -48,7 +48,7 @@ import {
   type SessionStatus,
 } from './services/session.service';
 import { fetchTrendingForecasts, type TrendingForecast } from './services/trending.service';
-import type { AgentEvent, ChatMessage, MarketPricePoint, Prediction, PredictionSession, SentimentDataPoint, TimelineEvent } from './types';
+import type { AgentEvent, ChatMessage, Prediction, PredictionSession, SentimentDataPoint, TimelineEvent } from './types';
 
 type AppState =
   | 'landing'
@@ -176,39 +176,6 @@ function toSentimentPoints(detail: SessionDetail | null): SentimentDataPoint[] {
     expertLower: point.expertLower ?? undefined,
     publicSentiment: point.publicSentiment,
   }));
-}
-
-/**
- * `sessions/{id}/predictionSeries` → market price-history points.
- *
- * The subcollection is written on the Tier-1 (market-resolved) path only, so an
- * empty result is the ordinary outcome for a freeform forecast, not a failure.
- * "Absent" and "empty" are indistinguishable here — both reach us as `[]` — so
- * MarketPriceHistory branches on `tier` to word them differently.
- *
- * `confidence`, `reasonType` and `evidenceIds` are dropped on purpose: the
- * pipeline writes them as fixed constants (1.0 / "market" / []). See the comment
- * on MarketPricePoint.
- *
- * Two defensive steps over documents the BFF already orders by `ts`:
- *  - `ts` arrives as an ISO string the BFF derives from a Firestore Timestamp,
- *    falling back to '' when conversion fails (session.repository.ts:280). '' →
- *    NaN, and a NaN x-value drags the axis to the epoch and flattens the real
- *    range into a vertical line, so those points are dropped.
- *  - the sort re-establishes order for the BFF's missing-index fallback path.
- */
-function toMarketPricePoints(detail: SessionDetail | null): MarketPricePoint[] {
-  if (!detail) {
-    return [];
-  }
-
-  return detail.predictionSeries
-    .map((point) => ({
-      t: new Date(point.ts).getTime(),
-      probability: point.probability,
-    }))
-    .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.probability))
-    .sort((a, b) => a.t - b.t);
 }
 
 function toTimelineEvents(detail: SessionDetail | null): TimelineEvent[] {
@@ -855,7 +822,6 @@ function App() {
   const hasForecastResult = activeSessionDetail?.result != null;
   const sentimentData = useMemo(() => toSentimentPoints(activeSessionDetail), [activeSessionDetail]);
   const timelineEvents = useMemo(() => toTimelineEvents(activeSessionDetail), [activeSessionDetail]);
-  const marketPricePoints = useMemo(() => toMarketPricePoints(activeSessionDetail), [activeSessionDetail]);
   const messages = useMemo(() => {
     const persistedMessages = sessionMessages ?? toChatMessages(activeSessionDetail);
     const unreconciledPending = pendingMessages.filter((pendingMessage) => {
@@ -1008,7 +974,6 @@ function App() {
         hasForecastResult={hasForecastResult}
         sentimentData={sentimentData}
         timelineEvents={timelineEvents}
-        marketPricePoints={marketPricePoints}
         agentEvents={filteredAgentEvents}
         messages={messages}
         isMessagesLoading={isMessagesLoading}
