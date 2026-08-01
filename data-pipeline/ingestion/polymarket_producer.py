@@ -402,13 +402,49 @@ def _event_end_date_passed(event: dict, now: datetime) -> bool:
     return parsed < now
 
 
+def _derive_market_status(market: dict) -> str:
+    """
+    The market's real state: "closed" | "archived" | "inactive" | "active".
+
+    Single source of truth, used by BOTH the selection filter and the emitted
+    payload. They previously derived it independently, which is precisely how a
+    filter and the field it filters on drift apart — the filter drops one set
+    while the payload reports another, and nothing detects the divergence.
+
+    Order matters and is not arbitrary: `closed` wins over `archived` wins over
+    `inactive`, because a market can carry several of these flags at once and
+    the most terminal one is the honest answer.
+    """
+    if market.get("closed") is True:
+        return "closed"
+    if market.get("archived") is True:
+        return "archived"
+    if market.get("active") is False:
+        return "inactive"
+    return "active"
+
+
 def _market_skip_reason(market: dict) -> Optional[str]:
     """
     Why one nested market is not worth emitting a Bronze record for, or None
     when it is collectable.
 
-    Two rejections, both quiet by design:
+    Three rejections, all quiet by design:
       - "closed"       — the event is open but this leg has settled.
+      - "inactive"     — an UNNAMED PLACEHOLDER LEG, not a market. Measured live
+        2026-08-01 across the whole target set: 108 inactive markets, and every
+        single one priced at exactly 0.5000 — `distinct_prices = 1`, against 305
+        distinct values across the 1,171 active markets. Their questions are
+        template slots with no entity bound ("Will Company A be the largest
+        company in the world"). Polymarket writes 0.5/0.5 because there is
+        nothing to price; the value is a placeholder, not a measurement, and
+        once stored it is indistinguishable from one. The frontend reached the
+        same conclusion independently — `server/src/repositories/trending.repository.ts`
+        already filters `active !== false`, measured as removing 521 of 1,039
+        non-closed markets without dropping a single pickable market.
+        **`archived` is deliberately NOT dropped**: its markets carry real,
+        distinct prices and real questions (0.49, 0.255, 0.25 on the three seen).
+        The filter targets `inactive` specifically, never "not active".
       - "never_traded" — no `outcomePrices`. F9: a missing key means "never
         traded", NOT an error. Every market lacking it has cumulative volume of
         exactly $0 (n=7,224, max $0, zero exceptions).
@@ -421,11 +457,14 @@ def _market_skip_reason(market: dict) -> Optional[str]:
     defect survived 79 days. They are counted in the funnel instead (P2).
 
     Returning the reason rather than a bare bool is what lets the funnel
-    distinguish "settled" from "never traded" — two very different signals if
-    either count moves unexpectedly.
+    distinguish "settled" from "placeholder" from "never traded" — three very
+    different signals if any of the counts moves unexpectedly.
     """
-    if market.get("closed") is True:
+    status = _derive_market_status(market)
+    if status == "closed":
         return "closed"
+    if status == "inactive":
+        return "inactive"
     if not _parse_json_array(market.get("outcomePrices")):
         return "never_traded"
     return None
@@ -718,7 +757,7 @@ class PolymarketProducer:
         tag_passed = 0
         date_passed = 0
         markets_seen = 0
-        skipped: dict = {"closed": 0, "never_traded": 0}
+        skipped: dict = {"closed": 0, "inactive": 0, "never_traded": 0}
 
         for event in events:
             if not _event_passes_tag_filter(event):
@@ -747,9 +786,9 @@ class PolymarketProducer:
         logger.info(
             "[polymarket] Discovery funnel: %d events fetched -> %d passed tags "
             "-> %d passed endDate -> %d nested markets -> %d collectable "
-            "(skipped %d closed, %d never-traded)",
+            "(skipped %d closed, %d inactive, %d never-traded)",
             len(events), tag_passed, date_passed, markets_seen, len(collectable),
-            skipped["closed"], skipped["never_traded"],
+            skipped["closed"], skipped["inactive"], skipped["never_traded"],
             # P5: exempt from 1% INFO sampling. This fires once per hourly
             # refresh (24/day), and it is the only evidence that discovery ran
             # and what it selected — at 1% it would surface roughly once every
@@ -836,14 +875,9 @@ class PolymarketProducer:
                 parent_event_id = parent_event_id or str(events[0].get("id", ""))
                 event_title = event_title or str(events[0].get("title", "") or "")
 
-        if market.get("closed") is True:
-            market_status = "closed"
-        elif market.get("archived") is True:
-            market_status = "archived"
-        elif market.get("active") is False:
-            market_status = "inactive"
-        else:
-            market_status = "active"
+        # Shared with the selection filter (_market_skip_reason) so the state we
+        # filter on and the state we report can never disagree.
+        market_status = _derive_market_status(market)
 
         return {
             "payload_type":    "price_update",

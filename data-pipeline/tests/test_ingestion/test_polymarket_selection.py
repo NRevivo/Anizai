@@ -42,6 +42,7 @@ from ingestion.polymarket_producer import (
     TARGET_TAGS,
     PolymarketProducer,
     _attach_parent_event,
+    _derive_market_status,
     _event_end_date_passed,
     _event_passes_tag_filter,
     _event_tag_ids,
@@ -49,6 +50,18 @@ from ingestion.polymarket_producer import (
     _market_skip_reason,
     _verify_server_side_filters,
 )
+
+
+@pytest.fixture()
+def producer_factory():
+    """A producer with no Kafka connection — __init__ opens one and these
+    tests neither have nor need it."""
+    def _make():
+        p = PolymarketProducer.__new__(PolymarketProducer)
+        p._skipped_markets = 0
+        p._last_event_count = None
+        return p
+    return _make
 
 MOCKS_DIR = Path(__file__).parent.parent / "mocks"
 NOW = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
@@ -160,6 +173,91 @@ def test_closed_leg_is_skipped_and_distinguishable_from_never_traded(events):
     event = _by_case(events, "KEEP")
     closed = [m for m in event["markets"] if _market_skip_reason(m) == "closed"]
     assert closed, "fixture must contain at least one closed leg"
+
+
+# ==========================================================
+# [3b] Inactive placeholder legs (2026-08-01)
+# ==========================================================
+
+def test_inactive_market_is_skipped_as_a_placeholder():
+    """
+    An inactive leg is a TEMPLATE SLOT, not a market with a stale price.
+
+    Measured live 2026-08-01 across the whole target set: 108 inactive markets,
+    every one at exactly 0.5000 — distinct_prices = 1, against 305 distinct
+    values across the 1,171 active markets. Their questions are unnamed
+    placeholders ("Will Company A be the largest company in the world").
+    Polymarket writes 0.5/0.5 because there is nothing to price.
+
+    Stored, that 0.5 is indistinguishable from a measurement, and nothing in the
+    agent path branches on status — so it would render as "Market Consensus 50%"
+    beside a real forecast.
+    """
+    placeholder = {
+        "conditionId": "0xplaceholder",
+        "question": "Will Company A be the largest company in the world by 2030?",
+        "outcomes": '["Yes", "No"]',
+        "outcomePrices": '["0.5", "0.5"]',
+        "active": False,
+    }
+    assert _derive_market_status(placeholder) == "inactive"
+    assert _market_skip_reason(placeholder) == "inactive"
+    assert _market_is_collectable(placeholder) is False
+
+
+def test_archived_market_is_KEPT():
+    """
+    The filter targets `inactive` specifically, NEVER "not active".
+
+    Archived markets are real markets that were archived: measured 2026-08-01
+    they carry distinct genuine prices (0.49, 0.255, 0.25) and real questions
+    (RFK Jr 2028, xAI IPO, MBS). Dropping them would discard real data — this is
+    the test that fails if the filter is ever widened to `status != "active"`.
+    """
+    archived = {
+        "conditionId": "0xarchived",
+        "question": "Will Robert F. Kennedy Jr. win the 2028 Republican primary?",
+        "outcomes": '["Yes", "No"]',
+        "outcomePrices": '["0.49", "0.51"]',
+        "archived": True,
+    }
+    assert _derive_market_status(archived) == "archived"
+    assert _market_skip_reason(archived) is None, (
+        "archived markets carry real prices and must survive selection"
+    )
+    assert _market_is_collectable(archived) is True
+
+
+@pytest.mark.parametrize("market,expected", [
+    ({"closed": True, "archived": True, "active": False}, "closed"),
+    ({"archived": True, "active": False},                 "archived"),
+    ({"active": False},                                   "inactive"),
+    ({},                                                  "active"),
+    ({"closed": False, "archived": False, "active": True}, "active"),
+])
+def test_status_precedence_most_terminal_wins(market, expected):
+    """
+    A market can carry several flags at once; the most terminal is the honest
+    answer. This ordering is shared by the filter and the emitted payload, so a
+    change here moves both together rather than letting them drift.
+    """
+    assert _derive_market_status(market) == expected
+
+
+def test_filter_and_payload_agree_on_status(producer_factory):
+    """
+    The selection filter and the emitted `market_status` derive from the SAME
+    function. Before this, each computed the state independently — the exact
+    shape in which a filter and the field it filters on drift apart.
+    """
+    archived = {
+        "id": "1", "conditionId": "0xarchived", "question": "q",
+        "outcomes": '["Yes", "No"]', "outcomePrices": '["0.49", "0.51"]',
+        "archived": True,
+    }
+    payload = producer_factory()._fetch_market_prices(archived)
+    assert payload is not None
+    assert payload["market_status"] == _derive_market_status(archived) == "archived"
 
 
 def test_collectable_market_survives(events):
