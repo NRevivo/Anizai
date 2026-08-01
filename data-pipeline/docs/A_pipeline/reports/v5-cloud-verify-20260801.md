@@ -191,6 +191,40 @@ Forecast 2's sibling markets at ~100% are ones whose dates have passed:
 them** — which is exactly why A4 keys on the end date. Had one been picked, the
 guard's live-confirmation branch would have fired.
 
-## 8. Not done
+## 8. The pattern this sprint kept finding
+
+Four instances of one failure, in four different places:
+
+| Where | The default | Presented as |
+|---|---|---|
+| `silver_job` | `raw.get("price", 0.0)` | a measured probability |
+| `silver_job` | `status: "active"` hardcoded | an observed market state |
+| `synthesize` | `NO_MARKET_CAPTION` | a property of the user's question |
+| Polymarket | `0.5/0.5` on placeholder legs | a market price |
+
+And three ways the tooling *ratified* rather than caught them:
+
+- **Tests that pinned the defect.** Three gate-2 fixtures built a `price_update`
+  with no `price` key and asserted it routed successfully. A test that asserts
+  observed behaviour will always ratify a default — which is why CI stayed green
+  for 79 days. **Assert the intended outcome, never the observed one.**
+  `test_archived_market_is_KEPT` is that principle made concrete: it defends an
+  intention, failing if anyone widens the `inactive` filter to `status != "active"`
+  and discards three real markets.
+- **A type system that ratified an omission.** `conditionId?` is optional, so the
+  two-argument call at `DashboardPage.tsx:239` type-checks cleanly while the value
+  silently becomes null (KG-A-22). **An optional parameter makes a dropped
+  argument invisible to the compiler** — the same family as a default
+  indistinguishable from a measurement, one layer up in the toolchain.
+- **A green deployment running the wrong code.** Flink's HA restore and the
+  week-old agent image both reported healthy while executing code that predated
+  the fix.
+
+The common shape: *something reports success while the thing it was supposed to
+verify never happened.* Every one was caught by comparing against an independent
+source — a distribution, a digest, a JobID, a byte-diff — never by the component's
+own report.
+
+## 9. Not done
 
 The database wipe follows, and is a separate operation on its own timing.
