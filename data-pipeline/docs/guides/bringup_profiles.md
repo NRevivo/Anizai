@@ -2,10 +2,13 @@
 
 > Domain: C — Cloud (operational)
 > Type: Guide
-> Last updated: 2026-07-27 (boundary-hygiene pass with `cluster_operations_guide.md`:
-> §3 Step 4 Firestore gate widened to three options and moved earlier; §4 Teardown gained
-> a close-the-taps step and a Postgres backup gate; §5 trap 3 rewritten — the Flink half
-> of the sampling claim is withdrawn and `LOG_INFO_SAMPLE_RATE` is now banned on Flink)
+> Last updated: 2026-08-01 (post-Polymarket-completion pass: §3 Step 3 resize command now
+> carries the mandatory `--zone`; §3 Step 4 backlog gate rewritten — no consumer groups
+> exist, size by `--time -2`/`-1` across every topic in the path, and treat a backlog as
+> a cost; §4 item 3 teardown cancellation marked DISPUTED; §5 trap 3 Flink half resolved
+> — the mechanism is off-heap direct-buffer exhaustion and container memory cannot fix
+> it; §5 trap 5 now states that the stale-code failure is silent and gives the five-step
+> sequence)
 > TL;DR: **One** bring-up/teardown procedure with a **profile selector** — AGENTS,
 > PIPELINE, or FULL. Point Claude Code at this file and name a profile. Procedural
 > only: it holds sequences and gates, never live facts (those live in
@@ -104,7 +107,18 @@ skipping it means discovering the mistake by looking at a bill.
 
 ### Step 3 — Resize the pool
 
-Resize `main-pool` to 1 node. Expect ~3–5 min for the node, plus ~30 s per pod.
+```
+gcloud container clusters resize anizai-cluster --node-pool=main-pool --num-nodes=1 \
+  --zone=us-central1-a
+```
+
+**`--zone` is mandatory and the cluster is ZONAL** — `us-central1-a`, note the `-a`
+suffix. Without a location flag the command fails outright with *"One of [--location,
+--zone, --region] must be supplied"*; with `--region us-central1` it addresses a
+regional cluster that does not exist. This line omitted the flag until 2026-08-01 and
+failed for everyone who ran it from the guide.
+
+Expect ~3–5 min for the node, plus ~30 s per pod.
 
 Poll until steady. Expected end state:
 - Everything in the profile's "up" row → Running.
@@ -152,9 +166,32 @@ up — but it is a signal that a previous session died mid-forecast (KG-B-21).
 
 **PIPELINE and FULL — the backlog and budget gate.**
 
-Before Flink starts consuming, size the Kafka backlog per consumer group and decide
-explicitly whether to process it or drop it (`cluster_operations_guide.md` §7 holds
-the drop procedure). Then confirm OpenAI credit and RPD headroom — a large backlog
+Before Flink starts consuming, size the Kafka backlog and decide explicitly whether to
+process it or drop it (`cluster_operations_guide.md` §7 holds the drop procedure).
+
+**Size it as `--time -1` (latest) minus `--time -2` (earliest), per topic.** There are
+**no consumer groups** — `kafka-consumer-groups.sh --list` returns nothing, because both
+jobs track position by Flink checkpoint rather than by group offset. An earlier version
+of this line said "per consumer group" and was not executable. Note also that
+`kafka.tools.GetOffsetShell` no longer exists in the deployed Kafka build; it errors out
+and a naive loop silently sums to zero. Use `kafka-get-offsets.sh`.
+
+**A cumulative end offset is not a backlog.** On 2026-08-01 an end offset of 53,319 was
+read as "53k pending" and a whole clearing step was planned around it; retained was
+**1,400**, because seven-day retention had already aged the rest out.
+
+**Size EVERY topic in the path, including the ones you expect to be zero.** Purging an
+ingress topic is not purging a pipeline. On 2026-08-01 `ingest.bronze.polymarket` was
+cleared while 700 records sat in `process.silver.structured_metrics` — already past
+Silver, one stage from the vault, and about to be consumed by Gold on `earliest()`. A
+Bronze-only purge would have produced exactly the contamination the purge existed to
+prevent, by a route the step did not cover.
+
+**A backlog is a cost, not only a correctness question.** Bringing the pipeline up with
+one spends real GPT-4o enrichment on stale data: on 2026-08-01, 3,326 retained
+arxiv/hackernews/newsapi records would have been enriched, against a shared RPD ceiling,
+in a window that cared only about Polymarket. Decide whether you want that spend before
+Flink starts, not after. Then confirm OpenAI credit and RPD headroom — a large backlog
 replay and a forecast session share one account and one ceiling.
 
 **All profiles — observability.** If this session's purpose is to produce numbers,
@@ -191,11 +228,18 @@ Any failure → stop and report. Do not repair by editing manifests mid-session.
    worth keeping, write them into a doc during the session.**
 3. **Close the taps before anything else stops.** Re-pause whatever DAGs this session
    unpaused; scale `telegram` and `polymarket` back to 0 if the profile brought them
-   up. Under PIPELINE / FULL you may also cancel the Flink jobs for a clean final
-   checkpoint and tidy HA state — not required, since HA preserves the graphs either
-   way, but it produces better diagnostics next time (`cluster_operations_guide.md`
-   §3 holds the command). Nothing below this step should be done while data is still
-   flowing.
+   up. Nothing below this step should be done while data is still flowing.
+
+   **On cancelling the Flink jobs at teardown — DISPUTED, do not act on either
+   reading.** This step used to call cancellation optional tidiness "since HA preserves
+   the graphs either way." That is contested: a cancelled job is globally terminal and
+   its graph is cleaned out of the Kubernetes HA store, which would leave nothing for
+   the next bring-up to recover. **Neither reading has been tested.** Until one is, do
+   not cancel at teardown — leaving the jobs running preserves the HA state that §5
+   trap 5 depends on, and costs only a less tidy final checkpoint.
+   (`cluster_operations_guide.md` §3 holds the command if a deliberate test is ever
+   run.) This does not affect the image-change case, where cancellation is mandatory at
+   the next bring-up regardless — see §5 trap 5.
 4. **Back up Postgres if anything wrote to it this session.** Flink writes to the
    vaults, and a schema migration counts; the agent reads only. If either happened,
    take a manual backup now — `cluster_operations_guide.md` §8 holds the procedure.
@@ -241,12 +285,21 @@ and therefore do not reliably reach Cloud Logging: do not plan a measurement ses
 around grepping them. The durable sources are `agent_llm_cost_usd_total` and
 `agent_node_duration_seconds` in Prometheus. (Related: KG-B-4.)
 
-*Flink — the same claim, and it does not hold.* This file used to assert that the
-sampling applies to the Flink jobs too. **That half was contradicted by direct
-observation on 2026-07-27:** with the variable absent and the code default at 0.01, the
-operator startup lines and the `[gold/dedup]` skip lines all appeared on the Flink UDF
-path — at a true 1 % sample they would have been essentially none. Treat the Flink half
-of the sampling claim as **unverified**, and do not plan around it in either direction.
+*Flink — RESOLVED 2026-08-01, and the reasoning previously given here was wrong.* This
+file argued that the sampling claim "does not hold" on Flink, because with the variable
+absent the operator startup lines and `[gold/dedup]` lines all appeared. **Those were
+submit-time CLIENT output, not the UDF path.** They never came from the TaskManager, so
+they said nothing about the path that actually fails — and that confusion sent two
+months of investigation in the wrong direction.
+
+Measured directly on 2026-08-01, local, single-variable: records emitted by the
+TaskManager's Python worker are **0 at 0.01 and 0 at 1.0** — identical — yet 1.0 OOMs on
+the first message and 0.01 runs clean. Our Python records reach **no TaskManager sink at
+any sample rate**: `docker logs`, `flink--taskexecutor-*.log` and the UDF boot log all
+contain zero `processing.silver_job` records at either setting. **If you are debugging a
+Flink UDF in this project, the log lines you are looking for do not arrive** —
+independent of this defect, and worth knowing before you spend a session grepping for
+them.
 
 > ### Do not set `LOG_INFO_SAMPLE_RATE` on the Flink workloads.
 >
@@ -263,14 +316,40 @@ of the sampling claim as **unverified**, and do not plan around it in either dir
 > different, opposite outcome. JVM heap stayed a flat bounded sawtooth (~170–536 MB)
 > throughout, so the growth was entirely Python-side.
 >
-> **The mechanism is not established — do not assume it is log volume.** The first
-> explanation offered (roughly a hundredfold increase in log records) is inconsistent
-> with the observation above: if INFO passes unsampled on this path either way, setting
-> the variable to `1.0` cannot have multiplied record volume, so something else is
-> responsible. Unresolved. Raising the container memory limit is **not** the workaround
-> — `6Gi` proved that. If a session genuinely needs full INFO out of Flink, the
-> Python-side memory has to be bounded first (`python.fn-execution.*` / managed memory).
-> That is real PyFlink tuning work, not a manifest edit.
+> **The failure is off-heap, and container memory CANNOT fix it.** Reproduced locally
+> 2026-08-01 with a single-variable change: the exception is
+> `java.lang.OutOfMemoryError: Direct buffer memory` in the TaskManager JVM — **not** a
+> Beam Python worker fault. Everything below it in the stack (`Failed to start remote
+> bundle`, `CANCELLED: client cancelled`, `BeamFnDataGrpcMultiplexer: Hanged up`) is
+> wreckage from the OOM tearing down the gRPC channel, which is why the symptom has read
+> as a Python crash for so long. At the moment of failure the container reported
+> `OOMKilled=false`, `Restarts=0`, and **750 MiB in use of 7.6 GiB available**. The
+> container survives; only the JOB dies. Direct buffer memory is bounded by Flink's own
+> off-heap configuration (`taskmanager.memory.*` → `-XX:MaxDirectMemorySize`), not by
+> cgroups — so raising `mem_limit` on a compose service, or `resources.limits.memory` on
+> the k8s Deployment, changes nothing. The JVM refuses the allocation long before Docker
+> or the kernel is involved. `6Gi` proved this in cloud before the mechanism was
+> understood. **If your instinct on an OOM is more memory, this is the line that should
+> stop you.**
+>
+> **The remaining question is narrow.** Volume is eliminated: the emitted-record count is
+> identical at both settings (above). Duplicate handlers are eliminated —
+> `setup_logging()` installs one handler with two filters unconditionally and never
+> branches on the rate. The only thing the value changes is the return of
+> `_SampledInfoFilter.filter()`. Remaining hypothesis, **UNVERIFIED**: records passing
+> the filter are still transported over Beam's FnLogging gRPC channel — which uses direct
+> buffers — and discarded at the JVM end, which would explain the OOM and the zero
+> visible records simultaneously. The distinguishing test is to instrument
+> `_SampledInfoFilter.filter()` return counts inside the image; counting sinks cannot
+> resolve it. See KG-A-10 / KG-A-17.
+>
+> **Local and cloud were one defect.** `infrastructure/.env` carried
+> `LOG_INFO_SAMPLE_RATE=1.0`, and `docker-compose.yml` hands both Flink legs the entire
+> file via `env_file` — which is why local Flink had never once worked (KG-A-10, closed
+> 2026-08-01). Same variable, same first-message signature, same fix as the cloud OOM.
+> Compose now pins the value on both Flink services so no `.env` value can reach the
+> Flink JVM; the k8s manifests set it nowhere and use no `envFrom`, so cloud is safe by
+> construction.
 
 *The agent Deployment is a different manifest and a different decision.* `1.0` is
 recommended there in several places (KG-B-4), but **it has never actually been set** —
@@ -288,11 +367,30 @@ all at 0 live while their committed manifests declare `replicas: 1`. A routine
 issued and no obvious cause. Always read desired replicas from the cluster, never from
 the repo, and prefer `kubectl scale` over `apply` during a session.
 
-**5 — Flink does not pick up new code from a pod restart.**
+**5 — Flink does not pick up new code from a pod restart, and the failure is SILENT.**
 Scaling Flink back up recovers the *previously compiled* job graph from HA state. If
 the image changed while it was down, the jobs must be cancelled and resubmitted — see
 `cluster_operations_guide.md` §6. Verify jobs reach RUNNING rather than a RESTARTING
 loop.
+
+**Why this is worse than it sounds.** The restored job does not error, warn, or restart.
+It reaches `RUNNING`, processes messages, and reports perfectly healthy — on a pod whose
+image is the new one, running the old compiled code. Observed 2026-08-01: both jobs
+recovered on their own with `restored: 1`, and the recovered JobIDs matched the
+pre-teardown HA ConfigMap names character for character. Had it not been caught, the
+verification downstream would have shown rows missing fields that were already fixed,
+and the investigation would have gone to a file that was already correct.
+
+**The five steps, in order, whenever the image changed:**
+1. Bring Flink up (JobManager, then TaskManager)
+2. `flink list` — **record** what recovered, including JobIDs
+3. **Cancel** both recovered jobs
+4. Submit from the new image
+5. `flink list` again — confirm the running JobIDs are the ones you just submitted
+
+Step 5 is the whole point: a running JobManager does not imply a submitted job, and
+nothing else distinguishes a restored graph from a fresh one. **If the image did NOT
+change, the automatic restore is correct** — do not cancel, and see §4 item 3.
 
 ---
 
