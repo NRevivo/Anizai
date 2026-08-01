@@ -17,6 +17,12 @@ const createSessionSchema = z.object({
     question: z.string().min(1).max(1000),
     title: z.string().max(200).optional(),
     idempotencyKey: z.string().trim().min(1).uuid(),
+    // Polymarket condition id, present only when the question came from a market
+    // pick. `nullish` rather than `optional`: the client sends `undefined` on the
+    // freeform path but an explicit `null` is equally valid, and rejecting either
+    // would break freeform submission — which has no market and never will.
+    // Not `.uuid()`; a condition id is a 0x-prefixed 32-byte hash, not a UUID.
+    conditionId: z.string().trim().min(1).max(200).nullish(),
 });
 
 const createMessageSchema = z.object({
@@ -72,6 +78,32 @@ router.get('/sessions/:id', async (req, res, next) => {
 
         const response: ApiSuccessResponse = {
             data: detail,
+        };
+
+        res.json(response);
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * GET /sessions/:id/predictionSeries
+ * The market's price history for one session.
+ *
+ * Separate from `GET /sessions/:id` so ~683 documents stay off the blocking path
+ * of every session open — the chart is below the fold and most readers never
+ * reach it. Fetched when the card scrolls into view. See the service for the
+ * full rationale.
+ */
+router.get('/sessions/:id/predictionSeries', async (req, res, next) => {
+    try {
+        const user = req.user as AuthUser;
+        const sessionId = req.params.id as string;
+
+        const series = await sessionsService.getPredictionSeries(sessionId, user.uid);
+
+        const response: ApiSuccessResponse = {
+            data: series,
         };
 
         res.json(response);

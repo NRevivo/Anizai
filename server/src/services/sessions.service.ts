@@ -13,7 +13,12 @@ import * as usersService from './users.service.js';
 // ─────────────────────────────────────────────────────────────
 
 export interface ClarificationCandidate {
-    id: string;                                  // canonical market id
+    // A freshly generated UUID4, NOT a market identifier — the agent has no
+    // canonical Polymarket id to offer pre-vector-index
+    // (`agent/nodes/query_understand.py:380`). It exists only to round-trip the
+    // user's choice back as `chosenCandidateId` into `canonicalKey`. Never put
+    // it in `conditionId`: it can never match a Polymarket condition id.
+    id: string;
     label: string;                               // human-readable
     source: 'polymarket' | 'kalshi';
     description: string;                         // resolution criteria / longer context
@@ -31,6 +36,17 @@ export interface Session {
     followEnabled: boolean;
     isFollowing: boolean;
     canonicalKey: string | null;
+    /**
+     * Polymarket condition id of the market this session is currently pinned to,
+     * or null when it is not pinned to one — a freeform question, or a session
+     * that has been through clarification.
+     *
+     * **Cleared on clarification, never carried.** Clarification is market
+     * selection, not rewording, so the original id would pin the forecast to the
+     * wrong market. See `requeueClarifiedSession` for why the chosen candidate's
+     * id cannot replace it either.
+     */
+    conditionId: string | null;
     errorCode: string | null;
     errorMessage: string | null;
     clarificationCandidates: ClarificationCandidate[] | null;
@@ -167,7 +183,6 @@ export interface SentimentDataPoint {
 export interface SessionDetail {
     session: Session;
     messages: SessionMessage[];
-    predictionSeries: PredictionPoint[];
     evidence: Evidence[];
     result: SessionResult | null;
     sentimentTimeSeries: SentimentDataPoint[];
@@ -177,6 +192,8 @@ export interface CreateSessionInput {
     question: string;
     title?: string;
     idempotencyKey: string;
+    /** Polymarket condition id; absent/null for freeform questions. See Session. */
+    conditionId?: string | null;
 }
 
 export interface CreateMessageInput {
@@ -248,13 +265,11 @@ export async function getSessionDetail(sessionId: string, userId: string): Promi
 
     const [
         messages,
-        predictionSeries,
         evidence,
         sentimentTimeSeries,
         result
     ] = await Promise.all([
         sessionRepository.getMessages(sessionId),
-        sessionRepository.getPredictionSeries(sessionId),
         sessionRepository.getEvidence(sessionId),
         sessionRepository.getSentimentTimeSeries(sessionId),
         getSessionResult(sessionId, userId)
@@ -263,11 +278,37 @@ export async function getSessionDetail(sessionId: string, userId: string): Promi
     return {
         session,
         messages,
-        predictionSeries,
         evidence,
         result,
         sentimentTimeSeries,
     };
+}
+
+/**
+ * The market's price history for one session.
+ *
+ * Split out of `getSessionDetail`, which is a blocking `Promise.all` on the
+ * critical path of every session open. The series is ~683 documents — an order
+ * of magnitude larger than any other member of that set (evidence is capped at
+ * 50) — and the chart that consumes it sits below the fold, so a user who reads
+ * the verdict and leaves paid for pixels they never saw. It was also queried for
+ * `tier_2` sessions, where the subcollection is always empty.
+ *
+ * Same split, and the same reasoning, as `markets[]` moving out of `/trending`
+ * into `GET /trending/:id/markets` (`trending.repository.ts:396-414`).
+ *
+ * Note this moves the read cost rather than removing it: a user who does scroll
+ * to the chart pays exactly what they paid before, just later and off the
+ * blocking path.
+ */
+export async function getPredictionSeries(
+    sessionId: string,
+    userId: string
+): Promise<PredictionPoint[]> {
+    // Throws 404 unless the requester owns the session.
+    await getSession(sessionId, userId);
+
+    return sessionRepository.getPredictionSeries(sessionId);
 }
 
 /**

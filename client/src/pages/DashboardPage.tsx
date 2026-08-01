@@ -66,7 +66,12 @@ interface DashboardPageProps {
     awaitingSinceMs?: number | null;
     trendingForecasts: TrendingQuestionView[];
     onSessionSelect: (sessionId: string) => void;
-    onCreateSession: (question: string, idempotencyKey: string) => Promise<void>;
+    /** `conditionId` is null/absent for freeform questions — see CreateSessionInput. */
+    onCreateSession: (
+        question: string,
+        idempotencyKey: string,
+        conditionId?: string | null
+    ) => Promise<void>;
     onRetrySession: (sessionId: string) => Promise<void>;
     onClarifySession: (sessionId: string, chosenCandidateId: string | null) => Promise<void>;
     onSendMessage: (message: string) => Promise<void>;
