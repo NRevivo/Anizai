@@ -150,6 +150,10 @@ spec:
             #    Flink's own off-heap config (taskmanager.memory.* -> -XX:MaxDirectMemorySize), not
             #    by cgroups. The JVM refuses the allocation before the kernel is ever involved, so
             #    more memory changes nothing. The instinct to add memory on an OOM is wrong here.
+            #  - Our Python records reach NO TaskManager sink at ANY sample rate. Measured 0 records
+            #    in `kubectl logs`, /opt/flink/log/flink--taskexecutor-*.log and the UDF boot log, at
+            #    both 0.01 and 1.0. This is true independently of this defect: if you are debugging a
+            #    Flink UDF here, the application logs you are looking for do not arrive at all.
             #
             # KG-A-10 (CLOSED — reproduction + fix) and KG-A-17 (OPEN — mechanism) in
             # docs/A_pipeline/pipeline_sprints.md. The Phase 7D report could not explain this.
