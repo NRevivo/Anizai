@@ -144,7 +144,53 @@ selection; **(b)** refuse resolution against a non-`active` row, falling to A5's
 refusal. Neither is free — both need an image rebuild the next window needs
 anyway.
 
-## 7. Not done this session
+## 7. Second window (same day) — V4 and V6
 
-V6 (end-to-end forecast) deferred; `agent-worker` never brought up. The database
-wipe follows V6 and is unaffected by anything here.
+**V4.** The deployed agent was `anizai-agent:0.5.0-sprint26`, built 2026-07-23 —
+a week BEFORE Track A landed in `d603450`. Bringing it up would have tested an
+agent with no A1/A3/A4/A5 and emitted the OLD `NO_MARKET_CAPTION`, looking like a
+plausible refusal while proving nothing. Rebuilt as
+**`anizai-agent:0.6.0-trackA`, digest `sha256:937dfed1…471d9aee`**, from
+`35c343b`, with all four verified inside the image before push.
+
+**The `inactive` filter, live.** Funnel:
+`374 events -> 230 tags -> 177 endDate -> 2547 nested -> 1173 collectable
+(skipped 266 closed, 1106 inactive, 2 never-traded)`. Acceptance **1,173/1,173**
+on six criteria; **0 rows at exactly 0.5000** (was 108); status distribution
+`active 1170 / archived 3 / inactive 0`.
+
+**Note on the skip attribution.** The prediction was ~108 inactive / ~1000
+never-traded; the reality was 1,106 / 2. `_market_skip_reason` checks `inactive`
+before `never_traded`, and the never-traded population turned out to BE the same
+placeholder legs. So the placeholder population was never 108 — it was ~1,106,
+of which only the 108 that had acquired an `["0.5","0.5"]` array could reach the
+vault. Collectable matched the prediction exactly (1,173).
+
+**V6 — three of four pass.** No wrong-market resolution (August 3 against seven
+one-word-apart siblings), YES side correct (0.245 / 0.77 against cards of 25% /
+76%), CLOB history real (743 points, 30d 23h, 60.1-min gaps, 0.14s, vault
+fallback unused). **Open: `via=question-match` on both — see KG-A-22.**
+
+### predictionSeries point counts are NOT a quality metric
+
+Forecast 1 returned **743** points; forecast 2 returned **15**. The 15 is not
+degradation and must not be "fixed": that market opened the previous day, so 15
+hourly points is its *entire* history. Both were served from CLOB (0.14s /
+0.15s) with the vault fallback holding 2 rows and going unused in both cases.
+The system showed what exists rather than padding it to look complete — which is
+the same principle as refusing rather than fabricating a benchmark. A future
+reader seeing "only 15 points" should check the market's age before treating it
+as a fault.
+
+### A4 verified against data, not exercised live
+
+Forecast 2's sibling markets at ~100% are ones whose dates have passed:
+`through July 29?` (0.9995, `end_date_iso 2026-07-29`), `July 30?` (0.9995,
+`2026-07-30`), `July 31?` (0.9985, `2026-07-31`). All three carry
+`status='active'` in the vault, so **status alone would not have flagged any of
+them** — which is exactly why A4 keys on the end date. Had one been picked, the
+guard's live-confirmation branch would have fired.
+
+## 8. Not done
+
+The database wipe follows, and is a separate operation on its own timing.
