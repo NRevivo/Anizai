@@ -71,7 +71,7 @@ this repo describes only the first and asserts the second does not exist. Both a
   │   sessions/{id}                        ← BFF writes, client reads live
   │     messages/{id}                      ← BFF + agent write, client reads live
   │     evidence/{id}                      ← agent writes
-  │     predictionSeries/{id}              ← agent writes (empty today, §3)
+  │     predictionSeries/{id}              ← market price history, Tier-1 only
   │     agentEvents/{id}                   ← agent writes, client reads live
   │   sessionResults/{id}                  ← agent writes
   │   forecastQueries/{id}                 ← BFF writes, agent claims  (server-only)

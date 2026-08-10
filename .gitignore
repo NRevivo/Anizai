@@ -24,4 +24,13 @@
 .DS_Store
 
 # Local dev tooling state — per-machine (SQLite DB, agent/job scratch dirs).
+# Both rules are needed: a leading slash anchors the pattern to the repo root, so
+# `/dev/` matches ONLY a top-level dev/ and silently leaves `data-pipeline/dev/`
+# tracked — which is where the Polymarket API-shape scratch work actually lands.
 /dev/
+data-pipeline/dev/
+
+# Generated pipeline report — regenerated per run, never reviewed as source.
+# Ignored rather than relying on "remember not to stage it": a safeguard that
+# depends on remembering fails the first time anyone runs `git add -A`.
+/data-pipeline/PIPELINE_REPORT.md

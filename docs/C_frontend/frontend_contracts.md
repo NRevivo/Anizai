@@ -1,7 +1,7 @@
 # frontend_contracts.md
 > Domain: C — Frontend / BFF
 > Type: Spec
-> Last updated: 2026-07-18
+> Last updated: 2026-07-30 (§2.2 gains the cross-domain `conditionId` status — written but unconsumed, and the camelCase/snake_case hop)
 > TL;DR: Every data shape crossing a boundary in Domain C — the session lifecycle, the REST wire types returned by `GET /sessions/:id`, the Firestore documents the client reads directly, and the mapping layer that turns both into view models. Open this for any question about what a field is called, what it holds, or who writes it.
 
 ## Navigation
@@ -72,8 +72,57 @@ status fields. They are not interchangeable:
 | `forecastQueries/{id}` | `status` | `'pending'` | BFF (`session.repository.ts:436`) |
 
 `forecastQueries` documents also carry `queryId` (a fresh `randomUUID()`), `sessionId`,
-`userId`, `question`, `createdAt`, `claimedAt: null`, `claimedBy: null`. The agent
-claims by setting `claimedAt` / `claimedBy`.
+`userId`, `question`, `conditionId`, `createdAt`, `claimedAt: null`, `claimedBy: null`.
+The agent claims by setting `claimedAt` / `claimedBy`.
+
+**`conditionId`** (`string | null`) is the Polymarket condition id of the market the
+question came from — the deterministic join key against
+`momentum_vault.external_reference_id`, which spares the pipeline a text match. It is
+**always written**, so consumers read one shape; `null` is the freeform case, where the
+question resolves to no market and never will. An empty string is rejected at the route
+(`z.string().trim().min(1).max(200).nullish()`), so a broken id cannot masquerade as
+freeform. It is **not** a UUID — a condition id is a 0x-prefixed 32-byte hash.
+
+It is also persisted on `sessions/{id}`, where it records the market the session is
+**currently** pinned to.
+
+**Clarification clears it — on both documents — and never carries it forward.**
+Clarification *is* market selection, not rewording: the candidate list asks "which
+market did you mean?". Carrying the original id would pin the forecast to the first
+market while the user has just chosen a different one, producing a confident and
+silently wrong answer — real price, `tier_1`, a rendered chart, wrong market.
+
+The chosen candidate's id **cannot replace it either**. Candidate ids are freshly
+generated UUID4s, not market identifiers
+(`data-pipeline/agent/nodes/query_understand.py:380`); the agent has no canonical
+Polymarket id to offer, because that needs a vector index that does not exist yet.
+Writing one into `conditionId` would put a value in the join key that can never match
+`momentum_vault.external_reference_id`.
+
+Null is therefore the correct outcome on every clarification path: **no id falls back
+to question matching, against the text the user just corrected, and a stale id is worse
+than none.** The candidate's id still round-trips through `canonicalKey`, unchanged.
+
+⚠️ `ClarificationCandidate.id` was annotated `// canonical market id` in
+`sessions.service.ts`. That comment was wrong and is what produced the carry-forward
+assumption in the first place; it now states what the field actually is.
+
+**Cross-domain status (verified 2026-07-30): the field is written but nothing reads
+it yet.** A `grep` for `condition_id` / `conditionId` across `data-pipeline/agent/`
+returns no reader of the queue document — only
+`agent/agents/market_bridge.py:223`, which refers to the *vault's*
+`external_reference_id`, a different thing one hop away. So writing it is currently
+inert: the pipeline still resolves by matching the question text, which works because
+the picker submits the market's verbatim `question` (§ above). This is expected — the
+field was added to light up the deterministic join *when* Domain B wires it, not to
+change behaviour now.
+
+**Two names for one value, one hop apart.** The queue document carries **camelCase
+`conditionId`** (BFF convention); the vault column it is meant to join against holds
+the **snake_case** `condition_id` written by `processing/silver_job.py`. Whoever wires
+the read must translate. This is the same shape as the evidence snake_case/camelCase
+trap in §3.5.1 — which the BFF already handles with a dual-read — and it is worth
+knowing before it costs someone an afternoon.
 
 ### §2.3 Queue-document creation paths
 
@@ -133,7 +182,6 @@ become `ApiError`, or `ApiAuthError` for 401/403.
 {
   session:            Session;
   messages:           SessionMessage[];
-  predictionSeries:   PredictionPoint[];   // agent writes none today — §6
   evidence:           Evidence[];          // capped at 50, §3.5
   result:             SessionResult | null;  // null until status === 'done'
   sentimentTimeSeries: SentimentDataPoint[]; // agent writes none today — §6
@@ -767,7 +815,7 @@ retired behavior.
 | Four evidence fields have no fallback | `type`, `title`, `snippet`, `score` are read raw with no snake_case alternative and no null default, but are typed non-optional. If the agent writes `source_type`-style keys for these, they arrive `undefined`. **Not verified against a live evidence document** — needs a Firestore inspection to confirm which keys the agent actually writes. |
 | `impact` is a dead duplicate of `impactOnForecast` | Both exist on the wire `Evidence` type (`sessions.service.ts:90` and `:95`, the latter tagged `// New: Impact classification`). The agent only populates `impactOnForecast`. `TimelineEvent` dropped `impact` entirely and the UI reads `impactOnForecast` exclusively. The wire-type field is retained but unused. |
 | `latestProbability` is BFF-derived | The agent never writes it to the session doc; the BFF back-fills from `sessionResults` for `done` sessions at the cost of one extra read each (§3.3). Removable once the agent writes the field directly. |
-| `predictionSeries` is dead plumbing | Typed, fetched, index-fallback-handled, and returned on every `SessionDetail` — but the agent writes no points, and **no client mapper reads the array**. There is no `predictionSeries` field on `Prediction`. Dead on both ends. |
+| `predictionSeries` client-side is live (was dead plumbing) | **No longer dead on the client end.** Served by its own route, `GET /sessions/:id/predictionSeries` — deliberately **not** part of `SessionDetail`, since ~683 documents on the critical path of every session open is an order of magnitude more than anything else in that aggregate, for a chart below the fold. `cards/MarketPriceHistory.tsx` fetches it on `IntersectionObserver` and maps it inline. Contract finalised by the pipeline owner: `ts` (Firestore Timestamp), `probability` (0–1, the market's YES price), plus three constants — `confidence: 1.0`, `reasonType: "market"`, `evidenceIds: []`. The three constants are **dropped at the mapper**, not carried and ignored: `confidence` is a fixed value, so plotting it or deriving a band from it would present padding as a measurement. Written on the **Tier-1 path only** — on Tier 2 the subcollection does not exist, and both "absent" and "empty" reach the client as `[]`, so the card branches on `tier` to word them differently. Whether the deployed agent writes points is Domain-B state, not verifiable here. |
 | `sentimentTimeSeries` / `marketComparison` / `marketProbability` empty | The agent emits nothing for these; the Sentiment and Market cards render deliberate empty states. Expected shapes are specified in `../backend-specs/market-sentiment-spec.md`. Tracked KG-C-6. |
 | `followEnabled` / `isFollowing` are inert | Written `false` at creation, never updated, read by no UI. Reserved for a tracking/follow feature that does not exist. |
 | Mapped-but-never-rendered fields | `generatedAt`, `agentVersion` reach `Prediction` and stop; `evidenceId`, `origin`, `url`, `fetchedAt`, `recencyWeight`, `usedInAnswer`, `rank` reach `TimelineEvent` and stop; `AgentEvent.payload` and `SessionMessage.meta` are mapped and unused. Not defects — but the plumbing implies a consumer that isn't there. |

@@ -1,0 +1,394 @@
+{
+  "_comment": "A REAL Gamma /events page, captured live 2026-07-30 and trimmed to the keys ingestion/polymarket_producer.py reads. Each event exercises one branch of the P1 selection chain. Shapes are authentic: tags carry int ids, outcomes/outcomePrices/clobTokenIds are JSON-ENCODED STRINGS, and market liquidity arrives as a string while event volume is a float.",
+  "_events": [
+    {
+      "id": "158505",
+      "title": "Clarity Act (H.R.3633) signed into law in 2026?",
+      "case": "DROP: carries a target tag AND an exclude tag"
+    },
+    {
+      "id": "329654",
+      "title": "US obtains Iranian enriched uranium by...?",
+      "case": "KEEP: target tag, future endDate, mixed markets (collectable + never-traded + closed)"
+    },
+    {
+      "id": "448037",
+      "title": "Hantavirus pandemic in 2026?",
+      "case": "DROP: no target tag"
+    },
+    {
+      "id": "574486",
+      "title": "Will Trump pardon SBF by July 31?",
+      "case": "DROP: carries a target tag AND an exclude tag"
+    },
+    {
+      "id": "3296549",
+      "title": "US obtains Iranian enriched uranium by...? (endDate rewound for fixture)",
+      "case": "DROP: endDate already passed (rewound from a real event — live non-closed sweeps rarely contain one)"
+    }
+  ],
+  "data": [
+    {
+      "id": "158505",
+      "title": "Clarity Act (H.R.3633) signed into law in 2026?",
+      "volume": 3314337.6252710004,
+      "volume24hr": 386539.795551,
+      "endDate": "2027-01-01T05:00:00Z",
+      "closed": false,
+      "tags": [
+        {
+          "id": "21",
+          "label": "Crypto"
+        },
+        {
+          "id": "126",
+          "label": "Trump"
+        },
+        {
+          "id": "2",
+          "label": "Politics"
+        },
+        {
+          "id": "531",
+          "label": "us law"
+        },
+        {
+          "id": "105292",
+          "label": "Crypto Legal"
+        },
+        {
+          "id": "105797",
+          "label": "Clarity Act"
+        }
+      ],
+      "markets": [
+        {
+          "id": "1163699",
+          "conditionId": "0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390",
+          "question": "Clarity Act (H.R.3633) signed into law in 2026?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.285\", \"0.715\"]",
+          "clobTokenIds": "[\"35198549486569600595408965368290795524428922595732253580266052028158040373233\", \"29633826701713552120011280893309822625942861174174976276686142480636225243753\"]",
+          "volume24hr": 348512.7625,
+          "liquidityNum": 48000.2913,
+          "liquidity": "48000.2913",
+          "endDate": "2027-01-01T05:00:00Z",
+          "endDateIso": "2027-01-01",
+          "closed": false,
+          "archived": false,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "329654",
+      "title": "US obtains Iranian enriched uranium by...?",
+      "volume": 28960375.990350045,
+      "volume24hr": 106626.814148,
+      "endDate": "2026-12-31T00:00:00Z",
+      "closed": false,
+      "tags": [
+        {
+          "id": "2",
+          "label": "Politics"
+        },
+        {
+          "id": "104039",
+          "label": "U.S. x Iran"
+        },
+        {
+          "id": "100265",
+          "label": "Geopolitics"
+        },
+        {
+          "id": "104010",
+          "label": "Iran Ceasefire"
+        },
+        {
+          "id": "78",
+          "label": "Iran"
+        },
+        {
+          "id": "126",
+          "label": "Trump"
+        },
+        {
+          "id": "453",
+          "label": "Negotiation Topics"
+        }
+      ],
+      "markets": [
+        {
+          "id": "2006982",
+          "conditionId": "0xd87a0ee5367e38072ac013e99035672125fee3a3f4446f0389fe806e42e3e42e",
+          "question": "US obtains Iranian enriched uranium by April 30?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0\", \"1\"]",
+          "clobTokenIds": "[\"41096062945098111823949933488606080240606740976160051684644447840115341135428\", \"107954094694031491419426961086575608232833931530777814045947373328458211979429\"]",
+          "endDate": "2026-04-30T00:00:00Z",
+          "endDateIso": "2026-04-30",
+          "closed": true,
+          "archived": false,
+          "active": true
+        },
+        {
+          "id": "2006983",
+          "conditionId": "0x58998da8fa20593cf07618032acd580344a79279a8bcc3ed128b668d793c3d6f",
+          "question": "US obtains Iranian enriched uranium by December 31?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.085\", \"0.915\"]",
+          "clobTokenIds": "[\"114657271285511367879703365484572688248973675722511239339535646764098946050607\", \"12933385462445051219548039807631278921517469211617755773732773415883384410827\"]",
+          "volume24hr": 64250.716361000006,
+          "liquidityNum": 170444.1545,
+          "liquidity": "170444.1545",
+          "endDate": "2026-12-31T00:00:00Z",
+          "endDateIso": "2026-12-31",
+          "closed": false,
+          "archived": false,
+          "active": true
+        },
+        {
+          "id": "2183424",
+          "conditionId": "0xc112ff35c760ee66738e288067c3de90a2b44a28a9e2f4488989d498be03b292",
+          "question": "US obtains Iranian enriched uranium by June 30?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0\", \"1\"]",
+          "clobTokenIds": "[\"107010784463622992347585756781888741119874289659386929971064211775896839258138\", \"74383005746117841900553443989581268615957888455524049940092822086091148821262\"]",
+          "endDate": "2026-06-30T00:00:00Z",
+          "endDateIso": "2026-06-30",
+          "closed": true,
+          "archived": false,
+          "active": true
+        },
+        {
+          "id": "2355076",
+          "conditionId": "0xef5365cb2973f77e162709e007e0da70d06e8ff1e115372beb437d64326efd76",
+          "question": "US obtains Iranian enriched uranium by July 31?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "clobTokenIds": "[\"99898826776688642243611180513761391438338703592111222029361539646852005434476\", \"47677872301173174398105864641994853717439067266071737642114461777263524877447\"]",
+          "volume24hr": 0,
+          "liquidityNum": 0,
+          "liquidity": "0",
+          "endDate": "2026-07-31T00:00:00Z",
+          "endDateIso": "2026-07-31",
+          "closed": false,
+          "archived": true,
+          "active": false
+        },
+        {
+          "id": "2492625",
+          "conditionId": "0xca9ce5a7e2f41eccfedf8c376b77e1f72d762e69142cdd54b5de41de30e918a2",
+          "question": "US obtains Iranian enriched uranium by July 31? ",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.0015\", \"0.9985\"]",
+          "clobTokenIds": "[\"36146590157764268681634085928856537349789942828886863710234676538502719790403\", \"106223094497006590794919847361505664504239342102498987257666051011853716926618\"]",
+          "volume24hr": 33462.24045700001,
+          "liquidityNum": 112929.07134,
+          "liquidity": "112929.07134",
+          "endDate": "2026-07-31T00:00:00Z",
+          "endDateIso": "2026-07-31",
+          "closed": false,
+          "archived": false,
+          "active": true
+        },
+        {
+          "id": "2757753",
+          "conditionId": "0x720e3088802a33c3607cbff579d67a6e5c42f6e0196470a447f108f9d005557f",
+          "question": "US obtains Iranian enriched uranium by September 30?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.045\", \"0.955\"]",
+          "clobTokenIds": "[\"14531058244135511323708167131367659269778725299916035706490325037718122844763\", \"88496841039217425529633014138604073270845626461615951633938983852496815451920\"]",
+          "volume24hr": 10869.63333,
+          "liquidityNum": 100475.615,
+          "liquidity": "100475.615",
+          "endDate": "2026-09-30T00:00:00Z",
+          "endDateIso": "2026-09-30",
+          "closed": false,
+          "archived": false,
+          "active": true
+        },
+        {
+          "id": "3203595",
+          "conditionId": "0x8bf79620792c8452d889c11f61b4ee05d06f4ed2ea2fb5c689d6ff15e8ce311b",
+          "question": "US obtains Iranian enriched uranium by August 31?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.03\", \"0.97\"]",
+          "clobTokenIds": "[\"34405171049111579727508208902100269461068454587749309895982764876837944442705\", \"54081917799321060265978771417458515772990225518811339761398893337548265533430\"]",
+          "liquidityNum": 4993.13648,
+          "liquidity": "4993.13648",
+          "endDate": "2026-08-31T00:00:00Z",
+          "endDateIso": "2026-08-31",
+          "closed": false,
+          "archived": false,
+          "active": true
+        },
+        {
+          "id": "1808970",
+          "conditionId": "0xbcacd5a055f5a9ced6f69f122216c073dd6987d08253fc07bbcc168fa5b81d55",
+          "question": "US obtains Iranian enriched uranium by May 31?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0\", \"1\"]",
+          "clobTokenIds": "[\"99787107393065498256888522570939526464960671564345515510320748534859284179297\", \"5345441419419147559625888104788940459264045849260872706421285679583531763371\"]",
+          "endDate": "2026-05-31T00:00:00Z",
+          "endDateIso": "2026-05-31",
+          "closed": true,
+          "archived": false,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "448037",
+      "title": "Hantavirus pandemic in 2026?",
+      "volume": 17244249.33927901,
+      "volume24hr": 63295.964091,
+      "endDate": "2026-12-31T00:00:00Z",
+      "closed": false,
+      "tags": [
+        {
+          "id": "570",
+          "label": "Pandemics"
+        },
+        {
+          "id": "84",
+          "label": "Weather"
+        },
+        {
+          "id": "104841",
+          "label": "Hantavirus"
+        }
+      ],
+      "markets": [
+        {
+          "id": "2155000",
+          "conditionId": "0xa4ddc18895cc7b14810283ef8f113939abffd3969c6a0e37f1897110c67e6f73",
+          "question": "Hantavirus pandemic in 2026?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.0335\", \"0.9665\"]",
+          "clobTokenIds": "[\"51508280778202349361616850684455231843716212176724253736363122559269229712002\", \"95212449865986159112377413335252801281670333750637442556685159781445406848396\"]",
+          "volume24hr": 63676.094091000006,
+          "liquidityNum": 965529.92788,
+          "liquidity": "965529.92788",
+          "endDate": "2026-12-31T00:00:00Z",
+          "endDateIso": "2026-12-31",
+          "closed": false,
+          "archived": false,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "574486",
+      "title": "Will Trump pardon SBF by July 31?",
+      "volume": 926265.3488010005,
+      "volume24hr": 54344.25918400001,
+      "endDate": "2026-07-31T19:59:00Z",
+      "closed": false,
+      "tags": [
+        {
+          "id": "126",
+          "label": "Trump"
+        },
+        {
+          "id": "21",
+          "label": "Crypto"
+        },
+        {
+          "id": "2",
+          "label": "Politics"
+        },
+        {
+          "id": "105292",
+          "label": "Crypto Legal"
+        }
+      ],
+      "markets": [
+        {
+          "id": "2474777",
+          "conditionId": "0xfe6f1dad89e1ffad14c6429e2f50354d78bef4ea94b0444c9b8bb7ef24be7175",
+          "question": "Will Trump pardon SBF by July 31?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.0005\", \"0.9995\"]",
+          "clobTokenIds": "[\"91225583041989160599792216424096291630066936781677985371862696685339502604935\", \"13727859623875845595005090657064885280591158091786516620721270589849369886200\"]",
+          "volume24hr": 54336.237161000005,
+          "liquidityNum": 275381.93673,
+          "liquidity": "275381.93673",
+          "endDate": "2026-07-31T19:59:00Z",
+          "endDateIso": "2026-07-31",
+          "closed": false,
+          "archived": false,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "3296549",
+      "title": "US obtains Iranian enriched uranium by...? (endDate rewound for fixture)",
+      "volume": 28960375.990350045,
+      "volume24hr": 106626.814148,
+      "endDate": "2020-01-01T00:00:00Z",
+      "closed": false,
+      "tags": [
+        {
+          "id": "2",
+          "label": "Politics"
+        },
+        {
+          "id": "104039",
+          "label": "U.S. x Iran"
+        },
+        {
+          "id": "100265",
+          "label": "Geopolitics"
+        },
+        {
+          "id": "104010",
+          "label": "Iran Ceasefire"
+        },
+        {
+          "id": "78",
+          "label": "Iran"
+        },
+        {
+          "id": "126",
+          "label": "Trump"
+        },
+        {
+          "id": "453",
+          "label": "Negotiation Topics"
+        }
+      ],
+      "markets": [
+        {
+          "id": "2006982",
+          "conditionId": "0xd87a0ee5367e38072ac013e99035672125fee3a3f4446f0389fe806e42e3e42e",
+          "question": "US obtains Iranian enriched uranium by April 30?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0\", \"1\"]",
+          "clobTokenIds": "[\"41096062945098111823949933488606080240606740976160051684644447840115341135428\", \"107954094694031491419426961086575608232833931530777814045947373328458211979429\"]",
+          "endDate": "2026-04-30T00:00:00Z",
+          "endDateIso": "2026-04-30",
+          "closed": true,
+          "archived": false,
+          "active": true
+        },
+        {
+          "id": "2006983",
+          "conditionId": "0x58998da8fa20593cf07618032acd580344a79279a8bcc3ed128b668d793c3d6f",
+          "question": "US obtains Iranian enriched uranium by December 31?",
+          "outcomes": "[\"Yes\", \"No\"]",
+          "outcomePrices": "[\"0.085\", \"0.915\"]",
+          "clobTokenIds": "[\"114657271285511367879703365484572688248973675722511239339535646764098946050607\", \"12933385462445051219548039807631278921517469211617755773732773415883384410827\"]",
+          "volume24hr": 64250.716361000006,
+          "liquidityNum": 170444.1545,
+          "liquidity": "170444.1545",
+          "endDate": "2026-12-31T00:00:00Z",
+          "endDateIso": "2026-12-31",
+          "closed": false,
+          "archived": false,
+          "active": true
+        }
+      ]
+    }
+  ]
+}

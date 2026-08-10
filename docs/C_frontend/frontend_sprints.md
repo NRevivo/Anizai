@@ -1,7 +1,7 @@
 # frontend_sprints.md
 > Domain: C — Frontend / BFF
 > Type: Sprints
-> Last updated: 2026-07-20
+> Last updated: 2026-07-30 (two slices added: the market-first new-forecast screen and the price-history chart / `conditionId` round trip)
 > TL;DR: Live status of the client and BFF — what's closed, what's open, what's deferred, and the Domain C Known Gaps (KG-C-1 … KG-C-15). Open this to see what frontend/BFF work remains and which debts are tracked.
 
 ## Navigation
@@ -45,6 +45,13 @@ could be identified, the date column says so.
 | Trending topic filter — KG-C-15 | Closed | 2026-07-20 | Trending constrained to the pipeline's 13 forecastable topic domains via an excluded-category check plus a Polymarket tag → topic map; `debug` log for unmapped tags, `warn` + `[]` when nothing is on topic. No contract change. Server tests 28→33 |
 | Trending cleanup — finish the section | Closed | 2026-07-20 | Dead `trend` removed (KG-C-14 residual); `slug` dropped from the contract; `url` wired as the row link on both surfaces; strike-ladder outcomes deduped on rendered percentage; orphaned `trendingForecasts` collection constant removed; **deleted `components/TrendingForecasts.tsx`** — an unimported component holding four inline hardcoded forecasts, which survived the `mockData.ts` deletion because its fixtures were inline rather than imported. Server tests 33→35 |
 | BFF production-hardening — KG-C-10 | Closed | 2026-07-22 | Path-prefix app-level auth (structural, no more per-route opt-in); env-driven CORS via `CORS_ORIGINS` (no hardcoded localhost in prod); `GET /me` made idempotent (`findById` pure read, migration + expiry-downgrade moved to write paths, downgrade enforced live in `incrementUsage`); zod field detail forwarded via a `validationError` helper. Server tests 35→47. See §4 design note |
+| Market-first new-forecast screen | Closed | 2026-07-28 | The event title could never text-match a market question (measured: 15 of the top 20 visible titles), so a forecast created from a card was unresolvable by construction. `/trending` now exposes per-market `question` + `conditionId`; `MarketPicker` chooses a leg and submits its **verbatim** question. Markets lead the screen and free text became a peer modal. `markets[]` moved off the default list payload into `GET /trending/:id/markets` (59.9 KB → 4.5 KB) and `compression` added. `GET /trending/search` reaches the whole catalogue, not just the top-100 by volume. Also fixed a mobile-only blank screen — `crypto.randomUUID` is undefined on insecure origins — and a sidebar row showing "—" instead of a probability for newly finished forecasts |
+| Price-history chart + `conditionId` round trip | Closed | 2026-07-30 | `sessions/{id}/predictionSeries` was plumbed end to end but read by nothing; `cards/MarketPriceHistory.tsx` now renders it against the Anizai forecast, with axis geometry unit-tested in `lib/marketPriceChart.ts` (19 tests). A browser pass over six states caught two axis defects (a 2.1-day series printing "Jun 15" five times; y-ticks at 23/43/63/90), both now regression-tested. `conditionId` threaded from picker → `POST /sessions` → `forecastQueries`, and **cleared on clarification** — clarification is market *selection*, and candidate ids are per-session UUID4s, not market identifiers, so carrying the old id would pin a forecast to the wrong market. Empty series split three ways (`tier_2` / `tier_1` / `null`) so a degraded fetch cannot read as "no market". Series fetch made lazy (`IntersectionObserver`) and moved off `SessionDetail`. Client tests 90 → 115, server 50 → 54 |
+
+> **Verification status of the 2026-07-30 row.** The card and chart were confirmed
+> against real pipeline data on 2026-07-30 (`frontend_ui.md` §6.3) — the first time
+> either had non-zero market data to render. The `tier_1`-with-empty-series branch had
+> no reachable state and remains source-verified only.
 
 > Slices 2.5–2.7 are documented in `../archive/backend-audit.md` and referenced by CLAUDE.md,
 > but no commit on `client/`/`server/` could be matched to them by message. Their
@@ -112,7 +119,7 @@ KG-C-13, KG-C-14 and KG-C-15 also closed the same day, and KG-C-10 closed
 |---|---|---|---|
 | Market comparison card (live data) | Slice 13 | Agent emits `marketProbability: null` and `marketComparison: []` | Agent populates them; shapes specified in `../backend-specs/market-sentiment-spec.md` |
 | Sentiment time series | Slice 13 | Agent writes no points | As above |
-| `predictionSeries` feature | Task 10 | Plumbed end-to-end but agent writes nothing and no client mapper reads it | A product decision to build probability-over-time; otherwise delete the plumbing |
+| `predictionSeries` feature | Task 10 | **Closed on the client side.** The product decision was made: `cards/MarketPriceHistory.tsx` renders the market's own price history against the Anizai forecast, with pure geometry in `lib/marketPriceChart.ts` (19 unit tests). Remaining dependency is Domain B actually writing the documents | — |
 | Tracking / follow feature | — | `followEnabled` / `isFollowing` written `false`, never updated, read by no UI | Product decision |
 | Router adoption | — | No router library; navigation is a `useState` union. Costs deep links, history, shareable URLs | A deliberate routing sprint — not a local fix |
 | Reasoning-trace retention | Sprint 25 | Rule A drops the agent timeline at `done`; events persist in Firestore but are never shown again | Product decision on whether a finished forecast should show how it was produced |

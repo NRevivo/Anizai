@@ -148,9 +148,23 @@ def run(state: dict) -> dict:
         session_id, actual_session_id, run_id, claimed.get("queryId"),
     )
 
+    # A1: the market picker's conditionId, when the queue doc carries one.
+    # `claim_query` returns the doc payload verbatim, so this needs no
+    # firestore_client change — the key simply appears once the BFF writes it.
+    #
+    # Absent is the normal case today and must stay silent: the field does not
+    # yet exist on any forecastQueries doc (the picker selects a conditionId but
+    # CreateForecastView drops it before submit), so a warning here would fire on
+    # every single forecast. Downstream, an empty condition_id routes to the
+    # unchanged pg_trgm resolver — identical behaviour to before this field
+    # existed. Normalised to "" rather than None so consumers can use a plain
+    # truthiness check without caring which absence they got.
+    condition_id = str(claimed.get("conditionId") or "").strip()
+
     return {
         "session_id": actual_session_id,
         "raw_question": claimed["question"],
         "user_id": claimed["userId"],
         "run_id": run_id,
+        "condition_id": condition_id,
     }

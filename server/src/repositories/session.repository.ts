@@ -28,6 +28,7 @@ function mapSessionDoc(doc: FirebaseFirestore.QueryDocumentSnapshot): Session {
         followEnabled: data.followEnabled ?? false,
         isFollowing: data.isFollowing ?? false,
         canonicalKey: data.canonicalKey ?? null,
+        conditionId: data.conditionId ?? null,
         errorCode: data.errorCode ?? null,
         errorMessage: data.errorMessage ?? null,
         clarificationCandidates: (data.clarificationCandidates ?? null) as ClarificationCandidate[] | null,
@@ -187,6 +188,7 @@ export const sessionRepository = {
             followEnabled: data.followEnabled ?? false,
             isFollowing: data.isFollowing ?? false,
             canonicalKey: data.canonicalKey ?? null,
+            conditionId: data.conditionId ?? null,
             errorCode: data.errorCode ?? null,
             errorMessage: data.errorMessage ?? null,
             clarificationCandidates: (data.clarificationCandidates ?? null) as ClarificationCandidate[] | null,
@@ -420,6 +422,7 @@ export const sessionRepository = {
             followEnabled: false,
             isFollowing: false,
             canonicalKey: null,
+            conditionId: input.conditionId ?? null,
             errorCode: null,
             errorMessage: null,
             clarificationCandidates: null,
@@ -433,6 +436,11 @@ export const sessionRepository = {
             sessionId: sessionRef.id,
             userId,
             question: input.question,
+            // The market this question is a verbatim copy of, or null for
+            // freeform. Lets the pipeline join on
+            // `momentum_vault.external_reference_id` instead of text-matching
+            // the question. Always written, so consumers can read one shape.
+            conditionId: input.conditionId ?? null,
             status: 'pending' as const,
             createdAt,
             claimedAt: null,
@@ -465,6 +473,12 @@ export const sessionRepository = {
         const sessionUpdate = {
             status: 'queued' as const,
             canonicalKey: selectedCandidate?.id ?? session.canonicalKey ?? null,
+            // Cleared, never carried. See the note on forecastQueryData below.
+            // Clearing here too keeps `session.conditionId` meaning "the market
+            // this session is currently pinned to" rather than "the market it was
+            // originally created against", which would go stale the moment a
+            // clarification lands and read as current to anyone downstream.
+            conditionId: null,
             errorCode: null,
             errorMessage: null,
             clarificationCandidates: null,
@@ -477,6 +491,25 @@ export const sessionRepository = {
             sessionId: session.id,
             userId: session.userId,
             question: session.question,
+            // ALWAYS null on requeue — never carried forward, and never set from
+            // the chosen candidate.
+            //
+            // Clarification is market *selection*, not rewording: the candidate
+            // list asks "which market did you mean?". Carrying the original id
+            // would pin the forecast to the first market while the user has just
+            // chosen a different one — a confident, silently wrong answer.
+            //
+            // It cannot be replaced by the candidate's id either. Candidate ids
+            // are freshly generated UUID4s, not market identifiers
+            // (`agent/nodes/query_understand.py:380`); the agent has no canonical
+            // Polymarket id to offer, because that needs a vector index that does
+            // not exist yet. Writing one into conditionId would put a value in the
+            // join key that can never match momentum_vault.external_reference_id.
+            //
+            // Null is the correct outcome: no id falls back to question matching,
+            // against the text the user just corrected. A stale id is worse than
+            // none. The candidate's own id still round-trips through canonicalKey.
+            conditionId: null,
             status: 'pending' as const,
             createdAt: updatedAt,
             claimedAt: null,

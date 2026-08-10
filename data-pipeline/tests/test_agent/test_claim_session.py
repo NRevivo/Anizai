@@ -165,7 +165,14 @@ def test_run_propagates_question_and_user_id_from_payload(mocked_firestore):
     assert out["raw_question"] == "Will BTC hit 100k by EOY 2026?"
     assert out["user_id"] == "user-abc"
     assert out["run_id"]  # minted uuid4 hex
-    assert set(out) == {"session_id", "raw_question", "user_id", "run_id"}
+    # A1 (2026-07-30): condition_id joins the claim payload. Absent on the queue
+    # doc today — the picker selects one but CreateForecastView drops it before
+    # submit — so it normalises to "" and downstream falls through to the
+    # pg_trgm resolver exactly as before.
+    assert set(out) == {
+        "session_id", "raw_question", "user_id", "run_id", "condition_id",
+    }
+    assert out["condition_id"] == ""
 
 
 # ==========================================================

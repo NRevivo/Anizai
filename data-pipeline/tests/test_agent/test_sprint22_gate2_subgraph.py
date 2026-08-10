@@ -706,7 +706,12 @@ def test_subgraph_resolver_miss_falls_back_to_tier_2_cleanly(mocked_firestore_he
     result = sr.call_args.args[1]
     assert result["marketProbability"] is None
     assert result["marketComparison"] == []
-    assert result["marketComparisonInsight"] == synthesize_node.NO_MARKET_CAPTION
+    # A5 (2026-07-30): a MARKET-SHAPED question that resolves to nothing is our
+    # coverage gap, not a property of the question — see line 702, this test's
+    # own premise is that intent is True. It therefore gets the explicit
+    # refusal, not the freeform caption. NO_MARKET_CAPTION remains correct for
+    # genuinely open-ended questions (test 2).
+    assert result["marketComparisonInsight"] == synthesize_node.NO_MATCH_CAPTION
     assert result["tier"] == "tier_2"
 
     # predictionSeries empty (no polymarket → no price_history).

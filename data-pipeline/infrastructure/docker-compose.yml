@@ -280,6 +280,16 @@ services:
       # airflow-scheduler at line ~487).
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       POSTGRES_HOST: postgres
+      # KG-A-10: `env_file: .env` above hands this service the WHOLE file, so a
+      # producer-oriented setting can reach the Flink JVM. LOG_INFO_SAMPLE_RATE=1.0
+      # did exactly that — reproduced 2026-08-01, it kills the job on its first
+      # message with OutOfMemoryError: Direct buffer memory. Causation is confirmed
+      # by single-variable reproduction; the PATH from the flag to direct-buffer
+      # exhaustion is NOT established (KG-A-17 stays open for it). Pinned here so no
+      # value in .env can reach the JVM — an explicit `environment:` entry always
+      # wins over env_file. Raising mem_limit does NOT help: direct memory is bounded
+      # by Flink's off-heap config, not by cgroups.
+      LOG_INFO_SAMPLE_RATE: "0.01"
     volumes:
       - flink_checkpoints:/opt/flink/checkpoints
       - flink_checkpoints:/opt/flink/savepoints
@@ -341,6 +351,16 @@ services:
       # the same internal hostname corrections.
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       POSTGRES_HOST: postgres
+      # KG-A-10: `env_file: .env` above hands this service the WHOLE file, so a
+      # producer-oriented setting can reach the Flink JVM. LOG_INFO_SAMPLE_RATE=1.0
+      # did exactly that — reproduced 2026-08-01, it kills the job on its first
+      # message with OutOfMemoryError: Direct buffer memory. This is the service it
+      # killed. Causation is confirmed by single-variable reproduction; the PATH from
+      # the flag to direct-buffer exhaustion is NOT established (KG-A-17 stays open
+      # for it). Pinned here so no value in .env can reach the JVM — an explicit
+      # `environment:` entry always wins over env_file. Raising mem_limit does NOT
+      # help: direct memory is bounded by Flink's off-heap config, not by cgroups.
+      LOG_INFO_SAMPLE_RATE: "0.01"
     volumes:
       - flink_checkpoints:/opt/flink/checkpoints
     networks:

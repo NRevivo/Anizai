@@ -50,13 +50,24 @@ def _claim_payload(session_id="doc1", question="Will the Fed cut rates in 2026?"
 
 
 def _make_candidate(*, confidence=0.9, entities=None, search_terms=None,
-                    too_broad=False, rejected=False):
+                    too_broad=False, rejected=False, market_intent=True):
+    """
+    A structured_intent stub.
+
+    `market_intent` became a parameter on 2026-07-30 (A5). It was hardcoded
+    True, which mislabelled every question this helper produced as discrete and
+    market-resolvable — including open-ended ones like "will there be a Tokyo
+    earthquake". That distinction is now load-bearing: it decides whether an
+    unmatched question gets the freeform caption (accurate: no market could
+    exist) or the explicit refusal (accurate: a market should exist and we did
+    not find it).
+    """
     return {
         "intent": "forecast",
         "domain": "macro",
         "entities": entities or ["Federal Reserve"],
         "polymarket_search_terms": search_terms,
-        "has_market_question_intent": True,
+        "has_market_question_intent": market_intent,
         "confidence": confidence,
         "too_broad": too_broad,
         "rejected": rejected,
@@ -375,6 +386,11 @@ def test_gate2_tier2_freeform_clear_question_produces_tier2_synthesis(mock_react
                 confidence=0.90,
                 entities=["Tokyo Earthquake"],
                 search_terms=None,  # no polymarket terms
+                # Genuinely open-ended: no prediction market exists for "will
+                # there be a Tokyo earthquake", so the freeform caption is the
+                # accurate one and this test must not inherit the helper's
+                # default of True (A5).
+                market_intent=False,
             )
         ],
         polymarket_market=None,  # no polymarket data

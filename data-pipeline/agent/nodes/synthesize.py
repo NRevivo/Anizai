@@ -118,6 +118,65 @@ KEY_EVIDENCE_TOP_N: int = 5
 # Triggers the Patch 4 frontend empty state in MarketComparison card.
 NO_MARKET_CAPTION: str = "No canonical market available — freeform analysis."
 
+# A5 — the honest refusal. Distinct from NO_MARKET_CAPTION above, and the
+# distinction is the whole point of this task.
+#
+# NO_MARKET_CAPTION is correct for an open-ended question ("how will the Gulf
+# situation develop?"): no market exists because no market COULD exist, and
+# freeform analysis is the product working as designed.
+#
+# This caption is for the other case: the user asked something discrete and
+# market-resolvable ("will the Fed cut by 50bps in September?") and we could not
+# find the market. That is a gap in OUR coverage, not a property of the
+# question, and describing it as "freeform analysis" quietly reframes our miss
+# as their question's nature. Naming it, and pointing at the screen where the
+# markets we DO hold are listed, turns a silent degradation into a recoverable
+# state the user can act on. Per plan D10: an honest state, not a broken one.
+NO_MATCH_CAPTION: str = (
+    "No matching prediction market was found for this question, so there is no "
+    "market benchmark to compare against. The forecast below is based on "
+    "evidence alone. To compare against live market pricing, pick the market "
+    "directly from the new-forecast screen."
+)
+
+# A5 — a resolved market is a retrospective, and must never be presented as a
+# live benchmark. `has_ended` is set by market_bridge's A4 guard, which confirms
+# against Polymarket rather than trusting the stored status (stale by
+# construction: the producer sweeps hourly, so a market can resolve in between).
+#
+# Why the comparison is SUPPRESSED rather than captioned:
+#     A resolved market's price is 0.0 or 1.0. That is the ANSWER, not a
+#     benchmark. Publishing it as `marketProbability` renders "Market Consensus
+#     100% vs Anizai 63%" under a caption reading "37 points below the market" —
+#     which is a scoreboard, not a comparison, and invites the user to conclude
+#     the system was wrong when it was never benchmarking against a settled
+#     outcome in the first place. Leaving marketProbability NULL drops the card
+#     to its empty state and the settled outcome moves into the caption text,
+#     where it can be described as what it is.
+RESOLVED_MARKET_PREFIX: str = (
+    "This market has already resolved, so there is no live market price to "
+    "compare against. "
+)
+
+
+def _settled_outcome_sentence(odds: Optional[float]) -> str:
+    """
+    Describe how a resolved market settled, in words rather than as a benchmark.
+
+    A settled market prices at the extremes — near 1.0 for YES, near 0.0 for NO —
+    so the numeric value IS the resolution. The 0.5 band is unreachable in
+    practice for a genuinely settled market; it is handled so an early or
+    disputed settlement degrades to a neutral sentence instead of asserting an
+    outcome we cannot read.
+    """
+    if odds is None:
+        return "The final outcome is not available."
+    if odds >= 0.99:
+        return "It settled YES."
+    if odds <= 0.01:
+        return "It settled NO."
+    return f"It last traded at {odds:.0%} before resolving."
+
 
 # ==========================================================
 # OpenAI client lifecycle (matches Sprint 19 / Bundle A pattern)
@@ -230,6 +289,11 @@ def run(state: dict, *, client: Optional[Any] = None) -> dict:
         evidence_trail=evidence_trail,
         polymarket_payload=polymarket_payload,
         tier=tier,
+        # A5: distinguishes "no market exists for this kind of question" from
+        # "a market should exist and we did not find it".
+        market_question_intent=bool(
+            structured_intent.get("has_market_question_intent")
+        ),
     )
 
     logger.info(
@@ -395,6 +459,7 @@ def _build_session_result(
     evidence_trail: list[dict],
     polymarket_payload: Optional[dict],
     tier: str,
+    market_question_intent: bool = False,
 ) -> dict:
     """
     Assemble the §8.7.2-compliant SessionResult dict from the LLM's
@@ -444,7 +509,20 @@ def _build_session_result(
         synthesis_output.get("market_comparison_insight") or ""
     )
     if polymarket_payload is None:
-        market_comparison_insight = NO_MARKET_CAPTION
+        # A5: which "no market" is this? A market-shaped question that found
+        # nothing is our coverage gap and gets the actionable refusal; an
+        # open-ended question gets the freeform caption, which is accurate.
+        market_comparison_insight = (
+            NO_MATCH_CAPTION if market_question_intent else NO_MARKET_CAPTION
+        )
+    elif polymarket_payload.get("has_ended"):
+        # A5: REPLACE the model's commentary rather than prefix it. The model was
+        # asked to compare two probabilities and did so; with the comparison
+        # suppressed, its numeric commentary would describe a bar chart that is
+        # no longer on screen.
+        market_comparison_insight = RESOLVED_MARKET_PREFIX + _settled_outcome_sentence(
+            polymarket_payload.get("current_odds")
+        )
 
     final_probability = float(synthesis_output["final_probability"])
 
@@ -454,7 +532,16 @@ def _build_session_result(
     # from "market exists but odds are 0.0" (preserved as 0.0).
     market_probability: Optional[float] = None
     market_comparison: list[dict] = []
-    if polymarket_payload is not None:
+    # A5: `has_ended` suppresses the numeric comparison entirely — NULL
+    # marketProbability drops the MarketComparison card to its empty state,
+    # which is the honest render for a settled outcome. predictionSeries is
+    # deliberately NOT suppressed alongside it: measured on five recently-closed
+    # high-volume markets (2026-07-30), three showed a substantial move to
+    # certainty over the final 30 days (ranges of 0.385 / 0.368 / 0.589) and the
+    # two flat ones sat at ~0.005 throughout — uninteresting but never
+    # misleading. A time series is labelled as history and carries none of the
+    # scoreboard framing a lone scalar does.
+    if polymarket_payload is not None and not polymarket_payload.get("has_ended"):
         odds = polymarket_payload.get("current_odds")
         if odds is not None:
             market_probability = float(odds)

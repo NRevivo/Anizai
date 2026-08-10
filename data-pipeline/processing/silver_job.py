@@ -129,6 +129,30 @@ except ImportError:
 DLQ_TAG    = "dlq"
 SOCIAL_TAG = "social_pulse"
 
+# ==========================================================
+# Polymarket probability bounds (S5)
+# ==========================================================
+# A Polymarket price is a probability and is definitionally bounded at [0, 1].
+# INCLUSIVE at both ends: 0.0 and 1.0 are legitimate live market states (a
+# resolved-NO leg trades at exactly 0.0, and longshot legs sit at 0.0005), and
+# discarding them would throw away real data.
+#
+# What this guard is NOT for: it is not the detector for the 79-day zero-price
+# defect. That failure is now structurally unreachable one layer up — a market
+# whose outcomes cannot be read emits NO record at all rather than a sentinel
+# (`_fetch_market_prices` returns None), and a payload with no `price` key now
+# fails the numeric gate below instead of silently defaulting to 0.0 in the
+# mapper. This guard catches SCALE errors: a negative value, a percentage that
+# arrived as 67 instead of 0.67, an upstream shape change. The zero-price class
+# is caught by the producer's per-sweep all-zeros WARNING instead, which can
+# distinguish "this market is at 0" from "every market is at 0".
+#
+# Source-scoped by construction: these bounds are applied only inside the
+# Polymarket branch. FRED (4.35), OpenWeather and OpenSky values are not 0-1 and
+# never reach this check.
+POLYMARKET_PROBABILITY_MIN = 0.0
+POLYMARKET_PROBABILITY_MAX = 1.0
+
 
 # ==========================================================
 # Transform Functions — Pure Python, no PyFlink dependency
@@ -167,11 +191,41 @@ def map_price_update_to_silver(raw: dict, envelope: dict) -> dict:
             ),
         },
         "data_point": {
+            # The 0.0 default here is UNREACHABLE on the routed path and must
+            # stay that way. `process_polymarket_message` gates on presence
+            # first — `float(raw.get("price"))` with NO default, so an absent key
+            # raises TypeError and routes to DLQ as `price_guard` — before this
+            # mapper is ever called. That ordering is what distinguishes "no
+            # price was sent" from "the market really is at 0.0", which the
+            # [0.0, 1.0] range guard structurally cannot do, since 0.0 is a
+            # legitimate value. Reinstating a default in the GATE would collapse
+            # the two back together and reopen the defect that put 93,607 zero
+            # rows into the vault.
             "current_value": float(raw.get("price", 0.0)),
-            "unit":          "USD",
-            "status":        "active",
+            # S3 — a Polymarket price is a probability in [0, 1], never dollars.
+            # "USD" was wrong from the start and actively misleading: it invites
+            # a reader (or a future consumer) to treat 0.0135 as a price in
+            # cents. Verified before changing — the only non-test reader of this
+            # field is market_bridge._build_linked_sources, which passes it
+            # through for display and never compares it to a literal.
+            "unit":          "probability",
+            # S2 — the producer classifies the real state (active / inactive /
+            # archived / closed) from the Gamma object. Hardcoding "active" here
+            # discarded that and asserted every row was live, which is how a
+            # resolved market could be served to the agent as a current one.
+            # Measured 2026-07-30 on the target set: 1,298 active, 95 inactive,
+            # 3 archived — so this was wrong for ~7% of rows, silently.
+            # WebSocket rows carry no market_status; "active" remains their
+            # default, which is correct for a live trade event.
+            "status":        raw.get("market_status", "active"),
             "timestamp_utc": (
+                # S4 — `timestamp` is the WebSocket key; `fetched_at` is the one
+                # REST snapshots actually send. Without the middle fallback every
+                # REST row silently aged to the envelope's producer_timestamp,
+                # which is close enough to look right and wrong enough to skew a
+                # time-series.
                 raw.get("timestamp")
+                or raw.get("fetched_at")
                 or envelope.get("producer_timestamp", "")
             ),
         },
@@ -198,6 +252,49 @@ def map_price_update_to_silver(raw: dict, envelope: dict) -> dict:
             "whale_alert":        bool(raw.get("whale_alert", False)),
             "resolution_rules":   "",
             "question":           raw.get("question", ""),
+
+            # --- Catalog fields (S1) ---
+            # The producer has emitted these since the T7 fix; this mapper was
+            # a fixed 7-key dict, so every one of them hit the floor here. They
+            # cost NO schema change to carry: momentum_vault.insert stores
+            # metadata_extension verbatim as JSONB, so the column already holds
+            # whatever this dict contains.
+            #
+            # WebSocket rows carry none of these — a last_trade event has no
+            # catalog context — so each defaults to its empty form rather than
+            # being absent, keeping the JSONB shape uniform across both
+            # ingestion modes. Consumers can then read a key unconditionally
+            # instead of branching on ingestion_mode.
+
+            # {"Yes": "97186…", "No": "81470…"} — keyed by outcome label (P8),
+            # NOT a positional list. This is the join key for the CLOB
+            # price-history call that feeds the frontend chart, which needs the
+            # YES token specifically; picking it by index would chart the NO
+            # side and invert a 7% market into 93%.
+            "clob_token_ids":  raw.get("clob_token_ids", {}),
+            # Polymarket's own market id. It is ALSO written to
+            # core_identity.parent_id above, but that field does not survive
+            # persistence: momentum_vault has no parent_id column (init.sql —
+            # 13 columns) and `insert` does not reference one, so today the
+            # market id is dropped entirely at the vault boundary. Carrying it
+            # here is the fix, and it costs nothing — metadata_extension is
+            # stored verbatim as JSONB, so no migration and no extra deployment.
+            "market_id":       raw.get("market_id", ""),
+            # Links this market to its parent event. The event is the coherent
+            # forecasting unit (D2) and the only thing that groups a 128-leg
+            # candidate field back together.
+            "parent_event_id": raw.get("parent_event_id", ""),
+            # The parent's headline — the picker shows it, and without it
+            # nothing downstream can NAME the question this market belongs to.
+            "event_title":     raw.get("event_title", ""),
+            # Feeds the agent's resolved-market guard (A4). `status` below is
+            # stale by construction: a market can resolve between our sweep and
+            # the user's question, so the agent re-checks the date rather than
+            # trusting a stored status.
+            "end_date_iso":    raw.get("end_date_iso", ""),
+            # Both sides of the book. NO is not 1 - YES once a spread exists,
+            # so the complement cannot be reconstructed from current_value.
+            "outcome_prices":  raw.get("outcome_prices", {}),
         },
     }
 
@@ -250,6 +347,8 @@ def process_polymarket_message(
         1. Envelope fails validate_envelope()  → (DEAD_LETTER_QUEUE, dlq_record)
         2. Payload fails validate_bronze_payload() → (DEAD_LETTER_QUEUE, dlq_record)
         3. payload_type == "price_update"
+               → price missing or non-numeric  → (DEAD_LETTER_QUEUE, dlq_record)
+               → price outside [0.0, 1.0]      → (DEAD_LETTER_QUEUE, dlq_record)
                → map_price_update_to_silver()
                → validate_silver_structured_metric()
                → pass: (SILVER_STRUCTURED_METRICS, silver_record)
@@ -320,6 +419,41 @@ def process_polymarket_message(
                 event_type, raw.get("asset_id", "unknown"),
             )
             return None, None   # intentional skip — not a DLQ error
+
+        # --- Gate: price is numeric (S5) ---
+        # Previously the mapper read `raw.get("price", 0.0)`, so a payload with
+        # no price key became a confident 0.0 rather than an error. That default
+        # is what let 93,607 rows of zeros look like data. There is no legitimate
+        # price_update without a price on either ingestion path.
+        try:
+            probability = float(raw.get("price"))
+        except (TypeError, ValueError):
+            errors = [
+                f"raw_payload.price={raw.get('price')!r} is missing or non-numeric. "
+                "Every price_update carries a probability on both the REST and "
+                "WebSocket paths (Section B.8)."
+            ]
+            logger.error(
+                "[silver/polymarket] Non-numeric price for condition_id=%s: %s",
+                raw.get("condition_id") or raw.get("asset_id", "unknown"), errors,
+            )
+            return DEAD_LETTER_QUEUE, _dlq_record(envelope, errors, "price_guard")
+
+        # --- Gate: probability range guard (S5) ---
+        if not (POLYMARKET_PROBABILITY_MIN <= probability
+                <= POLYMARKET_PROBABILITY_MAX):
+            errors = [
+                f"raw_payload.price={probability} is outside the valid range "
+                f"[{POLYMARKET_PROBABILITY_MIN}, {POLYMARKET_PROBABILITY_MAX}]. "
+                "Polymarket prices are probabilities and are bounded at 0-1 by "
+                "definition; a value outside it is a scale error (a percentage "
+                "sent as 67 rather than 0.67) or an upstream shape change."
+            ]
+            logger.error(
+                "[silver/polymarket] Out-of-range price for condition_id=%s: %s",
+                raw.get("condition_id") or raw.get("asset_id", "unknown"), errors,
+            )
+            return DEAD_LETTER_QUEUE, _dlq_record(envelope, errors, "price_range_guard")
 
         silver = map_price_update_to_silver(raw, envelope)
         result = validate_silver_structured_metric(silver)

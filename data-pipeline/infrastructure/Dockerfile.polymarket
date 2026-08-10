@@ -48,4 +48,32 @@ COPY ingestion/__init__.py /app/ingestion/__init__.py
 # PYTHONPATH makes `from config.settings import ...` resolve correctly.
 ENV PYTHONPATH=/app
 
+# Python block-buffers stdout when it is not a TTY, and the producer logs to
+# stdout (`polymarket_producer.py`, main()), so without this a killed container
+# can lose whatever is still sitting in the buffer.
+#
+# It is NOT, however, why the producer's logs look absent. That is
+# `INFO_SAMPLE_RATE = 0.01` in `utils/logging_config.py:64` — INFO records are
+# deliberately 1% sampled (ERROR and above are kept in full). "Market discovery"
+# appearing three times in thirty days is exactly 1% of ~288 sweeps/day, and a
+# run that ingested 1,100 rows while logging almost nothing is the expected
+# behaviour, not a fault. Several earlier investigations concluded ingestion was
+# dead on that evidence; it was not.
+#
+# Consequence for anyone verifying a run: nothing to set. The two records that
+# matter — the discovery funnel and the per-sweep emitted/skipped/total line —
+# now carry `extra={"always_emit": True}` and bypass sampling per-record
+# (`utils/logging_config.py`, _SampledInfoFilter). They are emitted in full at
+# the default 1% rate.
+#
+# Do NOT reach for LOG_INFO_SAMPLE_RATE=1.0, which an earlier revision of this
+# comment recommended. That flag is process-wide: it unsamples every INFO record
+# in the container, including the per-message ones the policy exists to suppress.
+# The same recommendation was applied to the agent and took the pipeline down; it
+# was withdrawn and reopened as a KG. The underlying OOM mechanism is still
+# unresolved (KG-A-17), so the safe assumption is that unsampling a high-volume
+# INFO stream in this cluster is load-bearing, not cosmetic. Exempt the specific
+# record instead.
+ENV PYTHONUNBUFFERED=1
+
 CMD ["python", "-m", "ingestion.polymarket_producer"]

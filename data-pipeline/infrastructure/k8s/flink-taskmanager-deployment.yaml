@@ -128,8 +128,35 @@ spec:
               value: ""
             # Phase 7D durable (KG-A-7): the enrichment dedup gate is a kill switch, default on — stays true.
             # REJECT_CAPTURE_ENABLED stays true (7B.5 needs the reject corpus). RUN_ID neutral until a run sets it.
-            # LOG_INFO_SAMPLE_RATE intentionally ABSENT (default): setting it to 1.0 triggered a TaskManager OOM
-            # in the 7D window (mechanism unresolved — reports/phase7d-verify-20260727/deployment_log.md); do NOT re-add.
+            # LOG_INFO_SAMPLE_RATE intentionally ABSENT (code default 0.01). DO NOT re-add it at 1.0.
+            # This is the workload it killed — two TaskManagers, in the Phase 7D window.
+            #
+            # Reproduced locally 2026-08-01 (KG-A-10): setting this to 1.0 kills the JOB on its first
+            # message with
+            #     java.lang.OutOfMemoryError: Direct buffer memory
+            # Causation is confirmed by single-variable reproduction — 1.0 crashes, 0.01 runs clean.
+            # The exact path from the flag to direct-buffer exhaustion is NOT established. The
+            # "more log records over the Beam channel" explanation is CONTRADICTED by 7D evidence
+            # that INFO is already unsampled on the Flink UDF path (KG-A-18). Do not re-add it, and
+            # do not assume the mechanism is understood.
+            #
+            # PROVEN, and load-bearing for whoever debugs this next:
+            #  - The CONTAINER SURVIVES. Measured OOMKilled=false, Restarts=0, 750 MiB of 7.6 GiB in
+            #    use. Only the job dies. The downstream noise ("Failed to start remote bundle",
+            #    "CANCELLED: client cancelled", BeamFnDataGrpcMultiplexer hang-ups) is the gRPC
+            #    channel being torn down by the OOM, and reads misleadingly as a Beam Python worker
+            #    crash. That misreading sent two months of investigation at container memory.
+            #  - RAISING resources.limits.memory CANNOT FIX THIS. Direct buffer memory is bounded by
+            #    Flink's own off-heap config (taskmanager.memory.* -> -XX:MaxDirectMemorySize), not
+            #    by cgroups. The JVM refuses the allocation before the kernel is ever involved, so
+            #    more memory changes nothing. The instinct to add memory on an OOM is wrong here.
+            #  - Our Python records reach NO TaskManager sink at ANY sample rate. Measured 0 records
+            #    in `kubectl logs`, /opt/flink/log/flink--taskexecutor-*.log and the UDF boot log, at
+            #    both 0.01 and 1.0. This is true independently of this defect: if you are debugging a
+            #    Flink UDF here, the application logs you are looking for do not arrive at all.
+            #
+            # KG-A-10 (CLOSED — reproduction + fix) and KG-A-17 (OPEN — mechanism) in
+            # docs/A_pipeline/pipeline_sprints.md. The Phase 7D report could not explain this.
             - name: ENRICHMENT_DEDUP_GATE_ENABLED
               value: "true"
             # POSTGRES_PASSWORD and OPENAI_API_KEY are read from

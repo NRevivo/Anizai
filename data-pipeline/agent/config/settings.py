@@ -251,3 +251,74 @@ LOG_LEVEL = os.getenv("AGENT_LOG_LEVEL", "INFO")
 AGENT_VAULT_RETRY_MAX_ATTEMPTS = int(os.getenv("AGENT_VAULT_RETRY_MAX_ATTEMPTS", "3"))
 AGENT_VAULT_RETRY_BASE_DELAY_S = float(os.getenv("AGENT_VAULT_RETRY_BASE_DELAY_S", "0.5"))
 AGENT_VAULT_RETRY_MAX_DELAY_S = float(os.getenv("AGENT_VAULT_RETRY_MAX_DELAY_S", "2.0"))
+
+
+# ==========================================================
+# 14. Polymarket public-API budget (A3 + the CLOB history fetch)
+# ==========================================================
+# The hub's only outbound calls to a non-OpenAI external service. Both live in
+# agent/tools/polymarket_api.py and are made from inside market_bridge, i.e.
+# inside vault_query's per-agent future, hard-capped at PER_AGENT_TIMEOUT_S (15s,
+# vault_query.py:69) — which that future ALSO spends on FRED anomalies, Google
+# Trends per entity, and the vault reads.
+#
+# 5s, SINGLE ATTEMPT, no retry loop. Deliberately not the vault-read retry
+# profile above: a vault read failing is a broken forecast, while these two calls
+# are both strictly-optional enrichment. The market lookup is a safety net for a
+# market we simply have not collected yet, and the price history only decorates a
+# chart. Neither is worth spending a second attempt out of a shared 15s budget,
+# and per hub-principles G4 an overrun degrades rather than blocks.
+#
+# Measured 2026-07-30 against the live endpoints: Gamma condition-id lookup
+# 1.08-1.31s, CLOB prices-history at fidelity=60 0.47-1.25s (7/7 calls inside 5s).
+# One 20s+ read timeout was observed at fidelity=180, which is why the ceiling is
+# a hard cap and the failure path is "carry on without it" rather than a retry.
+POLYMARKET_API_TIMEOUT_S = float(os.getenv("POLYMARKET_API_TIMEOUT_S", "5"))
+
+# The READ half of the requests timeout tuple is what the value above sets.
+# This is the CONNECT half, and the split matters:
+#
+#   `requests` does NOT accept a wall-clock deadline. A scalar `timeout=5`
+#   applies 5s to the connect phase AND 5s to the read phase independently, and
+#   the read timeout governs the gap between socket reads rather than the total
+#   — so a server that dribbles bytes can hold a "5s" call open indefinitely.
+#   Worst case for a scalar is therefore ~2x at minimum and unbounded at worst.
+#
+# Passing an explicit (connect, read) tuple makes the two phases separately
+# legible, and a short connect timeout fails fast on an unreachable host instead
+# of spending the read budget on a TCP handshake that is never going to complete.
+# The wall-clock guarantee itself cannot come from here — it is enforced by the
+# CALLER, which tracks elapsed time across calls and stops spending.
+POLYMARKET_API_CONNECT_TIMEOUT_S = float(
+    os.getenv("POLYMARKET_API_CONNECT_TIMEOUT_S", "2")
+)
+
+# The A3 path makes TWO calls (market lookup, then price history). Two
+# independent 5s ceilings would put 10s of a shared 15s budget at risk, so the
+# pair shares ONE 6s allowance: the history call gets 6s minus whatever the
+# lookup actually spent.
+#
+# The asymmetry is deliberate and reflects what each call is worth. The lookup
+# decides whether a forecast has a market benchmark at all; the history only
+# decorates a chart. So when the budget runs short the history is what gets
+# dropped — degrading to a missing chart, never to a failed forecast. A failed
+# forecast is the worst outcome this system can produce; a chartless one is
+# merely disappointing.
+POLYMARKET_A3_COMBINED_BUDGET_S = float(
+    os.getenv("POLYMARKET_A3_COMBINED_BUDGET_S", "6")
+)
+
+# Below this much remaining budget the history call is skipped outright rather
+# than started. Measured floor is ~0.47s on a healthy response, so anything under
+# a second is near-certain to time out — and a doomed request still costs the
+# full wait before failing, which is time taken from nothing.
+POLYMARKET_A3_MIN_HISTORY_S = float(os.getenv("POLYMARKET_A3_MIN_HISTORY_S", "1"))
+
+# Resolution of the CLOB price history, in minutes per point. `interval=max` is a
+# ROLLING 30-DAY WINDOW (verified 2026-07-30: markets created 2025-05-02 return
+# exactly 30.0 days), so this directly sets the point count: 60 -> ~700 points,
+# native (no fidelity) -> ~4,245. Each point becomes ONE Firestore doc in the
+# predictionSeries subcollection, so this is also the per-forecast write count.
+# Hourly over 30 days is a legible chart at ~2 batched commits; raise it to
+# thin the series further.
+POLYMARKET_HISTORY_FIDELITY_MIN = int(os.getenv("POLYMARKET_HISTORY_FIDELITY_MIN", "60"))
