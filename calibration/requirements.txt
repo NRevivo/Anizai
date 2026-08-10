@@ -1,0 +1,31 @@
+# ==========================================================
+# Anizai — Calibration Harness Dependencies (Phase 10)
+# ==========================================================
+# Follows the repository's per-component requirements convention
+# (see requirements-polymarket.txt, requirements-telegram.txt).
+#
+# The calibration package deliberately drags nothing new into the project:
+# every pin below already appears in requirements.txt or requirements.lock at
+# the same version. That is the point — a measurement harness that changed the
+# project's dependency graph would be perturbing the thing it measures.
+#
+# Notably absent:
+#   click       — the CLI uses argparse from the standard library instead.
+#   psycopg3    — the plan proposed async psycopg3; this uses psycopg2 like
+#                 the rest of the repository. See calibration/db.py.
+#   kafka, openai, langchain — calibration neither produces nor reasons.
+
+# .env loading — calibration/config.py calls load_dotenv() at import
+python-dotenv==1.0.1
+
+# Typed model boundary between SQL rows and Python (calibration/models.py)
+pydantic==2.13.3
+
+# Synchronous HTTP — Polymarket Gamma + CLOB REST (calibration/polymarket/client.py)
+requests==2.31.0
+
+# PostgreSQL client for the dedicated calibration database
+psycopg2-binary==2.9.9
+
+# --- Test-only ---
+pytest==8.1.1

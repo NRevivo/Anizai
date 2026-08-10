@@ -1,0 +1,5 @@
+cohort,n,mean_brier,std_brier,skill_vs_coin_flip,small_sample
+7d,0,,,,False
+14d,0,,,,False
+30-45d,0,,,,False
+all,0,,,,False

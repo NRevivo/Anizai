@@ -1,0 +1,381 @@
+/*
+ * Theme tokens.
+ *
+ * Values come from the validated data-viz reference palette. The three
+ * categorical slots used here (blue, orange, aqua) pass every gate in both
+ * modes under the all-pairs rule; aqua sits below 3:1 on the light surface,
+ * so every chart that uses it ships a visible table view — the relief rule.
+ *
+ * Dark values are declared under both scopes deliberately: the media query
+ * covers the OS setting, the [data-theme] scope covers an explicit toggle,
+ * and the toggle must win in both directions.
+ */
+
+:root {
+  color-scheme: light;
+
+  --surface-1: #fcfcfb;
+  --page: #f9f9f7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+
+  /* Categorical slots — assigned to entities, never to rank. */
+  --series-1: #2a78d6; /* blue   — the agent's own numbers */
+  --series-2: #eb6834; /* orange — the reference / comparison */
+  --series-3: #1baf7a; /* aqua   — third dimension, table-backed */
+
+  /* Diverging pair for improvement deltas: blue (better) ↔ red (worse). */
+  --diverge-positive: #2a78d6;
+  --diverge-negative: #e34948;
+  --diverge-mid: #f0efec;
+
+  /* Status — reserved. Never used for a series. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  --success-text: #006300;
+
+  --radius: 6px;
+  --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    color-scheme: dark;
+
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+
+    --diverge-positive: #3987e5;
+    --diverge-negative: #e66767;
+    --diverge-mid: #383835;
+
+    --success-text: #0ca30c;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-1: #1a1a19;
+  --page: #0d0d0d;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --gridline: #2c2c2a;
+  --baseline: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+
+  --diverge-positive: #3987e5;
+  --diverge-negative: #e66767;
+  --diverge-mid: #383835;
+
+  --success-text: #0ca30c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--page);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---------- Layout ---------- */
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 20px 64px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.topbar h1 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.topbar .who {
+  color: var(--text-muted);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 16px 0 24px;
+  flex-wrap: wrap;
+}
+
+.tabs button {
+  appearance: none;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--text-secondary);
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.tabs button:hover {
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+.tabs button[aria-current='page'] {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.card > h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--text-primary);
+}
+
+.card > .sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+}
+
+/* ---------- Stat tiles ---------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.tile {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.tile .label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.tile .value {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  /* Proportional figures on standalone numbers — tabular-nums makes a large
+     value look loose. Columns get tabular-nums, not tiles. */
+}
+
+.tile .note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.tile.attention .value {
+  color: var(--status-critical);
+}
+
+/* ---------- Tables ---------- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--baseline);
+  white-space: nowrap;
+}
+
+td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--gridline);
+  color: var(--text-primary);
+}
+
+tbody tr:hover td {
+  background: var(--page);
+}
+
+td.num,
+th.num {
+  text-align: right;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+/* ---------- Misc ---------- */
+
+.empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.empty strong {
+  display: block;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.caveat {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--page);
+  border-left: 2px solid var(--status-warning);
+  padding: 8px 12px;
+  margin: 12px 0 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--page);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.filters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.filters label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+select,
+input[type='text'] {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
+
+button.action {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+button.action:hover:not(:disabled) {
+  background: var(--page);
+}
+
+button.action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  color: var(--status-critical);
+  font-size: 13px;
+  padding: 10px 0;
+}
+
+.chart-wrap {
+  width: 100%;
+  /* Height includes the x-axis band, so the axis labels are never cropped
+     into a nested scrollbar. */
+  height: 320px;
+}
+
+.login {
+  max-width: 380px;
+  margin: 96px auto;
+  text-align: center;
+}
+
+.login .card {
+  text-align: left;
+}

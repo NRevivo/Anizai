@@ -1,0 +1,33 @@
+# Calibration — ignored artifacts.
+#
+# Scoped to this directory so it cannot affect anything else in the repository.
+
+# --- Dependencies (243 MB; reinstalled by `npm install` / `pip install`) ---
+dashboard/node_modules/
+venv/
+.venv/
+
+# --- Build output ---
+dashboard/dist/
+dashboard/tsconfig.tsbuildinfo
+
+# --- Python bytecode and test caches ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Local configuration ---
+# Never commit a database URL or an operator allowlist. `check-config` prints
+# the effective settings, so there is no reason to keep them in a file here.
+.env
+.env.local
+
+# --- Exported results ---
+#
+# `results/` IS committed — it is the project deliverable. What is excluded is
+# scratch output from experimental runs, so a stray `--output results-tmp`
+# never lands in a commit.
+results-*/
+results/**/*.tmp
