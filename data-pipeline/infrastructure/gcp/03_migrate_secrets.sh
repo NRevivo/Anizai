@@ -10,7 +10,7 @@
 #   one-shots the local .env into Secret Manager so .env can stop
 #   being authoritative — pods read from SM after Sprint C1.
 #
-#   The 15 keys below are the explicit allowlist of *secrets* in the
+#   The 17 keys below are the explicit allowlist of *secrets* in the
 #   project's .env. Non-secret config (POSTGRES_USER, POSTGRES_DB,
 #   POSTGRES_HOST, POSTGRES_PORT, KAFKA_BOOTSTRAP_SERVERS,
 #   OPENAI_MODEL_NAME, AIRFLOW_ADMIN_USERNAME, ARXIV_MAX_RESULTS,
@@ -37,19 +37,45 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:-anizai-pipeline}"
+PROJECT_ID="${PROJECT_ID:-anizai-pipehub}"
 ENV_FILE="${ENV_FILE:-data-pipeline/infrastructure/.env}"
 ADD_NEW_VERSION="${ADD_NEW_VERSION:-false}"
 
 # Allowlist — explicit, audited list of sensitive keys in .env.
 # DO NOT add non-secret config to this list (see header comment).
+#
+# Why 17 and not 15 (cloud project migration, 2026-08-14):
+#   This script ran exactly once, in Sprint C1. Every secret added after
+#   that — GMAIL_APP_PASSWORD (Phase 9.5-C) and TELEGRAM_SESSION_FILE
+#   (C4.12) — was created directly in Secret Manager against a project
+#   that already existed, bypassing .env and this allowlist. The drift is
+#   invisible while a project exists and fatal when one is built from
+#   scratch: NEWSAI_API_KEY missing strands airflow-scheduler and
+#   airflow-webserver in ContainerCreating (airflow-secrets-spc mount
+#   failure), and GMAIL_APP_PASSWORD missing stops the alertmanager pod
+#   ever starting (alertmanager-secrets-spc).
+#
+#   TELEGRAM_SESSION_FILE is the third such secret but is NOT listed here:
+#   it is binary and cannot live in .env, so it stays a separate
+#   `gcloud secrets create --data-file=` upload.
+#
+#   NEWSAI_API_KEY vs THE_NEWS_API_KEY: both appear below, and that is
+#   deliberate. .env and airflow-secrets-spc use NEWSAI_API_KEY; the
+#   rename to THE_NEWS_API_KEY is KG-C-5 and is deferred until the
+#   anizai-airflow rebuild so the rename lands in one coordinated pass.
+#   Until then THE_NEWS_API_KEY is absent from .env and reports
+#   "absent or empty" — expected, not a fault. POLYMARKET_API_KEY and
+#   POLYMARKET_API_SECRET report the same, because Polymarket uses public
+#   endpoints only and both are intentionally empty.
 SECRET_KEYS=(
   POSTGRES_PASSWORD
   AIRFLOW_POSTGRES_PASSWORD
   AIRFLOW_FERNET_KEY
   AIRFLOW_ADMIN_PASSWORD
   GRAFANA_ADMIN_PASSWORD
+  GMAIL_APP_PASSWORD
   OPENAI_API_KEY
+  NEWSAI_API_KEY
   THE_NEWS_API_KEY
   FRED_API_KEY
   OPENWEATHER_API_KEY

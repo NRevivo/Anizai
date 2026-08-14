@@ -24,7 +24,7 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:-anizai-pipeline}"
+PROJECT_ID="${PROJECT_ID:-anizai-pipehub}"
 CLUSTER_NAME="${CLUSTER_NAME:-anizai-cluster}"
 ZONE="${ZONE:-us-central1-a}"
 

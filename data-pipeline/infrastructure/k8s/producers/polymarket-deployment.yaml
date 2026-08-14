@@ -63,7 +63,35 @@ spec:
       # (polymarket-pool deleted in F0; only main-pool remains).
       containers:
         - name: polymarket
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-polymarket:0.2.0-p95
+          # Tag corrected 2026-08-14 (anizai-pipehub migration, R6).
+          # Was `0.2.0-p95` (digest sha256:a2a3e82e…e93cfd5c) — FOUR rolls back
+          # in the chain 0.2.0-p95 → 0.3.0-price → 0.4.0-coverage →
+          # 0.4.1-inactive. cloud_state.md §3 records why the drift went
+          # unnoticed: the live tag was never written down here and existed
+          # only in a gitignored file on the collaborator's machine.
+          #
+          # `0.4.1-inactive`, digest sha256:c7b15eb7…e69dcfc4. Built from commit
+          # 35c343b; drops inactive placeholder legs at selection (KG-A-20),
+          # verified inside the built image rather than inferred from the build
+          # (cloud_state.md §3).
+          #
+          # ⚠ PROVENANCE IS WEAKER HERE THAN FOR THE OTHER IMAGES — do not
+          # restate this one as "what ran in cloud". The sources do not agree
+          # and cannot be made to:
+          #   - carryover-20260801-window2.md §4 lists 0.4.1-inactive in the
+          #     window-2 teardown table, marked new.
+          #   - cloud_state.md §3 says 0.4.0-coverage was the image DEPLOYED
+          #     for that window and returned to replicas: 0, and calls
+          #     0.4.1-inactive the image "to roll out".
+          # So 0.4.1-inactive is the latest INTENDED image and a P2-verified
+          # artifact, but it may never have served traffic. It is the right tag
+          # either way — both readings point here — but a future reader must not
+          # inherit a "reproduces what ran" claim for this one workload.
+          #
+          # `0.4.0-coverage` (sha256:1d27ec05…6c43d758) is the rollback tag and
+          # is pushed alongside; `0.2.0-p95` is pushed too. Neither is referenced
+          # by any manifest — that is deliberate, not an oversight.
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-polymarket:0.4.1-inactive
           imagePullPolicy: Always
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS

@@ -47,7 +47,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: scan
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7b5i
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-flink:1.19.1-7b5i
           imagePullPolicy: IfNotPresent   # image is cached on the node from the flink pods -> fast start
           command: ["python"]
           args:

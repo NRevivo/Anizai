@@ -1,36 +1,38 @@
 #!/usr/bin/env bash
 # ==========================================================
-# Anizai — Create the GKE cluster with dual node pools
+# Anizai — Create the GKE cluster with a single node pool
 # (Phase C, Sprint C1.8)
 # ==========================================================
-# Why (Design Decision D2 — revised):
-#   The cluster runs TWO separately-scalable node pools:
+# Why (Design Decision D2 — revised twice):
+#   The cluster runs ONE node pool:
 #
-#     main-pool       — e2-standard-8 × 1 — all workloads except
-#                       Polymarket. Manually scaled to 0 during data
-#                       collection breaks to cut compute spend.
-#     polymarket-pool — e2-micro × 1 — Polymarket producer only,
-#                       always-on 24/7.
+#     main-pool — e2-standard-8 × 1 — every workload. Manually
+#                 scaled to 0 during data-collection breaks to cut
+#                 compute spend (~$200/month at on-demand 24/7; $0
+#                 while at zero nodes).
 #
-#   Rationale:
-#     Polymarket emits real-time price changes via WebSocket. Gaps
-#     in the WebSocket connection cannot be backfilled (the protocol
-#     is push-only, no historical replay). Every other producer in
-#     the pipeline either supports backfill (Telegram via MTProto
-#     channel-history catch-up; FRED/NewsAPI/etc. via scheduled DAG
-#     re-runs) or is itself a scheduled poller. Polymarket alone
-#     must stay connected continuously to avoid permanent data
-#     loss, so it gets its own tiny dedicated pool that survives
-#     when main-pool is scaled to zero.
+#   The second pool is gone — do not re-add it:
+#     Phase C originally created polymarket-pool (e2-micro × 1,
+#     always-on) so Polymarket's WebSocket would survive main-pool
+#     scaling to zero, on the reasoning that push-only price data
+#     cannot be backfilled. That rationale is OBSOLETE, and the pool
+#     was deleted on purpose in Phase 9.5-A/F0.
 #
-#     Cost shape:
-#       main-pool       ~$200/month at on-demand pricing (24/7).
-#                       Scaled to 0 between collection windows: $0.
-#       polymarket-pool ~$7/month (always-on, fits 1 GB / 2 vCPU).
+#     Why it failed: Kafka only exists while main-pool is up, so with
+#     main-pool at zero the Polymarket pod had a live WebSocket and
+#     nowhere to write. It crash-looped on NoBrokersAvailable roughly
+#     14 h/day, undetected, for days. An always-on pool bought no data
+#     and cost real money — the data gap it was meant to prevent
+#     happened anyway, with a crash-loop on top.
 #
-#   Automatic schedule-based scaling (Cloud Scheduler + Cloud Run
-#   trigger that toggles main-pool size) is deferred until after
-#   Sprint C5. V1 is manual via:
+#     Polymarket now schedules on main-pool and stops with everything
+#     else. producers/polymarket-deployment.yaml carries NO
+#     nodeSelector, so re-creating a pool named polymarket-pool would
+#     not even attract the pod to it.
+#
+#   Automatic schedule-based scaling (Cloud Scheduler toggling
+#   main-pool size) exists but both jobs are PAUSED; Ron resizes
+#   manually via:
 #     gcloud container clusters resize anizai-cluster \
 #       --node-pool=main-pool --zone=us-central1-a --num-nodes=0
 #
@@ -40,18 +42,18 @@
 #
 # When to (re-)run:
 #   - Once at Sprint C1.
-#   - Idempotent: skips cluster create if it exists; skips each
+#   - Idempotent: skips cluster create if it exists; skips the
 #     pool create if it exists; skips default-pool delete if it's
 #     already gone.
 #
-# Runtime: ~7-10 minutes (cluster + 3 pool operations).
+# Runtime: ~7-10 minutes (cluster + 2 pool operations).
 #
 # Spec: cloud_deployment_implementation.md §C1.8 (D2)
 # ==========================================================
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:-anizai-pipeline}"
+PROJECT_ID="${PROJECT_ID:-anizai-pipehub}"
 CLUSTER_NAME="${CLUSTER_NAME:-anizai-cluster}"
 ZONE="${ZONE:-us-central1-a}"
 RELEASE_CHANNEL="${RELEASE_CHANNEL:-regular}"
@@ -59,10 +61,6 @@ RELEASE_CHANNEL="${RELEASE_CHANNEL:-regular}"
 MAIN_POOL_NAME="${MAIN_POOL_NAME:-main-pool}"
 MAIN_POOL_MACHINE="${MAIN_POOL_MACHINE:-e2-standard-8}"
 MAIN_POOL_NODES="${MAIN_POOL_NODES:-1}"
-
-POLYMARKET_POOL_NAME="${POLYMARKET_POOL_NAME:-polymarket-pool}"
-POLYMARKET_POOL_MACHINE="${POLYMARKET_POOL_MACHINE:-e2-micro}"
-POLYMARKET_POOL_NODES="${POLYMARKET_POOL_NODES:-1}"
 
 # ----------------------------------------------------------
 # Helper: returns 0 if a node pool exists in the cluster.
@@ -76,7 +74,7 @@ pool_exists() {
 }
 
 # ----------------------------------------------------------
-# Step 1 — Create the cluster (with the GKE-default `default-pool`,
+# Step 1/3 — Create the cluster (with the GKE-default `default-pool`,
 # 1 e2-standard-8 node). We will replace default-pool with a
 # correctly-named main-pool in the next step. This dance is
 # necessary because gcloud container clusters create does not
@@ -87,7 +85,7 @@ if gcloud container clusters describe "${CLUSTER_NAME}" \
       --project "${PROJECT_ID}" >/dev/null 2>&1; then
   echo "  [SKIP] Cluster '${CLUSTER_NAME}' already exists in ${ZONE}."
 else
-  echo "=== Step 1/4: Creating GKE cluster '${CLUSTER_NAME}' in ${ZONE} ==="
+  echo "=== Step 1/3: Creating GKE cluster '${CLUSTER_NAME}' in ${ZONE} ==="
   echo "    (initial default-pool will be replaced by ${MAIN_POOL_NAME})"
   echo "    Workload pool: ${PROJECT_ID}.svc.id.goog"
   echo "    This will take ~5-7 minutes."
@@ -107,12 +105,12 @@ else
 fi
 
 # ----------------------------------------------------------
-# Step 2 — Add main-pool (e2-standard-8 × 1).
+# Step 2/3 — Add main-pool (e2-standard-8 × 1).
 # ----------------------------------------------------------
 if pool_exists "${MAIN_POOL_NAME}"; then
   echo "  [SKIP] Node pool '${MAIN_POOL_NAME}' already exists."
 else
-  echo "=== Step 2/4: Adding node pool '${MAIN_POOL_NAME}' (${MAIN_POOL_MACHINE} × ${MAIN_POOL_NODES}) ==="
+  echo "=== Step 2/3: Adding node pool '${MAIN_POOL_NAME}' (${MAIN_POOL_MACHINE} × ${MAIN_POOL_NODES}) ==="
   gcloud container node-pools create "${MAIN_POOL_NAME}" \
     --cluster="${CLUSTER_NAME}" \
     --zone="${ZONE}" \
@@ -122,13 +120,13 @@ else
 fi
 
 # ----------------------------------------------------------
-# Step 3 — Delete the GKE-default `default-pool` so all general
+# Step 3/3 — Delete the GKE-default `default-pool` so all general
 # workloads naturally land on main-pool. (Workloads without a
 # nodeSelector schedule to whichever non-tainted node has room;
 # leaving default-pool around would split scheduling unpredictably.)
 # ----------------------------------------------------------
 if pool_exists "default-pool"; then
-  echo "=== Step 3/4: Deleting transient default-pool ==="
+  echo "=== Step 3/3: Deleting transient default-pool ==="
   gcloud container node-pools delete default-pool \
     --cluster="${CLUSTER_NAME}" \
     --zone="${ZONE}" \
@@ -136,24 +134,6 @@ if pool_exists "default-pool"; then
     --quiet
 else
   echo "  [SKIP] default-pool already removed."
-fi
-
-# ----------------------------------------------------------
-# Step 4 — Add polymarket-pool (e2-micro × 1).
-# Always-on. Polymarket pod will pin to this pool via
-# nodeSelector: cloud.google.com/gke-nodepool=polymarket-pool
-# (GKE auto-applies that label to every node in the pool).
-# ----------------------------------------------------------
-if pool_exists "${POLYMARKET_POOL_NAME}"; then
-  echo "  [SKIP] Node pool '${POLYMARKET_POOL_NAME}' already exists."
-else
-  echo "=== Step 4/4: Adding node pool '${POLYMARKET_POOL_NAME}' (${POLYMARKET_POOL_MACHINE} × ${POLYMARKET_POOL_NODES}) ==="
-  gcloud container node-pools create "${POLYMARKET_POOL_NAME}" \
-    --cluster="${CLUSTER_NAME}" \
-    --zone="${ZONE}" \
-    --project="${PROJECT_ID}" \
-    --num-nodes="${POLYMARKET_POOL_NODES}" \
-    --machine-type="${POLYMARKET_POOL_MACHINE}"
 fi
 
 echo "=== Verifying cluster + pools ==="
@@ -174,4 +154,3 @@ echo "Manual scale-down recipe (when not collecting data):"
 echo "  gcloud container clusters resize ${CLUSTER_NAME} \\"
 echo "    --node-pool=${MAIN_POOL_NAME} --zone=${ZONE} --num-nodes=0 --quiet"
 echo "Bring back up with --num-nodes=1."
-echo "polymarket-pool is intentionally NOT included in scale-down — leave it running."

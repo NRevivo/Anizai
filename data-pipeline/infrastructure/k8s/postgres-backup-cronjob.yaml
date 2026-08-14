@@ -3,7 +3,7 @@
 # ==========================================================
 # Schedule: 0 2 * * * (02:00 UTC daily)
 # Dumps the anizai database and streams it gzip-compressed to:
-#   gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz
+#   gs://anizai-pipehub-backups/postgres/YYYY-MM-DD/anizai.sql.gz
 #
 # Image: google/cloud-sdk:slim (Debian-based, includes gsutil).
 # postgresql-client-16 is installed inline from the official pgdg apt
@@ -12,14 +12,14 @@
 # Credentials (D5 shell wrapper pattern + Workload Identity):
 #   POSTGRES_PASSWORD — mounted from Secret Manager via CSI (same
 #   flink-secretproviderclass SPC reused; pipeline-runtime GSA holds
-#   secretmanager.secretAccessor on anizai-pipeline).
+#   secretmanager.secretAccessor on anizai-pipehub).
 #   gsutil GCS writes — no explicit credential needed; pipeline-runtime
-#   GSA holds roles/storage.objectCreator on gs://anizai-pipeline-backups/
+#   GSA holds roles/storage.objectCreator on gs://anizai-pipehub-backups/
 #   (granted in 07_gcs_backup_bucket.sh). GKE Workload Identity serves
 #   these credentials from the metadata server automatically.
 #
 # Restore procedure (manual, on demand):
-#   gsutil cp gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz .
+#   gsutil cp gs://anizai-pipehub-backups/postgres/YYYY-MM-DD/anizai.sql.gz .
 #   gunzip anizai.sql.gz
 #   psql -h localhost -U anizai -d anizai < anizai.sql
 #
@@ -82,7 +82,7 @@ spec:
 
                   # --- Stream pg_dump → gzip → GCS ---
                   DATE=$(date -u +%F)
-                  DEST="gs://anizai-pipeline-backups/postgres/${DATE}/anizai.sql.gz"
+                  DEST="gs://anizai-pipehub-backups/postgres/${DATE}/anizai.sql.gz"
                   echo "Dumping anizai database to ${DEST}..."
                   pg_dump \
                     --host=postgres \

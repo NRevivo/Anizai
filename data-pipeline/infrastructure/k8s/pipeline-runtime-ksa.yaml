@@ -1,0 +1,54 @@
+# ==========================================================
+# Anizai — pipeline-runtime KSA (Phase C, Sprint C1.12)
+# ==========================================================
+# Why:
+#   The Kubernetes half of the Workload Identity link for every
+#   pipeline workload. Flink, Airflow, Postgres, the producers, the
+#   monitoring stack, the postgres-backup CronJob and wi-smoke-test
+#   all declare serviceAccountName: pipeline-runtime, and it is this
+#   annotation that lets those pods impersonate the Google service
+#   account holding roles/secretmanager.secretAccessor.
+#
+#   Committed as YAML from the anizai-pipehub migration onward.
+#   Previously this KSA was created by an imperative
+#   `kubectl create serviceaccount` + `kubectl annotate` pair recorded
+#   only in a runbook, so the cluster had a resource the repo could not
+#   reproduce. Rebuilding the project from scratch is exactly when that
+#   gap bites, so the file now exists.
+#
+# Workload Identity is TWO halves — this file is only one:
+#   1. THIS FILE — the KSA carries
+#      iam.gke.io/gcp-service-account: <GSA email>.
+#   2. The IAM policy binding — the GSA must grant
+#      roles/iam.workloadIdentityUser to
+#      serviceAccount:anizai-pipehub.svc.id.goog[anizai/pipeline-runtime].
+#      That half lives in Google's IAM policy and has NO Kubernetes
+#      representation, so it cannot be committed here. It is applied at
+#      S3 step 8 of the migration plan.
+#   Applying this file alone leaves pods failing with
+#   "Could not automatically determine credentials".
+#
+# Naming note — the mapping is symmetric HERE but not for the agent:
+#   KSA pipeline-runtime  -> GSA pipeline-runtime@...   (same name)
+#   KSA agent-worker-ksa  -> GSA agent-worker@...       (differs!)
+#   See agent-worker-ksa.yaml. Do not "regularise" either one.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/pipeline-runtime-ksa.yaml
+#
+# Spec: cloud_deployment_implementation.md §C1.12; migration plan §5 (D7)
+# ==========================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline-runtime
+  namespace: anizai
+  labels:
+    # part-of is a plain Kubernetes label whose value coincidentally
+    # equals the OLD GCP project ID. It is not a project reference and
+    # is deliberately left unchanged across the anizai-pipehub
+    # migration, for consistency with every other manifest.
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+  annotations:
+    iam.gke.io/gcp-service-account: pipeline-runtime@anizai-pipehub.iam.gserviceaccount.com

@@ -73,7 +73,17 @@ spec:
         fsGroup: 9999
       containers:
         - name: flink-taskmanager
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7d
+          # Tag corrected 2026-08-14 (anizai-pipehub migration, R6).
+          # Was `1.19.1-7d` (digest sha256:9a73a780…ebced303) — one roll behind
+          # live, same uncommitted-during-the-window slip as the JobManager.
+          #
+          # `1.19.1-pmcov`, digest sha256:963cbf9d…c0238c52 — the image both
+          # Flink Deployments referenced and both jobs were compiled from in
+          # the 2026-08-01 window-2 run (carryover-20260801-window2.md §3/§4).
+          #
+          # MUST be byte-identical to the JobManager's tag (header, above):
+          # mismatched tags produce Py4J bridge errors at job submission.
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-flink:1.19.1-pmcov
           imagePullPolicy: IfNotPresent
           # Shell wrapper — same pattern as the JobManager.
           # Reads CSI-mounted secret files, exports as env vars, then

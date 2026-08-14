@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:-anizai-pipeline}"
+PROJECT_ID="${PROJECT_ID:-anizai-pipehub}"
 BILLING_ALERT_EMAIL="${BILLING_ALERT_EMAIL:-ron.mintz21@gmail.com}"
 
 if [[ -z "${BILLING_ACCOUNT_ID:-}" ]]; then
@@ -68,7 +68,7 @@ create_budget() {
   fi
 
   # --filter-projects accepts projects/{project_id}; project_id here is the
-  # alphanumeric project ID (anizai-pipeline), NOT the project number.
+  # alphanumeric project ID (anizai-pipehub), NOT the project number.
   gcloud billing budgets create \
     --billing-account="${BILLING_ACCOUNT_ID}" \
     --display-name="${DISPLAY_NAME}" \

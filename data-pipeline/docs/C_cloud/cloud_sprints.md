@@ -24,14 +24,15 @@
 | Phase 9.5 Stage A — Infrastructure robustness | Closed | 2026-05-19 | — (record in `cloud_archive.md`) | Root-caused the May 11–18 silence (Kafka `log.dirs` on ephemeral `/tmp`); durable PVC subdir + hourly kafka-init CronJob; polymarket-pool deleted; scale 0→1 proven robust. → `cloud_archive.md` |
 | Phase 9.5 Stage B — Application robustness | Closed | 2026-05-20 | — (record in `cloud_archive.md`) | Gold DB-insert retry; centralized OpenAI client factory (`max_retries=5`); Polymarket comments flag; producer raise-on-0%; 4 images → `*-p95`. → `cloud_archive.md` |
 | Phase 9.5 Stage C — Monitoring + ops docs | Closed | 2026-05-20 | — (record in `cloud_archive.md`) | kafka/postgres exporters; Alertmanager + Gmail SMTP; 13 alert rules; `Anizai Pipeline Health` dashboard; `cluster_operations_guide.md`. → `cloud_archive.md` |
+| Cloud Project Migration — `anizai-pipeline` → `anizai-pipehub` | **Open (active)** | — | `plans/cloud_project_migration.md` | Re-platform to a new GCP project with empty vaults, left switched off. Repo prep (R1–R9) then a gated cloud rebuild (S0–S7). **Plan is not version-controlled** — the tracker file points to `Claude-anizai-docs/cloud_migration/migration_plan.md`, which is authoritative |
 
-> **Plan file** column: every Domain-C phase is closed, so each points to its
-> `cloud_archive.md` record (`—`, no live plan file). There is **no open-sprint row** —
-> Domain C has none. Future on-demand deployment plans would appear here with a `plans/`
-> path once activated.
+> **Plan file** column: every Phase 9 / 9.5 row is closed and points to its
+> `cloud_archive.md` record (`—`, no live plan file). The migration row is the **one open
+> sprint** and points into `plans/`.
 
-**There are no open cloud implementation sprints.** The cluster is built and hardened.
-The open work below is the *deployment backlog* — moving already-written hub code onto GKE.
+**There are no open cloud implementation *phases*.** The cluster is built and hardened;
+what is open is the project migration above plus the *deployment backlog* below — moving
+already-written hub code onto GKE.
 
 ---
 

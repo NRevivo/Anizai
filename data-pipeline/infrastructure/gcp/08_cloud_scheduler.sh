@@ -27,7 +27,7 @@
 # Prerequisites:
 #   - cloudscheduler.googleapis.com enabled (added in 00_enable_apis.sh
 #     or needs adding — check with gcloud services list)
-#   - gcloud authenticated, project = anizai-pipeline
+#   - gcloud authenticated, project = anizai-pipehub
 #
 # Usage:
 #   bash infrastructure/gcp/08_cloud_scheduler.sh
@@ -37,7 +37,7 @@
 # ==========================================================
 set -euo pipefail
 
-PROJECT="anizai-pipeline"
+PROJECT="anizai-pipehub"
 CLUSTER="anizai-cluster"
 ZONE="us-central1-a"
 NODE_POOL="main-pool"

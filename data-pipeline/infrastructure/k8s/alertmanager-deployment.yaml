@@ -4,7 +4,7 @@
 # Receives firing alerts from Prometheus (Item 2 added the
 # alerting.alertmanagers config pointing here) and routes them
 # via Gmail SMTP to ron.mintz21@gmail.com with the
-# [anizai-pipeline] subject prefix.
+# [anizai-pipehub] subject prefix.
 #
 # Image: prom/alertmanager:v0.27.0 (current stable as of Phase 9.5).
 #

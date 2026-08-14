@@ -38,7 +38,7 @@ spec:
       serviceAccountName: pipeline-runtime
       containers:
         - name: airflow-webserver
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3-7b5i
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-airflow:2.9.3-7b5i
           imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
           args:
@@ -53,6 +53,17 @@ spec:
               value: LocalExecutor
             - name: AIRFLOW__CORE__LOAD_EXAMPLES
               value: "false"
+            # Added 2026-08-14 (anizai-pipehub migration, R8). This manifest
+            # carried no value at all, inheriting the Airflow default of
+            # "true" — which happened to be safe, but by accident rather
+            # than by decision. Set explicitly so both Airflow processes
+            # agree: on a virgin metadata DB either the scheduler or the
+            # webserver may parse a DAG first and write its DagModel row,
+            # and whichever wins decides the initial pause state.
+            # Rationale in full: airflow-scheduler-deployment.yaml header.
+            # Deliberately diverges from docker-compose.yml ('false').
+            - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
+              value: "true"
             - name: AIRFLOW__CORE__DAGS_FOLDER
               value: /opt/airflow/data-pipeline/orchestration/dags
             - name: AIRFLOW__WEBSERVER__EXPOSE_CONFIG

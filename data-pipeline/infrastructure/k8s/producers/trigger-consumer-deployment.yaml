@@ -39,7 +39,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: trigger-consumer
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-trigger-consumer:0.1.0
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-trigger-consumer:0.1.0
           imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:

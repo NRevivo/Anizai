@@ -17,10 +17,35 @@
 # exported here because LocalExecutor runs producer tasks as
 #   subprocesses of this container, inheriting its env.
 #
-# AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION=false: all DAGs
-#   default to unpaused. newsapi_high_frequency overrides this
-#   per-DAG via is_paused_upon_creation=True (C4.DAG). This
-#   matches docker-compose AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION.
+# AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION="true" — changed from
+#   "false" on 2026-08-14 (anizai-pipehub migration, R8). LOCAL PARITY
+#   IS DELIBERATELY BROKEN HERE: docker-compose.yml still sets 'false'
+#   and is intentionally left alone. The old comment justified "false"
+#   by matching compose; that reasoning does not survive contact with a
+#   rebuilt cloud metadata DB.
+#
+#   Why: a cloud Airflow metadata DB gets recreated (new project, new
+#   airflow-postgres PVC, airflow-init re-run). On a VIRGIN metadata DB
+#   this flag decides the initial pause state of every DAG, and at
+#   "false" six of the seven producer DAGs are created UNPAUSED. Only
+#   newsapi_dag.py carries is_paused_upon_creation=True. The fastest
+#   cadence is opensky_high_frequency at */3 * * * *, so the window to
+#   react is THREE MINUTES.
+#
+#   That is a spend hazard, not an inconvenience: under LocalExecutor
+#   the producers run as subprocesses of THIS container, so ingestion
+#   starts even with every producer Deployment still at replicas: 0.
+#   The old project's 7/7 paused state was established by hand against
+#   a live DB — a reactive gate that cannot win a three-minute race.
+#
+#   Making it permanent costs nothing: the flag affects only a DAG's
+#   FIRST parse, so it is inert once the seven DagModel rows exist.
+#   Pause/unpause afterwards is normal Airflow operation and is
+#   unaffected by this value.
+#
+#   The same variable is set to "true" on airflow-webserver-deployment
+#   for symmetry — either process may parse a DAG first and write the
+#   DagModel row, so both must agree.
 #
 # Spec: cloud_deployment_implementation.md §C4.6 (D1, D3, D5)
 # ==========================================================
@@ -44,7 +69,7 @@ spec:
       serviceAccountName: pipeline-runtime
       containers:
         - name: airflow-scheduler
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-airflow:2.9.3-7b5i
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-airflow:2.9.3-7b5i
           imagePullPolicy: Always
           command: ["/bin/bash", "-c"]
           args:
@@ -64,8 +89,10 @@ spec:
               value: LocalExecutor
             - name: AIRFLOW__CORE__LOAD_EXAMPLES
               value: "false"
+            # "true" since 2026-08-14 (R8) — see header. Deliberately
+            # diverges from docker-compose.yml, which stays 'false'.
             - name: AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION
-              value: "false"
+              value: "true"
             - name: AIRFLOW__CORE__DAGS_FOLDER
               value: /opt/airflow/data-pipeline/orchestration/dags
             - name: AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK

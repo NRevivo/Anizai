@@ -1,0 +1,59 @@
+# ==========================================================
+# Anizai — agent-worker KSA (Phase C, Sprint C5.2)
+# ==========================================================
+# Why:
+#   The Kubernetes half of the Workload Identity link for the agent
+#   worker — the one workload that does NOT use pipeline-runtime.
+#   It is scoped separately because it is the only pod making the
+#   cross-project hop: its GSA holds roles/datastore.user on the
+#   SEPARATE Firestore project anizai-ai, on top of
+#   roles/secretmanager.secretAccessor for OPENAI_API_KEY and
+#   POSTGRES_PASSWORD only (see agent-secretproviderclass.yaml).
+#
+#   Committed as YAML from the anizai-pipehub migration onward — see
+#   pipeline-runtime-ksa.yaml for why these files did not exist before.
+#
+# ⚠ THE NAME IS ASYMMETRIC — THIS IS NOT A TYPO:
+#       KSA (this file)  agent-worker-ksa      <- has the -ksa suffix
+#       GSA (Google)     agent-worker@...      <- does NOT
+#   agent-deployment.yaml declares
+#       serviceAccountName: agent-worker-ksa
+#   and the deployment is the authority. Three documents got this wrong
+#   (gcp/README.md and gcp-deployment/SKILL.md twice); all three were
+#   corrected during the migration. Renaming this KSA to agent-worker to
+#   "match" the GSA leaves the agent pod unschedulable with an unhelpful
+#   error, because no such ServiceAccount exists in the namespace.
+#
+# Workload Identity is TWO halves — this file is only one:
+#   1. THIS FILE — the KSA carries
+#      iam.gke.io/gcp-service-account: agent-worker@<project>...
+#   2. The IAM policy binding — the GSA must grant
+#      roles/iam.workloadIdentityUser to
+#      serviceAccount:anizai-pipehub.svc.id.goog[anizai/agent-worker-ksa].
+#      Note the KSA name (with -ksa) inside the brackets and the GSA name
+#      (without) in the target. That half lives in Google's IAM policy,
+#      has NO Kubernetes representation, and is applied at S3 step 8.
+#
+#   The cross-project grant is a THIRD, separate step (S4): the
+#   agent-worker GSA needs roles/datastore.user on project anizai-ai.
+#   Without it the pod starts and the Firestore listeners never attach.
+#
+# Apply with:
+#   kubectl apply -f infrastructure/k8s/agent-worker-ksa.yaml
+#
+# Spec: cloud_deployment_implementation.md §C5.2; migration plan §5 (D7)
+# ==========================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-worker-ksa
+  namespace: anizai
+  labels:
+    # part-of is a plain Kubernetes label whose value coincidentally
+    # equals the OLD GCP project ID. It is not a project reference and
+    # is deliberately left unchanged across the anizai-pipehub
+    # migration, for consistency with every other manifest.
+    app.kubernetes.io/part-of: anizai-pipeline
+    phase: C
+  annotations:
+    iam.gke.io/gcp-service-account: agent-worker@anizai-pipehub.iam.gserviceaccount.com

@@ -26,7 +26,7 @@
 # ==========================================================
 set -euo pipefail
 
-PROJECT="anizai-pipeline"
+PROJECT="anizai-pipehub"
 EMAIL="ron.mintz21@gmail.com"
 METRIC_NAME="openai_rate_limit_errors"
 
@@ -81,7 +81,7 @@ create_or_update_policy() {
   local duration="$4"
   local description="$5"
 
-  local subject="[anizai-pipeline] [${severity}] OpenAI rate-limit alert"
+  local subject="[anizai-pipehub] [${severity}] OpenAI rate-limit alert"
   local existing
   existing=$(gcloud alpha monitoring policies list \
     --project="$PROJECT" \

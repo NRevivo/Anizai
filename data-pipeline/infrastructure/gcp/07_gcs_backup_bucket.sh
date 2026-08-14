@@ -2,7 +2,7 @@
 # ==========================================================
 # 07_gcs_backup_bucket.sh — GCS backup bucket + lifecycle + IAM
 # ==========================================================
-# Creates gs://anizai-pipeline-backups/ with a 30-day object
+# Creates gs://anizai-pipehub-backups/ with a 30-day object
 # lifecycle on the postgres/ prefix, then grants the pipeline-runtime
 # GSA roles/storage.objectCreator so the pg_dump CronJob can write
 # dumps without a JSON key file (Workload Identity).
@@ -12,7 +12,7 @@
 # every run (idempotent by gsutil semantics). IAM binding is additive.
 #
 # Prerequisites:
-#   - gcloud authenticated: gcloud config get-value project = anizai-pipeline
+#   - gcloud authenticated: gcloud config get-value project = anizai-pipehub
 #   - storage.googleapis.com API enabled (enabled in 00_enable_apis.sh)
 #   - pipeline-runtime GSA exists (created in C1 04_create_cluster.sh)
 #
@@ -23,8 +23,8 @@
 # ==========================================================
 set -euo pipefail
 
-PROJECT="anizai-pipeline"
-BUCKET="gs://anizai-pipeline-backups"
+PROJECT="anizai-pipehub"
+BUCKET="gs://anizai-pipehub-backups"
 GSA="pipeline-runtime@${PROJECT}.iam.gserviceaccount.com"
 
 echo "=== C5.11 — GCS backup bucket setup ==="

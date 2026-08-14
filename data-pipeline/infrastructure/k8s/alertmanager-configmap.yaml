@@ -2,7 +2,7 @@
 # Anizai — Alertmanager Config (Phase 9.5 Stage C Item 4)
 # ==========================================================
 # Single receiver: gmail_receiver — sends alerts via Gmail SMTP
-# to ron.mintz21@gmail.com with the [anizai-pipeline] subject prefix.
+# to ron.mintz21@gmail.com with the [anizai-pipehub] subject prefix.
 #
 # Why Gmail SMTP (Path A — per Ron 2026-05-20):
 #   Simplest workable email path. App-Password (16-char) authenticates
@@ -56,7 +56,7 @@ data:
             auth_password: '${GMAIL_APP_PASSWORD}'
             require_tls: true
             headers:
-              Subject: '[anizai-pipeline] [{{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.alertname }}'
+              Subject: '[anizai-pipehub] [{{ .CommonLabels.severity | toUpper }}] {{ .CommonLabels.alertname }}'
             html: |
               <h3>{{ .CommonLabels.alertname }}</h3>
               <p><strong>Severity:</strong> {{ .CommonLabels.severity }}<br>

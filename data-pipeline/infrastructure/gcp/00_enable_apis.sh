@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:-anizai-pipeline}"
+PROJECT_ID="${PROJECT_ID:-anizai-pipehub}"
 
 echo "=== Verifying gcloud is authenticated and targeting ${PROJECT_ID} ==="
 ACTIVE_PROJECT="$(gcloud config get-value project 2>/dev/null || true)"

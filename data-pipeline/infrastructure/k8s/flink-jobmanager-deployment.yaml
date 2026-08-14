@@ -80,7 +80,22 @@ spec:
         fsGroup: 9999
       containers:
         - name: flink-jobmanager
-          image: us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/anizai-flink:1.19.1-7d
+          # Tag corrected 2026-08-14 (anizai-pipehub migration, R6).
+          # Was `1.19.1-7d` (digest sha256:9a73a780…ebced303) — the manifest
+          # was one roll behind live. `cluster_operations_guide.md` §6 step 2
+          # makes updating the tag in BOTH Flink manifests part of the rollout;
+          # on 2026-08-01 the roll happened and the edit never reached git.
+          #
+          # `1.19.1-pmcov`, digest sha256:963cbf9d…c0238c52 — the image both
+          # Flink Deployments referenced and both jobs were compiled from in
+          # the 2026-08-01 window-2 run (carryover-20260801-window2.md §3/§4).
+          # Built from commit 4d28fb5; carries the Track-S Silver catalog
+          # carry-through. KG-A-15 was checked on this rebuild: `pip freeze`
+          # is byte-identical to 1.19.1-7d — 118 packages, zero dependency
+          # movement (cloud_state.md §3).
+          #
+          # MUST match the TaskManager tag exactly — see that manifest's header.
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-flink:1.19.1-pmcov
           imagePullPolicy: IfNotPresent
           # Shell wrapper: reads CSI-mounted secret files and exports them as
           # env vars before handing off to the Flink entrypoint.

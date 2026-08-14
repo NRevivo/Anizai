@@ -23,7 +23,7 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:-anizai-pipeline}"
+PROJECT_ID="${PROJECT_ID:-anizai-pipehub}"
 REGION="${REGION:-us-central1}"
 REPO="${REPO:-anizai-images}"
 REGISTRY_HOST="${REGION}-docker.pkg.dev"

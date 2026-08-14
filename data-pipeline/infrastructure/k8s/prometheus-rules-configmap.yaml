@@ -6,7 +6,7 @@
 # via the prometheus-deployment.yaml subPath update.
 #
 # Notification path: Prometheus → Alertmanager (Item 4) → Gmail SMTP
-# → ron.mintz21@gmail.com with [anizai-pipeline] subject prefix.
+# → ron.mintz21@gmail.com with [anizai-pipehub] subject prefix.
 #
 # OpenAI rate-limit alerts are NOT here — they use a different
 # notification path (Cloud Logging-based metric → Cloud Monitoring

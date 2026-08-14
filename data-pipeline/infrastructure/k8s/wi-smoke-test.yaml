@@ -46,7 +46,7 @@ spec:
   provider: gke
   parameters:
     secrets: |
-      - resourceName: "projects/anizai-pipeline/secrets/OPENAI_API_KEY/versions/latest"
+      - resourceName: "projects/anizai-pipehub/secrets/OPENAI_API_KEY/versions/latest"
         path: "OPENAI_API_KEY"
 ---
 # ----------------------------------------------------------
