@@ -2,7 +2,10 @@
 
 > Domain: C — Cloud (operational)
 > Type: Guide
-> Last updated: 2026-08-01 (post-Polymarket-completion pass: §3 Step 3 resize command now
+> Last updated: 2026-08-12 (`anizai-pipehub` migration pass — §2 gains an explicit
+> `trigger-consumer` row and a resting-state subsection; six workloads now rest at
+> desired 0, so "comes up on its own" is no longer true for any of them)
+> Previous: 2026-08-01 (post-Polymarket-completion pass: §3 Step 3 resize command now
 > carries the mandatory `--zone`; §3 Step 4 backlog gate rewritten — no consumer groups
 > exist, size by `--time -2`/`-1` across every topic in the path, and treat a backlog as
 > a cost; §4 item 3 teardown cancellation marked DISPUTED; §5 trap 3 Flink half resolved
@@ -61,7 +64,8 @@ left alone and comes up on its own.
 | `telegram` | 0 | **1** | **1** |
 | `polymarket` | 0 | **1** | **1** |
 | Airflow producer DAGs | stay paused | unpause as needed | unpause as needed |
-| `postgres`, `kafka`, `airflow-*`, `trigger-consumer`, monitoring | up | up | up |
+| `trigger-consumer` | 0 | **1** | **1** |
+| `postgres`, `kafka`, `airflow-*`, monitoring | up | up | up |
 
 **Why AGENTS holds Flink at 0.** The agent's only in-cluster dependency is Postgres
 (it reads the vaults; it writes to Firestore, which is a different GCP project; it
@@ -73,9 +77,40 @@ measure.
 
 **Why AGENTS also holds `telegram` and `polymarket` at 0.** See §5 trap 1.
 
-**`trigger-consumer` comes up under every profile.** Harmless: with no reactive
-trigger emitted it idles, and if one *is* emitted, a dispatch failure on the consumer
-side is logged, not fatal to the agent.
+**`trigger-consumer` is now an explicit row, and it no longer comes up on its own.**
+Until 2026-08-12 it sat in the "up under every profile" line, on the reasoning that with
+no reactive trigger emitted it idles, and that a dispatch failure on the consumer side is
+logged rather than fatal to the agent. Two things changed that:
+
+- Its SecretProviderClass mounts `OPENWEATHER_API_KEY`, `OPENSKY_CLIENT_ID` and
+  `OPENSKY_CLIENT_SECRET`, and the pod exports all three before starting. A dispatch for
+  those sources therefore does **not** fail — it succeeds, and writes Bronze nobody asked
+  for. Under FULL, Flink then enriches it, at cost.
+- On `anizai-pipehub` it rests at desired **0** (below), so it will not appear by itself
+  whatever this table says.
+
+Under AGENTS it is held at 0: the agent is the only thing running, so a trigger it emits
+produces ingestion that serves no purpose in that session. Under PIPELINE and FULL it is
+at 1, which is where the reactive path belongs. **If you disagree, this is one row to
+change** — nothing else depends on it.
+
+### Resting state on `anizai-pipehub` (from 2026-08-12)
+
+The migration left **six** workloads at desired 0: `flink-jobmanager`,
+`flink-taskmanager`, `agent-worker`, `telegram`, `polymarket`, `trigger-consumer`
+(decision D10 in `Claude-anizai-docs/cloud_migration/migration_plan.md`). Everything else
+— Postgres, Kafka, `airflow-*`, monitoring, `kafka-ui` — still comes up on a resize.
+
+**What this changes:** a resize now brings up infrastructure only. Nothing ingests,
+nothing processes, nothing calls OpenAI until you raise it deliberately. The procedure
+itself is unchanged — §3 step 1 already has you set every workload in the table
+explicitly — but the floor underneath it is now 0, so a workload you forget to raise is
+**absent**, not quietly present. That is the intended failure direction.
+
+This is a deliberate divergence from the old project, whose last teardown left Flink and
+`trigger-consumer` at desired 1. The committed manifests still declare `replicas: 1` for
+all six (KG-C-10), so a routine `kubectl apply` still overrides the resting state — read
+desired replicas from the cluster, never from the repo (§5 trap 4).
 
 ---
 
