@@ -1,5 +1,15 @@
 # Anizai Data Pipeline — Cloud Connection Guide
-## GKE Cluster: anizai-cluster | Project: anizai-pipeline
+## GKE Cluster: anizai-cluster | Project: anizai-pipehub
+
+> Last updated: 2026-08-15 — project-identity pass (KG-C-11). Every `--project=`,
+> the kubectl context string, the Artifact Registry path and the GCS backup bucket
+> were re-pointed from the retired `anizai-pipeline` to `anizai-pipehub`. Identity
+> facts are owned by `docs/C_cloud/cloud_constants.md`. **Scope limit: identity
+> strings only — no procedure in this guide was re-verified against a live cluster
+> in that pass.** Four places where the rename alone does *not* make the surrounding
+> instruction correct are called out inline: the two-identity note in §1.0.2, the
+> backup-bucket start date in §1.9, the registry tag inventory in §2.4, and the
+> billing history break in §2.6.
 
 > **Scope — read this first.** This guide is about **connecting** to a cluster that is
 > already running: port-forwards, credentials, UIs, and where things live in the GCP
@@ -27,7 +37,7 @@
 # 1. Authenticate and set kubectl context (one-time per machine):
 gcloud auth login
 gcloud container clusters get-credentials anizai-cluster `
-  --zone us-central1-a --project anizai-pipeline
+  --zone us-central1-a --project anizai-pipehub
 
 # 2. Open all port-forwards in separate terminals (or background jobs):
 kubectl port-forward -n anizai svc/airflow-webserver 8090:8080
@@ -49,16 +59,16 @@ psql -h localhost -U anizai -d anizai
 # (password in Secret Manager — see Section 1.6)
 
 # 5. Retrieve any secret:
-gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipeline
+gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipehub
 
 # 6. Scale main-pool on/off:
 gcloud container clusters resize anizai-cluster `
   --node-pool=main-pool --num-nodes=1 `
-  --zone=us-central1-a --project=anizai-pipeline   # ON
+  --zone=us-central1-a --project=anizai-pipehub   # ON
 
 gcloud container clusters resize anizai-cluster `
   --node-pool=main-pool --num-nodes=0 `
-  --zone=us-central1-a --project=anizai-pipeline   # OFF
+  --zone=us-central1-a --project=anizai-pipehub   # OFF
 ```
 
 **Port-forward reference:**
@@ -121,7 +131,15 @@ All three tools must be installed and on your PATH before proceeding:
 gcloud auth login
 
 # Set the default project:
-gcloud config set project anizai-pipeline
+gcloud config set project anizai-pipehub
+
+# NOTE — there are TWO Google identities, one per project. kingron79@gmail.com
+# owns anizai-pipehub and has NO access to anizai-ai; ron.mintz21@gmail.com owns
+# anizai-ai. For any anizai-ai work pass --account=ron.mintz21@gmail.com as a
+# PER-INVOCATION flag; never `gcloud config set account`, or every subsequent
+# anizai-pipehub command silently runs as the wrong identity. Under kingron79@,
+# an anizai-ai read returns a PERMISSION ERROR, not an empty result — the two
+# are not the same. Full detail: docs/C_cloud/cloud_constants.md §2.
 
 # Optionally set application-default credentials (required by some SDK calls):
 gcloud auth application-default login
@@ -133,14 +151,14 @@ This command downloads cluster credentials and writes them to your local kubecon
 
 ```powershell
 gcloud container clusters get-credentials anizai-cluster `
-  --zone us-central1-a --project anizai-pipeline
+  --zone us-central1-a --project anizai-pipehub
 ```
 
 **Verify the context is set correctly:**
 
 ```powershell
 kubectl config current-context
-# Expected: gke_anizai-pipeline_us-central1-a_anizai-cluster
+# Expected: gke_anizai-pipehub_us-central1-a_anizai-cluster
 
 kubectl get nodes
 # Expected: one or two nodes in Ready state
@@ -148,11 +166,11 @@ kubectl get nodes
 
 ### 1.0.4 Retrieve Credentials from Secret Manager
 
-All service passwords are stored in GCP Secret Manager under project `anizai-pipeline`.
+All service passwords are stored in GCP Secret Manager under project `anizai-pipehub`.
 Never hard-code passwords. Always retrieve them like this:
 
 ```powershell
-gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipeline
+gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipehub
 ```
 
 Secret names are listed in each service section below.
@@ -179,7 +197,7 @@ Open http://localhost:8090 in a browser.
 # Username: hardcoded "admin" (set in airflow-init-job.yaml — not stored as a secret).
 
 # Password:
-gcloud secrets versions access latest --secret=AIRFLOW_ADMIN_PASSWORD --project=anizai-pipeline
+gcloud secrets versions access latest --secret=AIRFLOW_ADMIN_PASSWORD --project=anizai-pipehub
 ```
 
 ### What You Can Do Here
@@ -312,7 +330,7 @@ Open http://localhost:3000 in a browser.
 # Username: hardcoded "admin" (set in grafana-deployment.yaml as GF_SECURITY_ADMIN_USER env var — not stored as a secret).
 
 # Password:
-gcloud secrets versions access latest --secret=GRAFANA_ADMIN_PASSWORD --project=anizai-pipeline
+gcloud secrets versions access latest --secret=GRAFANA_ADMIN_PASSWORD --project=anizai-pipehub
 ```
 
 ### What You Can Do Here
@@ -399,7 +417,7 @@ In a separate terminal (leave the port-forward terminal open):
 
 ```powershell
 # Retrieve password first:
-gcloud secrets versions access latest --secret=POSTGRES_PASSWORD --project=anizai-pipeline
+gcloud secrets versions access latest --secret=POSTGRES_PASSWORD --project=anizai-pipehub
 
 # Connect:
 psql -h localhost -U anizai -d anizai
@@ -564,13 +582,26 @@ VITE_FIREBASE_AUTH_DOMAIN=anizai-ai.firebaseapp.com
 
 ## Section 1.9 — Backup & Restore
 
-**Backup runs daily at 02:00 UTC** → `gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz`
+**Backup runs daily at 02:00 UTC** → `gs://anizai-pipehub-backups/postgres/YYYY-MM-DD/anizai.sql.gz`
+
+> **⚠ This bucket starts at 2026-08-15.** It is a new, separately-namespaced
+> bucket created with the `anizai-pipehub` project — not a rename of
+> `gs://anizai-pipeline-backups`, and **nothing was copied across**. Its earliest
+> object is `postgres/2026-08-15/anizai.sql.gz`. Every backup taken before that
+> date lives in the retired project's bucket and is lost when that project is
+> deleted (`migration_plan.md` §9 item 3). Restore dates earlier than 2026-08-15
+> are not available here — list the prefix before assuming a date exists.
+> Separately, the CronJob does not fire while `main-pool` rests at 0 nodes, so
+> days are missing even after that date (KG-C-9).
 
 ### Manual Restore to Local Postgres
 
 ```powershell
-# Download a specific day's backup
-gsutil cp gs://anizai-pipeline-backups/postgres/2026-05-10/anizai.sql.gz .
+# Download a specific day's backup. Substitute a date that EXISTS — see the
+# warning below; the old hardcoded 2026-05-10 example was from the retired
+# project's bucket and does not exist here.
+gsutil ls gs://anizai-pipehub-backups/postgres/          # pick a date first
+gsutil cp gs://anizai-pipehub-backups/postgres/YYYY-MM-DD/anizai.sql.gz .
 
 # Restore to local scratch (requires local Postgres with TimescaleDB)
 gunzip anizai.sql.gz
@@ -609,7 +640,7 @@ gcloud container clusters resize anizai-cluster `
   --node-pool=main-pool `
   --num-nodes=1 `
   --zone=us-central1-a `
-  --project=anizai-pipeline
+  --project=anizai-pipehub
 ```
 
 After scaling up, wait 3–5 minutes for all pods to reach `Running` state:
@@ -640,7 +671,7 @@ gcloud container clusters resize anizai-cluster `
   --node-pool=main-pool `
   --num-nodes=0 `
   --zone=us-central1-a `
-  --project=anizai-pipeline
+  --project=anizai-pipehub
 ```
 
 **Note:** Scaling down evicts all pods on `main-pool`. Kafka messages that have not
@@ -698,7 +729,7 @@ Use the project switcher at the top to select the correct project for each secti
 
 | Project ID | What lives here |
 |------------|----------------|
-| `anizai-pipeline` | GKE cluster, Artifact Registry, Secret Manager, Billing, Storage |
+| `anizai-pipehub` | GKE cluster, Artifact Registry, Secret Manager, Billing, Storage |
 | `anizai-ai` | Firestore (Agentic Hub — forecasting query sessions) |
 
 **Switch projects:** Click the project name in the top bar → select from the list,
@@ -708,7 +739,7 @@ or type the project ID in the search box.
 
 ## Section 2.2 — GKE Workloads (Pods)
 
-**Project:** `anizai-pipeline`
+**Project:** `anizai-pipehub`
 
 **Path:** Hamburger menu → **Kubernetes Engine** → **Workloads**
 
@@ -728,7 +759,7 @@ click `anizai-cluster` to see node pool status, node count, and cluster version.
 
 ## Section 2.3 — Storage (Persistent Volumes / Disks)
 
-**Project:** `anizai-pipeline`
+**Project:** `anizai-pipehub`
 
 **Path:** Hamburger menu → **Compute Engine** → **Disks**
 
@@ -751,7 +782,7 @@ If a disk is accidentally deleted, vault data is lost. Do not delete disks named
 
 ## Section 2.4 — Artifact Registry (Docker Images)
 
-**Project:** `anizai-pipeline`
+**Project:** `anizai-pipehub`
 
 **Path:** Hamburger menu → **Artifact Registry** → **Repositories**
 
@@ -766,8 +797,15 @@ What you can find here:
 
 ```powershell
 gcloud auth configure-docker us-central1-docker.pkg.dev
-docker pull us-central1-docker.pkg.dev/anizai-pipeline/anizai-images/<IMAGE>:<TAG>
+docker pull us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/<IMAGE>:<TAG>
 ```
+
+> **⚠ This registry holds only the 10 tags pushed at the 2026-08-15 migration**
+> — it is not a copy of the retired project's registry. A tag you remember from
+> before that date may simply not exist here; `gcloud artifacts docker images
+> list` before pulling. One tag is gone for good: `anizai-polymarket:0.3.0-price`
+> was never pushed and ceases to exist when the old project is deleted
+> (`carryover-20260815-migration.md` §10, an accepted loss).
 
 **Tags are mutable and pods use `imagePullPolicy: Always` (KG-C-3)** — re-pushing a tag
 silently changes what runs. When identity matters, compare the `@sha256:` digest from
@@ -777,7 +815,7 @@ silently changes what runs. When identity matters, compare the `@sha256:` digest
 
 ## Section 2.5 — Secret Manager (Credentials)
 
-**Project:** `anizai-pipeline`
+**Project:** `anizai-pipehub`
 
 **Path:** Hamburger menu → **Security** → **Secret Manager**
 
@@ -789,7 +827,7 @@ What you can find here:
 **To retrieve a secret from the command line:**
 
 ```powershell
-gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipeline
+gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipehub
 ```
 
 **Key secrets reference:**
@@ -813,7 +851,7 @@ gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipe
 
 ## Section 2.6 — Billing and Budget Alerts
 
-**Project:** `anizai-pipeline`
+**Project:** `anizai-pipehub`
 
 **Path:** Hamburger menu → **Billing** → select the billing account → **Budgets & alerts**
 
@@ -823,8 +861,16 @@ What you can find here:
 - Click a budget name → **Edit** to adjust the threshold or alert recipients.
 
 **Path to current month cost breakdown:** Hamburger menu → **Billing** → **Reports**
-— filter by project `anizai-pipeline`, group by **Service** or **SKU** to identify
+— filter by project `anizai-pipehub`, group by **Service** or **SKU** to identify
 which services are driving cost (typically GKE node pool compute and PD storage).
+
+> **Cost history does not span the migration.** The billing account
+> (`010C82-6CA2C4-183381`, ILS) is unchanged, but spend before 2026-08-14 is
+> attributed to the retired `anizai-pipeline` project. A report filtered to
+> `anizai-pipehub` shows nothing before that date — that is the filter, not a
+> billing fault — and the old project's history disappears when it is deleted.
+> To compare against a pre-migration baseline, filter by billing account rather
+> than by project, and do it before deletion.
 
 ---
 
@@ -893,7 +939,7 @@ Start-Job -ScriptBlock { kubectl port-forward -n anizai svc/kafka-ui 8080:8080 }
 
 ```powershell
 gcloud container clusters get-credentials anizai-cluster `
-  --zone us-central1-a --project anizai-pipeline
+  --zone us-central1-a --project anizai-pipehub
 ```
 
 ### Pod is in CrashLoopBackOff

@@ -1,7 +1,8 @@
 # cloud_overview.md
 > Domain: C — Cloud
 > Type: Overview
-> Last updated: 2026-07-26 (§1 deployment-work paragraph + §5 navigation paths corrected; agent + pipeline image-tag rows refreshed 2026-07-23; monitoring/storage rows as of 2026-06-15, unverified against live)
+> Last updated: 2026-08-15 — project-identity pass (KG-C-13): the three architecture-diagram labels naming the retired `anizai-pipeline` re-pointed to `anizai-pipehub`. Identity facts are owned by `cloud_constants.md`; **nothing else in this file was refreshed, and its image-tag rows predate the migration.**
+> Prior stamp — 2026-07-26 (§1 deployment-work paragraph + §5 navigation paths corrected; agent + pipeline image-tag rows refreshed 2026-07-23; monitoring/storage rows as of 2026-06-15, unverified against live)
 > TL;DR: The macro view of the Anizai GKE deployment — cluster topology, what is
 > deployed vs. local-only, and which phases closed when. Open this first to orient
 > before the detailed Domain C files.
@@ -63,7 +64,7 @@ Single-zone GKE Standard cluster. One node pool, one namespace. Firestore lives 
 cross-project via Workload Identity — the only multi-project hop in the system.
 
 ```
- GCP project: anizai-pipeline                         GCP project: anizai-ai
+ GCP project: anizai-pipehub                         GCP project: anizai-ai
  ────────────────────────────                         ──────────────────────
  GKE cluster: anizai-cluster (us-central1-a)          Firestore
    node pool: main-pool  (e2-standard-8 ×1,             - forecastQueries (work queue)
@@ -84,12 +85,12 @@ cross-project via Workload Identity — the only multi-project hop in the system
    │ kafka-exporter  postgres-exporter        │
    └─────────────────────────────────────────┘
    ┌──────────── CRONJOBS / JOBS ────────────┐
-   │ postgres-backup (daily 02:00 UTC → GCS)  │   GCS: gs://anizai-pipeline-backups/
+   │ postgres-backup (daily 02:00 UTC → GCS)  │   GCS: gs://anizai-pipehub-backups/
    │ kafka-init (hourly, idempotent reassert) │   Artifact Registry: anizai-images
    │ airflow-init (one-shot, complete)        │   Secret Manager: 16 secrets (CSI, WI)
    └─────────────────────────────────────────┘
 
- Supporting GCP: Artifact Registry (us-central1-docker.pkg.dev/anizai-pipeline/anizai-images),
+ Supporting GCP: Artifact Registry (us-central1-docker.pkg.dev/anizai-pipehub/anizai-images),
  Secret Manager (CSI driver secrets-store-gke.csi.k8s.io, provider: gke — file mounts only),
  Cloud Scheduler (scale-up / scale-down main-pool, 05:00 / 15:00 IL Mon–Fri — PAUSED),
  Cloud Logging + 2 Cloud Monitoring policies (OpenAI-429 proxy alerts).

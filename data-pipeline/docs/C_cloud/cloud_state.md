@@ -1,7 +1,21 @@
 # cloud_state.md
 > Domain: C — Cloud
 > Type: State
-> Last updated: 2026-07-27 (§1 + §3 Flink image rolled to `1.19.1-7d` by Phase 7D T11, verified against the T11 deployment log — running JM+TM imageID matched the Artifact Registry digest `sha256:9a73a780…`; the Flink `replicas: 0` hold is superseded by the same apply. §3 `telegram` / `polymarket` replica-hold rows as verified 2026-07-26 after the agent-only cloud run; agent + airflow image tags and §6 Scheduler/Airflow verified 2026-07-23–26; monitoring/storage rows as of 2026-06-15, unverified against live)
+> Last updated: 2026-08-15 — **partial: identity only.** §2 re-pointed to
+> `anizai-pipehub` (project, Artifact Registry, GCS bucket) and the secret count
+> corrected 16 → 15. **Nothing else in this file was refreshed.**
+>
+> ⚠️ **§1, §3 and §6 are two teardowns and a project migration out of date — do not
+> read them as current (KG-C-12).** They were last verified 2026-07-27 and predate the
+> 2026-08-01 windows *and* the `anizai-pipeline` → `anizai-pipehub` rebuild. Known
+> wrong: the Flink tag (`1.19.1-7d` → `1.19.1-pmcov`), the agent tag
+> (`0.5.0-sprint26` → `0.6.0-trackA`, which **misreports its own version** — identify
+> by digest), the polymarket tag (`0.3.0-price`, an image that was never pushed to the
+> new registry), both Flink JobIDs, and the count of workloads resting at 0 (**six**,
+> not four — the D10 divergence). **Until the refresh lands, take identity from
+> `cloud_constants.md` and post-migration state from `carryover-20260815-migration.md`.**
+>
+> Prior stamp — 2026-07-27 (§1 + §3 Flink image rolled to `1.19.1-7d` by Phase 7D T11, verified against the T11 deployment log — running JM+TM imageID matched the Artifact Registry digest `sha256:9a73a780…`; the Flink `replicas: 0` hold is superseded by the same apply. §3 `telegram` / `polymarket` replica-hold rows as verified 2026-07-26 after the agent-only cloud run; agent + airflow image tags and §6 Scheduler/Airflow verified 2026-07-23–26; monitoring/storage rows as of 2026-06-15, unverified against live)
 > TL;DR: Current GKE runtime state — what is deployed, what runs only locally, the known
 > cluster gaps (KG-C-*), and the Scheduler/Airflow state. Open this to answer "what is
 > actually running in cloud right now, and what isn't?"
@@ -53,15 +67,15 @@ real forecasts before being returned to 0 — see `B_hub/agent_cloud_run_2026072
 | Attribute | Value |
 |---|---|
 | Cluster | `anizai-cluster` |
-| Project (cluster + pipeline) | `anizai-pipeline` |
+| Project (cluster + pipeline) | `anizai-pipehub` |
 | Project (Firestore) | `anizai-ai` (cross-project via Workload Identity, `roles/datastore.user`) |
 | Zone | `us-central1-a` (single-zone) |
 | Namespace | `anizai` |
 | Node pool | `main-pool` — `e2-standard-8` ×1; manually scaled 0↔1; `autoRepair`/`autoUpgrade` on, no maintenance window (KG-C-2) |
 | Cluster type | GKE Standard (not Autopilot — pod-level WI scoping needed for cross-project agent SA) |
-| Artifact Registry | `us-central1-docker.pkg.dev/anizai-pipeline/anizai-images` |
-| Secret Manager | 16 secrets via CSI driver `secrets-store-gke.csi.k8s.io` (`provider: gke`, file mounts only — no `secretObjects` sync) |
-| GCS | `gs://anizai-pipeline-backups/` (daily `pg_dump`, 30-day lifecycle) |
+| Artifact Registry | `us-central1-docker.pkg.dev/anizai-pipehub/anizai-images` |
+| Secret Manager | **15** secrets mounted via CSI driver `secrets-store-gke.csi.k8s.io` (`provider: gke`, file mounts only — no `secretObjects` sync). This row read "16" until 2026-08-15; the verified count is 15. Three different numbers are all correct — allowlist 17 / created 14 / mounted 15 — see `cloud_constants.md` §4, which owns them |
+| GCS | `gs://anizai-pipehub-backups/` (daily `pg_dump`, 30-day lifecycle) |
 
 > Phase 9 originally ran a second node pool (`polymarket-pool`); it was **deleted** in
 > Phase 9.5-A and Polymarket moved to `main-pool`. There is no second pool today.

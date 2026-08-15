@@ -1,10 +1,18 @@
 # Cluster Operations Guide
-## Anizai GKE — operational reference for `anizai-cluster` (project `anizai-pipeline`)
+## Anizai GKE — operational reference for `anizai-cluster` (project `anizai-pipehub`)
 
 This is the long-term reference for operating the running pipeline.
 Audience: Ron, and future Claude sessions reaching for "how do I X?".
 
-> Last updated: 2026-07-27 — boundary-hygiene pass with `bringup_profiles.md`. Live
+> Last updated: 2026-08-15 — project-identity pass (KG-C-11). Every `--project=`,
+> the Artifact Registry path and the GCS backup bucket were re-pointed from the
+> retired `anizai-pipeline` to `anizai-pipehub`; identity facts are owned by
+> `docs/C_cloud/cloud_constants.md`. **Scope limit: identity strings only — no
+> procedure in this guide was re-verified against a live cluster in that pass.**
+> The two `anizai-pipeline-*` Grafana dashboard UIDs in §12 are class-D keys and
+> were deliberately left alone; see the warning there.
+>
+> Prior stamp — 2026-07-27 — boundary-hygiene pass with `bringup_profiles.md`. Live
 > state (image tags, replica counts, DAG pause state, Scheduler state) was removed from
 > §1, §3, §4 and §12 and now lives only in `cloud_state.md`; §3 was rescoped from a
 > start/stop checklist to a raw-command reference under `bringup_profiles.md`; §8 gained
@@ -34,7 +42,7 @@ which always wins over anything written here.
 
 ### Cluster topology
 
-- GKE Standard cluster `anizai-cluster`, zone `us-central1-a`, project `anizai-pipeline`.
+- GKE Standard cluster `anizai-cluster`, zone `us-central1-a`, project `anizai-pipehub`.
 - One node pool: `main-pool` (e2-standard-8 × 1; manually scaled to 0 between
   collection windows). `polymarket-pool` was deleted in Phase 9.5 Stage A
   (KG-PHASE-9.5 carry: Polymarket now runs on main-pool with everything else).
@@ -70,7 +78,7 @@ which always wins over anything written here.
 | `postgres-exporter` | prometheuscommunity/postgres-exporter:v0.15.0 | Postgres internals + Anizai-specific vault freshness queries. | Vault-freshness alerts + dashboard panels go silent. |
 | `alertmanager` | prom/alertmanager:v0.27.0 | Receives firing alerts from Prometheus, routes via Gmail SMTP to `ron.mintz21@gmail.com`. | Alerts evaluate but no email. |
 | `grafana` | grafana/grafana:10.4.2 | 2 dashboards: `Anizai Pipeline` (Phase 9, detailed Flink) + `Anizai Pipeline Health` (Phase 9.5 C, single-screen). | UI-only; no operational impact. |
-| `postgres-backup` (CronJob) | google/cloud-sdk:slim | Daily `pg_dump` → `gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz`, 30-day lifecycle. | Lose ability to restore beyond Postgres PVC contents. |
+| `postgres-backup` (CronJob) | google/cloud-sdk:slim | Daily `pg_dump` → `gs://anizai-pipehub-backups/postgres/YYYY-MM-DD/anizai.sql.gz`, 30-day lifecycle. | Lose ability to restore beyond Postgres PVC contents. |
 | `kafka-init` (CronJob) | apache/kafka:3.7.0 | Hourly idempotent topic-reassert (Phase 9.5 F1). Creates the 19 expected topics with `--if-not-exists`. Self-heals after a PVC reset. | New topics would need manual `kafka-init-job.yaml` re-apply. |
 
 ### Data flow
@@ -149,7 +157,7 @@ network calls + Flink checkpoint windows, not the pipeline itself.
 # 1. Scale main-pool back to 1 node.
 gcloud container clusters resize anizai-cluster `
   --node-pool=main-pool --num-nodes=1 `
-  --zone=us-central1-a --project=anizai-pipeline --quiet
+  --zone=us-central1-a --project=anizai-pipehub --quiet
 
 # 2. Wait for Kafka, then for Postgres, to reach 1/1 Ready.
 #    Typically ~3-5 min for the node + ~30s per pod after.
@@ -196,7 +204,7 @@ done
 # 2. Scale main-pool to 0.
 gcloud container clusters resize anizai-cluster `
   --node-pool=main-pool --num-nodes=0 `
-  --zone=us-central1-a --project=anizai-pipeline --quiet
+  --zone=us-central1-a --project=anizai-pipehub --quiet
 
 # Pods will Terminate; PVCs detach. Data persists (postgres-data,
 # kafka-data, flink-checkpoints, prometheus-data, airflow-postgres-data).
@@ -232,12 +240,12 @@ the start cycle exercises every Phase 9.5 finding.
 
 ```powershell
 gcloud scheduler jobs resume scale-up-main-pool `
-  --location=us-central1 --project=anizai-pipeline
+  --location=us-central1 --project=anizai-pipehub
 gcloud scheduler jobs resume scale-down-main-pool `
-  --location=us-central1 --project=anizai-pipeline
+  --location=us-central1 --project=anizai-pipehub
 
 # Confirm:
-gcloud scheduler jobs list --location=us-central1 --project=anizai-pipeline
+gcloud scheduler jobs list --location=us-central1 --project=anizai-pipehub
 # Both should show STATE=ENABLED.
 ```
 
@@ -521,7 +529,7 @@ pre-rebuild compilation.
 ```powershell
 # 1. Confirm the new image is in Artifact Registry:
 gcloud artifacts docker images list `
-  us-central1-docker.pkg.dev/anizai-pipeline/anizai-images --include-tags `
+  us-central1-docker.pkg.dev/anizai-pipehub/anizai-images --include-tags `
   | grep anizai-flink
 
 # 2. Update the image tag in:
@@ -640,7 +648,7 @@ not history, so the actual loss is permanent).
 
 ## Section 8 — Backup and restore procedures
 
-Backups land at `gs://anizai-pipeline-backups/postgres/YYYY-MM-DD/anizai.sql.gz`
+Backups land at `gs://anizai-pipehub-backups/postgres/YYYY-MM-DD/anizai.sql.gz`
 daily at 02:00 UTC, via the `postgres-backup` CronJob. 30-day GCS lifecycle.
 
 ### Manual backup (on demand)
@@ -663,7 +671,7 @@ kubectl logs -n anizai -l job-name=<job-name> --tail=20
 # Expect a final line: "Backup complete: gs://.../YYYY-MM-DD/anizai.sql.gz"
 
 # Confirm the object actually landed before scaling anything down:
-gsutil ls -l gs://anizai-pipeline-backups/postgres/$(Get-Date -UFormat %Y-%m-%d)/
+gsutil ls -l gs://anizai-pipehub-backups/postgres/$(Get-Date -UFormat %Y-%m-%d)/
 ```
 
 **One thing to know before you run it:** the destination key is date-stamped, not
@@ -679,7 +687,7 @@ Tested Phase 9.5 Stage A F4.
 ```powershell
 # 1. Pick a backup to restore. Today (-1 day for guaranteed completeness):
 YDAY=(Get-Date).AddDays(-1).ToString("yyyy-MM-dd")
-gsutil cp gs://anizai-pipeline-backups/postgres/$YDAY/anizai.sql.gz `
+gsutil cp gs://anizai-pipehub-backups/postgres/$YDAY/anizai.sql.gz `
   "C:\Temp\anizai-restore.sql.gz"
 
 # 2. Copy into postgres-0 (via stdin pipe — kubectl cp has Windows colon-
@@ -858,8 +866,16 @@ operator doesn't alarm. Known Gaps now live per domain in each
 | Anizai Pipeline | Detailed: Flink throughput, checkpoint sizes, JVM heap, Kafka producer client metrics. The "is each subsystem behaving?" view. | http://localhost:3000/d/anizai-pipeline-v1 |
 | Anizai Pipeline Health | At-a-glance: vault row counts + freshness, Bronze topic rates, DLQ depth, Flink uptime, recent restarts. The "is the pipeline healthy right now?" view. | http://localhost:3000/d/anizai-pipeline-health-v1 |
 
+> **⚠ The two `anizai-pipeline-*` strings in the URLs above are NOT stale project
+> references — do not "fix" them.** They are Grafana dashboard `uid`s (class D in
+> `cloud_constants.md` §5), opaque keys that merely coincide with the old project
+> ID. Each must keep matching its `"uid"` in
+> `infrastructure/k8s/grafana-configmap.yaml` (lines 553 and 801); renaming one
+> without the other breaks the provisioning link and 404s the drilldown, for zero
+> benefit. The project-ID sweep of 2026-08-15 deliberately skipped these two lines.
+
 Port-forward: `kubectl port-forward -n anizai svc/grafana 3000:3000`.
-Credentials in Secret Manager: `gcloud secrets versions access latest --secret=GRAFANA_ADMIN_PASSWORD --project=anizai-pipeline`.
+Credentials in Secret Manager: `gcloud secrets versions access latest --secret=GRAFANA_ADMIN_PASSWORD --project=anizai-pipehub`.
 
 The "Known silent producers" text panel in Pipeline Health is kept up to
 date manually as the state in Section 12 changes — update both the panel
