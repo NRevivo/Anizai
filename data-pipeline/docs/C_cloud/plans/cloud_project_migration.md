@@ -75,16 +75,18 @@ Registry, billing alerts. ✅ done 2026-08-12, outside this tracker.
 
 | | Task | Status |
 |---|---|---|
-| S0 | Verify local images (P1/P2) — before S1 | [ ] |
-| S1 | Secrets | [ ] · Gate S1 [ ] |
-| S2 | Images — nine tags | [ ] · Gate S2 [ ] |
-| S3 | Cluster and identity | [ ] · Gate S3 [ ] |
-| S4 | Cross-project Firestore | [ ] · Gate S4 [ ] |
-| S5 | Workloads, layered | [ ] · Gates L1 [ ] L2 [ ] L3 [ ] L4 [ ] S5 [ ] |
-| S6 | Proof — one forecast | [ ] · Gate S6 [ ] |
-| S7 | Switch off | [ ] · Gate S7 [ ] |
+| S0 | Verify local images (P1/P2) — before S1 | [x] — 10/10 matched |
+| S1 | Secrets | [x] · Gate S1 [x] |
+| S2 | Images — nine tags (+1 optional) | [x] · Gate S2 [x] |
+| S3 | Cluster and identity | [x] · Gate S3 [x] |
+| S4 | Cross-project Firestore | [x] · Gate S4 [x] |
+| S5 | Workloads, layered | [x] · Gates L1 [x] L2 [x] L3 [x] L4 [x] S5 [x] |
+| S6 | Proof — one forecast | [x] · Gate S6 [x] |
+| S7 | Switch off | [x] · Gate S7 [x] |
 
 ## Definition of done
+
+**MET 2026-08-15.** Carry-over: `docs/C_cloud/carryover-20260815-migration.md`.
 
 `migration_plan.md` §6 — Gate S6 passed, Gate S7 verified, and a carry-over
 written to `docs/C_cloud/`. Closeout follows the `sprint-closeout` skill;
