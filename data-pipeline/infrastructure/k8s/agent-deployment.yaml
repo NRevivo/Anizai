@@ -69,7 +69,9 @@ spec:
           #
           # `0.6.0-trackA`, digest sha256:937dfed1…471d9aee — the image the
           # Deployment carried at the 2026-08-01 window-2 teardown
-          # (carryover-20260801-window2.md §4).
+          # (docs/C_cloud/archive_carryovers/carryover-20260801-window2.md §4 —
+          # archived 2026-08-15; it describes the retired anizai-pipeline
+          # project, so read the tag/digest from it, nothing else).
           #
           # NOTE: the full AGENT_VERSION string for this tag carries a
           # `+<git-sha>` suffix that is recorded NOWHERE in this repo, so it is

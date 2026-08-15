@@ -1,3 +1,29 @@
+> # ⛔ HISTORICAL — DESCRIBES THE RETIRED `anizai-pipeline` PROJECT
+>
+> **Archived 2026-08-15. Do not act on anything in this file.** It describes the
+> GCP project **`anizai-pipeline`**, which was retired in the
+> `anizai-pipeline` → `anizai-pipehub` migration. Every project ID, Artifact
+> Registry path, GCS bucket, kubectl context and replica state below is **wrong
+> for the live cluster**. Specifically: the backup bucket is now
+> `gs://anizai-pipehub-backups`, the kubectl context is
+> `gke_anizai-pipehub_us-central1-a_anizai-cluster`, the Flink JobIDs in §3 were
+> replaced on the rebuild, and the desired-replica table in §2 no longer holds —
+> six workloads now rest at 0.
+>
+> **Current facts live in:**
+> - `../cloud_constants.md` — identity: project, cluster, service accounts, secrets
+> - `../carryover-20260815-migration.md` — the live project's carry-over
+> - `../cloud_state.md` — live cluster state
+>
+> **The body below is unedited** and is a true record of what was true on
+> 2026-08-01. Only this banner was added.
+>
+> *Path note:* the `cluster-teardown-20260730.md` §2.1 citation in §3 refers to
+> `docs/backend-specs/cluster-teardown-20260730.md`, at the **repository root**,
+> not under `data-pipeline/docs/`.
+
+---
+
 # Cluster carry-over — 2026-08-01 teardown
 
 > Domain: C — Cloud

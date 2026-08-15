@@ -88,7 +88,11 @@ spec:
           #
           # `1.19.1-pmcov`, digest sha256:963cbf9d…c0238c52 — the image both
           # Flink Deployments referenced and both jobs were compiled from in
-          # the 2026-08-01 window-2 run (carryover-20260801-window2.md §3/§4).
+          # the 2026-08-01 window-2 run
+          # (docs/C_cloud/archive_carryovers/carryover-20260801-window2.md
+          # §3/§4 — archived 2026-08-15; it describes the retired
+          # anizai-pipeline project. The image tag and digest carry over; the
+          # JobIDs it lists do NOT — those were replaced on the rebuild.)
           # Built from commit 4d28fb5; carries the Track-S Silver catalog
           # carry-through. KG-A-15 was checked on this rebuild: `pip freeze`
           # is byte-identical to 1.19.1-7d — 118 packages, zero dependency

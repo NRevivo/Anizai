@@ -78,8 +78,10 @@ spec:
           # ⚠ PROVENANCE IS WEAKER HERE THAN FOR THE OTHER IMAGES — do not
           # restate this one as "what ran in cloud". The sources do not agree
           # and cannot be made to:
-          #   - carryover-20260801-window2.md §4 lists 0.4.1-inactive in the
-          #     window-2 teardown table, marked new.
+          #   - docs/C_cloud/archive_carryovers/carryover-20260801-window2.md
+          #     §4 lists 0.4.1-inactive in the window-2 teardown table, marked
+          #     new. (Archived 2026-08-15 — it describes the retired
+          #     anizai-pipeline project; the tag/digest carry over.)
           #   - cloud_state.md §3 says 0.4.0-coverage was the image DEPLOYED
           #     for that window and returned to replicas: 0, and calls
           #     0.4.1-inactive the image "to roll out".

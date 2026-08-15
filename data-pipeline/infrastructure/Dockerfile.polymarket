@@ -5,7 +5,11 @@
 # WebSocket for real-time price streams and polls the Gamma
 # REST API for market snapshots and comments.
 #
-# Runs exclusively on polymarket-pool (e2-micro, always on).
+# Runs on main-pool, the cluster's only node pool. The dedicated
+# polymarket-pool (e2-micro, always on) this line used to name was
+# DELETED in Phase 9.5-A — its always-on crash-loop cost more than
+# the data gap from scaling to 0 — and must not be re-created. No
+# nodeSelector pins this workload; see cloud_constants.md §1.
 # Public endpoints only — no API key required (Section B.8).
 #
 # Source entrypoint: ingestion/polymarket_producer.py

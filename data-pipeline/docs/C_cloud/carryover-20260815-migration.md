@@ -70,7 +70,8 @@ registry after push.
 
 **The polymarket qualifier is deliberate.** The sprint goal said "byte-identical
 to what ran". For five images that is true. For `polymarket:0.4.1-inactive` the
-sources disagree and cannot be reconciled: `carryover-20260801-window2.md` §4
+sources disagree and cannot be reconciled:
+`archive_carryovers/carryover-20260801-window2.md` §4 (archived 2026-08-15)
 lists it in the window-2 teardown table, while `cloud_state.md` §3 says
 `0.4.0-coverage` was the image *deployed* for that window and calls
 `0.4.1-inactive` the image "to roll out". It is the correct tag either way —
@@ -321,6 +322,41 @@ other machine, `.claude/skills/gcp-deployment/SKILL.md` still names
   pointers → `docs/old_docs/` (3 occurrences).
 - `cloud-principles/SKILL.md` — lines 42 and 76, the P3 cross-project boundary.
 - `CLAUDE.md` — zero hits, nothing to do.
+
+#### Second batch — the doc reorg, 2026-08-15 (also machine-local)
+
+`cloud_constants.md` was created so these facts would stop living only in
+git-ignored files. The corresponding edits *to* the ignored files — replacing
+their restated constants with references to it — are themselves ignored and will
+not arrive by `git pull`. Redo on any other machine:
+
+- **`gcp-deployment/SKILL.md`**
+  - §1 — the 13-row Project Constants table **deleted**, replaced by a pointer to
+    `data-pipeline/docs/C_cloud/cloud_constants.md` §1–§4 plus a note on why the
+    values are not restated. The **only** value kept inline is the
+    `agent-worker-ksa` / `agent-worker@` asymmetry — load-bearing at every point
+    of use, and a wrong value leaves the agent pod unschedulable.
+  - §4 bullet 2 — `agent-worker-ksa` name kept, restated rationale dropped
+    (→ `cloud_constants.md` §3).
+  - §5 bullet 1 — the 17/14/15 paragraph replaced by a pointer to §4.
+  - §10 row 2 — CSI-driver explanation trimmed to the check itself; the
+    which-driver-and-why sent to §4 "CSI driver". The `kubectl get csidriver`
+    command **stays** — that is a procedure, not a constant.
+  - §12 row 1 — unchanged; it already carries only the name, no rationale.
+- **`cloud-principles/SKILL.md`** — Cross-References only. P3/P4 keep
+  `anizai-pipehub` and `polymarket-pool` inline: those are guardrail sentences
+  where removing the name would weaken the rule, not lookup entries. Added a
+  pointer to `cloud_constants.md` and a KG-C-12 warning not to take identity from
+  `cloud_state.md` until its refresh lands.
+- **`CLAUDE.md`, `project_master.md`** — no constants restated; no edit. (Verified
+  by sweep, not assumed: `project_master.md`'s 5 Domain-C hits are narrative
+  sprint prose, not fact-table entries.)
+
+**Sweep method, recorded because it changed the result.** ripgrep honours
+`.gitignore`, so a default `rg carryover .` silently skipped `/.claude`,
+`/CLAUDE.md` and `data-pipeline/project_master.md` — the three most suspect
+files. Use `rg --no-ignore --hidden` and prove reachability with a positive
+control before reading any zero as evidence.
 
 When the ignore is revisited, un-ignore **`.claude/skills/`** specifically, not
 `/.claude` wholesale — the latter would sweep in local settings and permissions.
