@@ -744,6 +744,74 @@ empty database). Don't do this unless absolutely necessary.
 | Airflow DAG run status | `SCHED=$(kubectl get pods -n anizai -l app=airflow-scheduler -o jsonpath='{.items[0].metadata.name}'); kubectl exec -n anizai $SCHED -- bash -c 'export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:$(cat /var/secrets/airflow/AIRFLOW_POSTGRES_PASSWORD)@airflow-postgres/airflow" && airflow dags list-runs -d <DAG_ID> -o plain | head -5'` |
 | Trigger Airflow DAG manually | Same shell as above, then `airflow dags trigger <DAG_ID>` |
 
+### 9.1 — Reading a topic: the fake-zero trap (verified 2026-08-15)
+
+**`kafka-console-consumer.sh --from-beginning` returns "Processed a total of 0 messages" on a topic
+that demonstrably has messages.** The consumer-group form must fetch metadata, join a group and be
+assigned partitions before it reads anything; `--timeout-ms` is the wait for the *first message* and
+expires during that handshake. The output is indistinguishable from a genuinely empty topic.
+
+This has now produced a false conclusion **four times** on this project. On 2026-08-15 it was caught
+only because a positive control was run first — the same command against `ingestion_triggers`, known
+to hold exactly 1 message, also returned 0.
+
+> **Always read a topic by partition, never by consumer group:**
+> ```
+> kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-console-consumer.sh \
+>   --bootstrap-server localhost:9092 --topic <topic> \
+>   --partition <N> --offset earliest --max-messages 100 --timeout-ms 20000
+> ```
+> Loop N over every partition — a topic with 3 partitions can have all its data on one, so reading
+> partition 0 alone is another way to read a real zero (`ingest.bronze.telegram` had all records on
+> partition 2).
+
+**The authoritative message count is the offsets, not a consumer.** `sum(--time -1) - sum(--time -2)`
+per topic. To size every topic in one call rather than looping (2 calls × 19 topics):
+
+```
+kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-get-offsets.sh \
+  --bootstrap-server localhost:9092 --topic-partitions ".*" --time -1
+```
+Expect **55 partition rows** across the 19 topics — a row count well under that means the call
+itself failed, which is its own built-in control.
+
+### 9.2 — Windows: three ways a correct command silently becomes a wrong one
+
+The `powershell`-tagged blocks in this guide are mixed shell (§3 already warns). On Windows, three
+further failure modes were hit on 2026-08-15, all of which produce *plausible wrong output* rather
+than an error:
+
+1. **`$(...)` and `$((...))` are mangled in transit** through `kubectl exec ... -- bash -c "<arg>"`.
+   Shell arithmetic came back as `0: command not found` (57 times, summing silently to zero) and the
+   Airflow connection string lost its quotes. **Do the arithmetic in PowerShell**, or feed the script
+   via stdin.
+2. **Piping a PowerShell here-string to `kubectl exec -i` prepends a UTF-8 BOM and uses CRLF.** The
+   BOM breaks the first line (`bash: ﻿export: command not found`) and CRLF corrupts the last argument
+   (`-o plain` → `invalid choice: 'plain\r'`). **Write the script with
+   `[IO.File]::WriteAllText($p, $body, (New-Object System.Text.UTF8Encoding $false))` using `\n`
+   only, then redirect:** `cmd /c "kubectl exec -i -n anizai <pod> -- bash < ""<path>"""`.
+   This is the same `cmd /c` stdin trick §7 and §8 already use for file transfer.
+3. **PowerShell variable names are case-insensitive.** `$reg = @()` silently destroys a lookup table
+   named `$REG`, and the resulting empty result reads as a finding. Prefer doing lookups inside the
+   remote `python`/`bash` script rather than marshalling them through PowerShell.
+
+**The rule underneath all three:** before reporting a zero, prove the command can return non-zero.
+
+### 9.3 — Airflow CLI inside the scheduler pod
+
+`airflow <cmd>` run via `kubectl exec` fails with *"You need to initialize the database"* — the CLI
+defaults to SQLite because the connection string is exported by the container's **entrypoint**, and a
+fresh `exec` shell does not inherit it. Prefix every invocation:
+
+```
+export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:$(cat /var/secrets/airflow/AIRFLOW_POSTGRES_PASSWORD)@airflow-postgres/airflow"
+```
+
+For the same reason, **`printenv <VAR>` in an exec shell returns empty for every secret the
+entrypoint exported** — that is a measurement artifact, not a missing secret. Read the running
+process instead (`/proc/<pid>/environ` of an `airflow scheduler` process; PID 1's may not be
+readable from the exec context).
+
 ---
 
 ## Section 10 — How to add a new Prometheus alert
