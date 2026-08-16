@@ -152,20 +152,50 @@ data:
                 kafka-delete-records.sh to truncate.
 
           - alert: PolymarketBronzeStale
-            expr: sum(delta(kafka_topic_partition_current_offset{topic="ingest.bronze.polymarket"}[30m])) == 0
-            for: 5m
+            # WINDOW WIDENED 30m -> 2h, 2026-08-16. The [30m] window was written
+            # for the older WebSocket continuous-stream producer and was never
+            # updated when the cadence became an HOURLY sweep (D7 —
+            # polymarket_completion.md). One sweep emits ~1,200 records in ~6s
+            # and the topic is then silent for ~59 minutes, so a 30m delta is
+            # zero for roughly half of every hour and this alert fired on a
+            # fully healthy system, once per hour, for a day.
+            #
+            # Measured 2026-08-16 while it was firing: 1,278 firing samples in
+            # 24h (~44% of the time) against 19 consecutive hourly sweeps with
+            # Bronze == momentum_vault at 23,276 rows and zero gaps. The alert
+            # was wrong, not the producer.
+            #
+            # [2h] fires only when TWO consecutive sweeps are missed, which is a
+            # real fault rather than the normal gap. This restores the same
+            # margin HighFrequencyBronzeStale already gives the 10-20min
+            # producers (2h window = 6-12x their cadence); at [30m] this rule
+            # had 0.5x its producer's cadence, which is inverted.
+            expr: sum(delta(kafka_topic_partition_current_offset{topic="ingest.bronze.polymarket"}[2h])) == 0
+            for: 10m
             labels:
               severity: warning
               component: kafka
               source: polymarket
             annotations:
-              summary: "Polymarket Bronze topic silent for >30min"
+              summary: "Polymarket Bronze topic silent for >2h (two missed hourly sweeps)"
               description: |
-                Polymarket continuous-stream producer has emitted zero messages
-                in the past 30min. Check polymarket pod state:
+                Polymarket sweeps HOURLY, and has emitted zero messages for 2h —
+                i.e. at least two consecutive sweeps were missed. A single silent
+                30-60min gap is NORMAL and is no longer alerted on.
+
+                Check pod state:
                   kubectl get pod -n anizai -l app=polymarket
+
+                Restarts showing exit=137 / OOMKilled: the container limit is
+                512Mi and steady-state usage was measured at ~373Mi (73%) on
+                2026-08-16, with one OOMKill after ~10h. See KG-C-15 — expect
+                this to recur until the limit is raised.
+
                 If CrashLoopBackOff: check logs for KafkaTimeoutError (broker
                 unreachable) or NoBrokersAvailable (Kafka pod down).
+
+                Confirm collection independently by Bronze offset delta, never by
+                pod state alone (KG-A-23).
 
           - alert: HighFrequencyBronzeStale
             expr: sum by (topic) (delta(kafka_topic_partition_current_offset{topic=~"ingest.bronze.(hackernews|openweather)"}[2h])) == 0
