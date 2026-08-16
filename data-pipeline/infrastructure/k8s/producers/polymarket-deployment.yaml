@@ -102,10 +102,36 @@ spec:
           # (e2-standard-8, 32 GB RAM available). The previous
           # 30Mi request was a constraint of polymarket-pool's
           # e2-small ~34Mi allocatable budget.
+          #
+          # MEMORY RAISED 2026-08-16 (KG-C-15): 512Mi -> 1Gi limit,
+          # 128Mi -> 384Mi request.
+          #
+          # Evidence: on `0.4.1-inactive`'s first multi-day run the container
+          # was OOMKilled (exit=137) at 02:29:16Z, ~11h after start, and
+          # steady-state usage measured 373Mi immediately after — 73% of the
+          # old 512Mi limit. The hourly discovery sweep holds ~2,600 nested
+          # markets in memory while filtering to ~1,220 collectable, so the
+          # peak sits well above that resting figure. 1Gi leaves real headroom
+          # rather than moving the wall slightly.
+          #
+          # The 128Mi request was a fiction: the scheduler was placing this pod
+          # on a third of its actual steady-state footprint. 384Mi reserves
+          # something close to what it really uses.
+          #
+          # ⚠ Do NOT generalise `bringup_profiles.md` §5 trap 3 to this
+          # workload. That trap says raising container memory CANNOT fix the
+          # Flink TaskManager OOM, because that failure is JVM direct-buffer
+          # exhaustion bounded by `taskmanager.memory.*` (-XX:MaxDirectMemorySize)
+          # rather than by cgroups — the container there reported
+          # OOMKilled=false with 750MiB of 7.6GiB in use, and a 6Gi limit
+          # changed nothing. THIS is the opposite case: a pure-Python process
+          # hitting a genuine cgroup ceiling, OOMKilled=true, exit=137, where
+          # the container limit is exactly the lever. Same symptom, opposite
+          # fix; conflating them produced the 6Gi mistake.
           resources:
             requests:
               cpu: "50m"
-              memory: "128Mi"
+              memory: "384Mi"
             limits:
               cpu: "500m"
-              memory: "512Mi"
+              memory: "1Gi"

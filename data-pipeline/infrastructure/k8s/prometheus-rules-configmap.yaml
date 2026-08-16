@@ -186,10 +186,18 @@ data:
                 Check pod state:
                   kubectl get pod -n anizai -l app=polymarket
 
-                Restarts showing exit=137 / OOMKilled: the container limit is
-                512Mi and steady-state usage was measured at ~373Mi (73%) on
-                2026-08-16, with one OOMKill after ~10h. See KG-C-15 — expect
-                this to recur until the limit is raised.
+                Restarts showing exit=137 / OOMKilled: the producer RETAINS
+                memory across sweeps (~30 MiB/h, never returning to baseline —
+                see KG-C-15 for the measured curve). The limit was raised
+                512Mi -> 1Gi on 2026-08-16, which postpones a kill from ~11h to
+                ~28h but does not stop it. If you see this alert alongside an
+                exit=137 restart, that is the leak reaching the new ceiling —
+                restart deliberately right after a sweep completes rather than
+                waiting for a random mid-sweep kill.
+
+                NOTE: pod memory is NOT visible in Grafana (KG-C-16 — no
+                cAdvisor/kube-state-metrics scrape). Get the curve from GKE
+                Cloud Monitoring: kubernetes.io/container/memory/used_bytes.
 
                 If CrashLoopBackOff: check logs for KafkaTimeoutError (broker
                 unreachable) or NoBrokersAvailable (Kafka pod down).
