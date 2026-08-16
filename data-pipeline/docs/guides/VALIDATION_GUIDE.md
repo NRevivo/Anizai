@@ -74,7 +74,8 @@ This starts 12 services:
 - prometheus, grafana
 
 **First run note:** The `flink-jobmanager` and `flink-taskmanager` containers build the
-custom `anizai-flink:1.19.1` Docker image on first start. This takes 3–5 minutes.
+custom `anizai-flink` Docker image on first start (tags in use are
+`1.19.1-pmcov` / `1.19.1-7d` — see `cloud_state.md`). This takes 3–5 minutes.
 Subsequent starts use the cached image and complete in under 60 seconds.
 
 ### A.3 Verify All Services Are Healthy
@@ -113,7 +114,10 @@ containers and exit cleanly after completing their work.
 docker exec anizai-kafka /opt/kafka/bin/kafka-topics.sh `
   --bootstrap-server localhost:9092 --list
 
-# Expected: 15 topics including ingest.bronze.*, process.silver.*, serve.gold.*, dead-letter-queue
+# Expected: 19 topics — 11 ingest.bronze.*, 3 process.silver.*, 3 serve.gold.*,
+#           ingestion_triggers, dead-letter-queue.
+#           (Was documented as 15 until 2026-08-16; the authority is
+#            infrastructure/k8s/kafka-init-cronjob.yaml.)
 
 # Flink — should return JSON with {"taskmanagers": 1, ...}:
 curl -s http://localhost:8081/overview | python -m json.tool
@@ -135,7 +139,7 @@ curl -s http://localhost:8090/health | python -m json.tool
 | Grafana | http://localhost:3000 | `admin` / `admin_localdev` |
 | Prometheus | http://localhost:9090 | None required |
 
-**Kafka UI** — click "Topics" in the left sidebar to confirm all 15 topics were created
+**Kafka UI** — click "Topics" in the left sidebar to confirm all 19 topics were created
 by `kafka-init`. You should see all `ingest.bronze.*`, `process.silver.*`,
 `serve.gold.*`, `ingestion_triggers`, and `dead-letter-queue` topics.
 
@@ -167,8 +171,8 @@ docker exec anizai-flink-jobmanager `
 ```
 
 **Verify:** Open http://localhost:8081/jobs/running — you should see two running jobs:
-- `anizai-silver-polymarket`
-- `anizai-gold-polymarket`
+- `anizai-silver-polymarket` (the name is historical — it handles **all** sources)
+- `anizai-gold-all-sources`  (was documented as `anizai-gold-polymarket` until 2026-08-16)
 
 Both should show status `RUNNING` within 30 seconds of submission.
 
@@ -230,7 +234,7 @@ to confirm messages are arriving (message count > 0).
 
 Open Airflow at http://localhost:8090 and log in with `admin` / `admin_localdev`.
 
-You will see 8 DAGs in the DAG list:
+You will see 7 DAGs in the DAG list (one per file in `orchestration/dags/`):
 
 | DAG ID | Schedule | Purpose |
 |--------|----------|---------|
@@ -238,7 +242,7 @@ You will see 8 DAGs in the DAG list:
 | `arxiv_daily` | 07:00 UTC daily | ArXiv research papers (7 categories) |
 | `googletrends_daily` | 08:00 UTC daily | Google Trends (4 geos, 50 topics) |
 | `newsapi_high_frequency` | Every 20 min | newsapi.ai (Event Registry) headlines (5 categories) |
-| `hackernews_high_frequency` | Every 20 min | HackerNews stories (points > 50) |
+| `hackernews_high_frequency` | **Hourly** (`0 * * * *`) | HackerNews stories (points > 50). Cut from `*/20` on 2026-08-15 for OpenAI RPD headroom — KG-C-1a |
 | `openweather_high_frequency` | Every 10 min | OpenWeather (10 strategic hotspots) |
 | `opensky_high_frequency` | Every 3 min | OpenSky flight density (7 bounding boxes) |
 **Trigger order (important):**
@@ -290,7 +294,7 @@ Grafana (http://localhost:3000):
 
 ---
 
-### Step 6 — Run Validation Script
+### Step 5 — Run Validation Script
 
 After data collection is complete:
 
@@ -301,6 +305,8 @@ python -m tests.e2e.run_full_validation
 ```
 
 This prints a structured summary of all vault tables. See Section D for expected output.
+
+> Steps were renumbered 2026-08-16 — this section was labelled "Step 6" with no Step 5.
 
 ---
 
@@ -514,13 +520,15 @@ Early in a validation run it may be empty — this is expected on first run.
 Open http://localhost:3000 → log in → left sidebar → **Dashboards** →
 click **"Anizai Pipeline"**.
 
-The dashboard has three row sections:
+The dashboard has four row sections. Panel names below are verbatim from
+`grafana-configmap.yaml` — the names in this table until 2026-08-16 did not exist:
 
 | Row | Panels | What to Look For |
 |-----|--------|-----------------|
-| **Throughput** | Records/sec (Silver), Records/sec (Gold) | Should show non-zero rate when DAGs are running |
-| **Checkpoint** | Checkpoint duration, Checkpoint lag | Duration < 10s, lag < 60s = healthy |
-| **JVM / Resources** | Heap usage, GC count | Heap < 80% of assigned memory |
+| **Throughput** | `Operator Throughput (records/sec)`, `Total Records In – Per Operator` | Should show non-zero rate when DAGs are running |
+| **Latency** | `Processing Latency – p50 / p95 / p99` | Undocumented here until 2026-08-16 |
+| **Checkpoints** | `Checkpoint Duration & Size`, `Checkpoint Status` | Duration < 10s = healthy |
+| **JVM Health** | `TaskManager JVM Heap Memory`, `GC Time Rate` | Heap < 80% of assigned memory |
 
 If panels show "No data": Prometheus may still be waiting for the Flink jobs to
 expose metrics. Flink metrics are only available once a job is in `RUNNING` state.
@@ -596,7 +604,7 @@ After a 60-minute validation run, you should see approximately the following:
 
 **Grafana — What to Expect with Live Data:**
 
-- `Records/sec (Silver)`: Non-zero spikes when OpenSky (every 3 min) or OpenWeather (every 10 min) DAGs run
+- `Operator Throughput (records/sec)`: Non-zero spikes when OpenSky (every 3 min) or OpenWeather (every 10 min) DAGs run
 - `Checkpoint duration`: Should complete in 1–3 seconds under normal load
 - `JVM Heap`: Should stabilize at 30–50% of allocated 2GB TaskManager memory
 

@@ -1,7 +1,9 @@
 # Anizai Data Pipeline — Cloud Connection Guide
 ## GKE Cluster: anizai-cluster | Project: anizai-pipehub
 
-> Last updated: 2026-08-15 — project-identity pass (KG-C-11). Every `--project=`,
+> Last updated: 2026-08-16 — procedure audit (see the second note below).
+>
+> Prior stamp — 2026-08-15 — project-identity pass (KG-C-11). Every `--project=`,
 > the kubectl context string, the Artifact Registry path and the GCS backup bucket
 > were re-pointed from the retired `anizai-pipeline` to `anizai-pipehub`. Identity
 > facts are owned by `docs/C_cloud/cloud_constants.md`. **Scope limit: identity
@@ -23,11 +25,27 @@
 > For what is actually deployed right now, see `docs/C_cloud/cloud_state.md` — the
 > live cluster always wins over any value written into a guide.
 >
-> **Full accuracy sweep 2026-07-26** (closes KG-C-6). The two defects KG-C-6 named —
-> lowercase secret names and an outdated Scheduler schedule — were already gone; the
-> sweep instead corrected the node-pool count, the Flink re-submit instruction, the
-> Artifact Registry paths, the agent metric names, topic and job names, and the
-> Firestore collection layout.
+> **Procedure audit 2026-08-16** (KG-C-11 procedural half). Every runnable command
+> checked against `infrastructure/k8s/`, the DAG files and the agent source.
+> Corrected: the `component=` pod selectors in §1.1 (matched nothing — the labels
+> are `app=`), all three PromQL samples in §1.5 (all three returned nothing), the
+> Grafana panel names in §1.4 (named panels that do not exist, and omitted the
+> Latency row), the scrape-target expectation in §1.5 (three of five targets are
+> *correctly* DOWN at the D10 resting state), and the `NEWSAI_API_KEY` row in §2.5
+> (provider direction was inverted — see KG-C-5). §1.4 gained the KG-C-14 note on
+> why a correct Grafana password can still be rejected.
+>
+> **The 2026-07-26 "full accuracy sweep" did not catch any of those**, and the
+> 2026-08-15 identity pass was explicitly strings-only. Both stamps were accurate
+> about what they did and misleading about what they implied. **Re-read this file
+> before trusting it; do not let a stamp substitute for that** — that is KG-C-6's
+> own recorded lesson, recurring.
+>
+> Prior — **full accuracy sweep 2026-07-26** (closed KG-C-6). The two defects
+> KG-C-6 named — lowercase secret names and an outdated Scheduler schedule — were
+> already gone; that sweep instead corrected the node-pool count, the Flink
+> re-submit instruction, the Artifact Registry paths, the agent metric names,
+> topic and job names, and the Firestore collection layout.
 
 ---
 
@@ -39,29 +57,40 @@ gcloud auth login
 gcloud container clusters get-credentials anizai-cluster `
   --zone us-central1-a --project anizai-pipehub
 
-# 2. Open all port-forwards in separate terminals (or background jobs):
+# 2. FIRST — see which workloads actually have a pod. A port-forward to a
+#    Service with no endpoints fails outright ("no endpoints available"),
+#    it does not hang. Six workloads rest at desired 0 (D10), so several
+#    of the forwards below are only valid once someone has scaled them.
+kubectl get deploy -n anizai -o custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas,READY:.status.readyReplicas
+
+#    Always available while the pool is up:  postgres, kafka, kafka-ui,
+#      airflow-webserver, prometheus, grafana
+#    Only if scaled up:                      flink-jobmanager, agent-worker
+
+# 3. Open the port-forwards you need, in separate terminals (or background jobs):
 kubectl port-forward -n anizai svc/airflow-webserver 8090:8080
 kubectl port-forward -n anizai svc/kafka-ui 8080:8080
-kubectl port-forward -n anizai svc/flink-jobmanager 8081:8081
+kubectl port-forward -n anizai svc/flink-jobmanager 8081:8081     # needs flink-jobmanager scaled up
 kubectl port-forward -n anizai svc/grafana 3000:3000
 kubectl port-forward -n anizai svc/prometheus 9090:9090
 kubectl port-forward -n anizai svc/postgres 5432:5432
 
-# 3. Open in browser:
+# 4. Open in browser:
 #   Airflow:    http://localhost:8090  (credentials in Secret Manager)
 #   Kafka UI:   http://localhost:8080  (no credentials required)
 #   Flink:      http://localhost:8081  (no credentials required)
-#   Grafana:    http://localhost:3000  (credentials in Secret Manager)
+#   Grafana:    http://localhost:3000  (credentials in Secret Manager — read §1.4
+#                                       FIRST if the password is rejected)
 #   Prometheus: http://localhost:9090  (no credentials required)
 
-# 4. Query PostgreSQL directly:
+# 5. Query PostgreSQL directly:
 psql -h localhost -U anizai -d anizai
 # (password in Secret Manager — see Section 1.6)
 
-# 5. Retrieve any secret:
+# 6. Retrieve any secret:
 gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipehub
 
-# 6. Scale main-pool on/off:
+# 7. Scale main-pool on/off:
 gcloud container clusters resize anizai-cluster `
   --node-pool=main-pool --num-nodes=1 `
   --zone=us-central1-a --project=anizai-pipehub   # ON
@@ -221,9 +250,16 @@ kubectl logs -n anizai deploy/airflow-webserver --tail=50
 ### Pod Status
 
 ```powershell
-kubectl get pods -n anizai -l component=scheduler
-kubectl get pods -n anizai -l component=webserver
+kubectl get pods -n anizai -l app=airflow-scheduler
+kubectl get pods -n anizai -l app=airflow-webserver
 ```
+
+> **These selectors read `app=`, not `component=`.** No pod in this deployment
+> carries a `component` label — the only `component:` keys in
+> `infrastructure/k8s/` are *alert* labels inside `prometheus-rules-configmap.yaml`.
+> A `-l component=scheduler` selector returns `No resources found`, which is
+> indistinguishable from Airflow being down. Corrected 2026-08-16; the authority
+> is `airflow-scheduler-deployment.yaml` / `airflow-webserver-deployment.yaml`.
 
 ---
 
@@ -333,12 +369,60 @@ Open http://localhost:3000 in a browser.
 gcloud secrets versions access latest --secret=GRAFANA_ADMIN_PASSWORD --project=anizai-pipehub
 ```
 
+> **⚠ A new secret version does not reach a running pod. This applies to every
+> rotation, not just to past ones.**
+>
+> Grafana reads the password **once, at container start**:
+> `export GF_SECURITY_ADMIN_PASSWORD=$(cat /var/secrets/grafana/GRAFANA_ADMIN_PASSWORD)`
+> (`grafana-deployment.yaml`). The CSI driver mounts the secret at pod start and
+> does **not** rotate the file into a running pod. So after **any** rotation there
+> is a window in which `gcloud … access latest` returns the new value while the
+> pod is still authenticating against the old one — and the symptom is a 401 with
+> what you can prove is the correct password.
+>
+> **The rule: rotate, then restart. A rotation is not complete until the pod has
+> been restarted.**
+>
+> ```powershell
+> kubectl delete pod -n anizai -l app=grafana
+> kubectl rollout status deploy/grafana -n anizai --timeout=120s
+> ```
+>
+> Safe to do at any time: `/var/lib/grafana` is on no PVC (only the CSI secret and
+> the provisioning ConfigMap are mounted), so `grafana.db` is rebuilt on every
+> start and the env password takes effect immediately. Nothing is lost — both
+> dashboards re-provision from the ConfigMap.
+>
+> **Precedent — KG-C-14, 2026-08-15.** This secret was stored malformed (leading
+> space), and the trimmed value was uploaded as **version 2**. The fix did not
+> bite only because a rollout restart happened to be part of it: version 2 was
+> created at 15:48:50 and the pod started at 15:49:14, 24 seconds later. Verified
+> behaviourally on 2026-08-16 — current password 200, the old space-prefixed value
+> 401, a deliberately wrong value 401. **The 24-second margin was luck, not
+> design.** Do not rely on it next time.
+>
+> Never work around a 401 by reading an older secret version. On this secret,
+> version 1 is the malformed one.
+
 ### What You Can Do Here
 
-- **View pipeline dashboards** — Left sidebar → **Dashboards** → click **"Anizai Pipeline"**.
-- **Throughput row** — `Records/sec (Silver)` and `Records/sec (Gold)` — should show non-zero spikes when DAGs fire.
-- **Checkpoint row** — Checkpoint duration (target < 10s) and checkpoint lag (target < 60s).
-- **JVM / Resources row** — Heap usage (healthy at 30–50% of 2GB TaskManager memory).
+- **View pipeline dashboards** — Left sidebar → **Dashboards**. Two are
+  provisioned: **"Anizai Pipeline"** (detailed Flink drill-down) and
+  **"Anizai Pipeline Health"** (single-screen at-a-glance). Direct URLs and the
+  warning about their `uid`s are in `cluster_operations_guide.md` §13.
+
+**"Anizai Pipeline" has four rows** (panel names below are verbatim from
+`grafana-configmap.yaml` — earlier drafts of this guide named panels that do
+not exist):
+
+- **Throughput** — `Operator Throughput (records/sec)` and
+  `Total Records In – Per Operator`. Non-zero spikes when DAGs fire.
+- **Latency** — `Processing Latency – p50 / p95 / p99`. This row was missing
+  from this guide entirely until 2026-08-16.
+- **Checkpoints** — `Checkpoint Duration & Size` (duration target < 10s) and
+  `Checkpoint Status`.
+- **JVM Health** — `TaskManager JVM Heap Memory` (healthy at 30–50% of the 2GB
+  TaskManager allocation) and `GC Time Rate`.
 
 **If panels show "No data":** Flink jobs may not be running. Flink metrics are only
 exposed while a job is in `RUNNING` state. Verify jobs are running in the Flink UI
@@ -373,21 +457,51 @@ Open http://localhost:9090 in a browser. No credentials required.
 ### What You Can Do Here
 
 - **Query raw metrics** — Use the Expression Browser on the home page to run PromQL queries.
-- **Check scrape targets** — Click **Status** → **Targets** to confirm Flink, Kafka, and PostgreSQL exporters are `UP`.
+- **Check scrape targets** — Click **Status** → **Targets**. There are **five**
+  scrape jobs (`prometheus-configmap.yaml`), and **not all of them are supposed
+  to be UP**:
+
+  | Job | Expected while the pool is up |
+  |---|---|
+  | `kafka-exporter` | **UP** — a DOWN here is a real fault |
+  | `postgres-exporter` | **UP** — a DOWN here is a real fault |
+  | `flink-jobmanager` | **DOWN unless Flink was scaled up.** Flink rests at desired 0 (D10) |
+  | `flink-taskmanager` | **DOWN unless Flink was scaled up** |
+  | `agent-worker` | **DOWN unless the agent was scaled up.** Declared `replicas: 0` |
+
+  Reading the three conditional targets as a fault is the failure mode this
+  table exists to prevent. Check desired replicas before concluding anything:
+  `kubectl get deploy -n anizai -o custom-columns=NAME:.metadata.name,DESIRED:.spec.replicas`.
+
 - **Explore available metrics** — Click **Graph** and start typing `flink_` or `kafka_` to autocomplete metric names.
 
-**Sample queries:**
+**Sample queries.** These are the forms actually in use on this cluster — each
+one is taken from a provisioned dashboard panel or a live alert rule, not
+composed by hand:
 
 ```
-# Flink records processed per second (Silver job):
-rate(flink_taskmanager_job_task_numRecordsIn_total[1m])
+# Flink records processed per second, per operator
+# (source: grafana-configmap.yaml, "Operator Throughput" panel):
+rate(flink_taskmanager_job_task_operator_numRecordsIn[1m])
 
-# Kafka consumer lag:
-kafka_consumer_group_lag
+# Kafka topic depth — the end offset, per topic/partition
+# (source: prometheus-rules-configmap.yaml, six alert rules):
+kafka_topic_partition_current_offset{topic="ingest.bronze.polymarket"}
 
-# PostgreSQL active connections:
-pg_stat_activity_count
+# PostgreSQL connection headroom
+# (source: prometheus-rules-configmap.yaml, PostgresConnectionPoolSaturating):
+pg_settings_max_connections - pg_stat_database_numbackends{datname="anizai"}
 ```
+
+> **Three queries that were in this section until 2026-08-16 and returned
+> nothing.** Recorded so they are not reintroduced from memory:
+> `flink_taskmanager_job_task_numRecordsIn_total` — Flink's Prometheus reporter
+> appends no `_total`, and the metric in use is operator-scope;
+> `kafka_consumer_group_lag` — the exporter spells it `kafka_consumergroup_lag`,
+> and in any case **there are no consumer groups on this cluster** (both Flink
+> jobs track position by checkpoint — `bringup_profiles.md` §3 step 4), so even
+> the correctly-spelled metric is empty; `pg_stat_activity_count` — not exported
+> by this `postgres-exporter` configuration.
 
 ### Pod Logs
 
@@ -839,13 +953,28 @@ gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipe
 | `AIRFLOW_FERNET_KEY` | Airflow connection encryption |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana web login (username is plain env var `admin`) |
 | `OPENAI_API_KEY` | Gold enrichment + agent synthesis (GPT-4o / GPT-4o-mini) |
-| `NEWSAI_API_KEY` | NewsAPI ingestion (TheNewsAPI provider since Sprint 21.5). **The name is misleading — it holds a thenewsapi.com key, not a newsapi.ai one. Rename to `THE_NEWS_API_KEY` is pending (KG-C-5); do not rotate a newsapi.ai key into it.** |
+| `NEWSAI_API_KEY` | NewsAPI ingestion. **Provider is newsapi.ai / Event Registry (`eventregistry.org`) since the Phase 7A migration, 2026-05-09** — `config/settings.py` sets `NEWSAI_BASE_URL = "https://eventregistry.org/api/v1"` and the producer calls `{BASE}/article/getArticles` with `apiKey=`. **Rotate an eventregistry.org key into it.** The secret name is correct and matches the provider. |
 | `FRED_API_KEY` | FRED economic data |
 | `OPENWEATHER_API_KEY` | OpenWeather source |
 | `OPENSKY_CLIENT_ID` | OpenSky OAuth2 |
 | `OPENSKY_CLIENT_SECRET` | OpenSky OAuth2 |
 | `TELEGRAM_API_ID` | Telegram MTProto |
 | `TELEGRAM_API_HASH` | Telegram MTProto |
+
+> **The `NEWSAI_API_KEY` row was inverted until 2026-08-16.** It read *"holds a
+> thenewsapi.com key … do not rotate a newsapi.ai key into it"* — which is
+> exactly the key the producer needs. Following it during a rotation would have
+> taken NewsAPI ingestion down, with KG-A-23 masking the DAG failure. The
+> inversion originated in the KG-C-5 row, not here; that row has been rewritten,
+> and the proposed `THE_NEWS_API_KEY` rename is **on hold** rather than pending —
+> it would rename the secret to advertise the retired provider.
+> `VALIDATION_GUIDE.md` line 50 had it right all along and is the reference.
+>
+> **Two secrets carry a known shape hazard (KG-C-14)** — values were migrated
+> without trimming whitespace/quotes. `GRAFANA_ADMIN_PASSWORD` was fixed as
+> version 2 (see §1.4). `FRED_API_KEY` was deliberately **not** trimmed because
+> it had been logged in plaintext and is being rotated at FRED. Check byte length
+> against the provider's expected shape after any `.env`-sourced migration.
 
 ---
 

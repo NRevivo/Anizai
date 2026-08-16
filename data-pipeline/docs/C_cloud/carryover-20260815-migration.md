@@ -161,9 +161,16 @@ have created 6 of 7 unpaused, and `opensky_high_frequency` runs `*/3 * * * *` �
 a three-minute fuse, with ingestion starting under LocalExecutor even with every
 producer Deployment at 0. `docker-compose.yml` deliberately stays `'false'`.
 
-**KG-C-10 is now wider, not narrower.** The manifests still declare
-`replicas: 1` for the six workloads resting at 0. A routine
+**KG-C-10 is now wider, not narrower.** The manifests declare `replicas: 1` for
+**five** of the six workloads resting at 0 — `flink-jobmanager`,
+`flink-taskmanager`, `telegram`, `polymarket`, `trigger-consumer`. A routine
 `kubectl apply -f infrastructure/k8s/` restarts Flink and all three producers.
+
+> **Corrected 2026-08-16 — this said "the six".** `k8s/agent-deployment.yaml`
+> declares `replicas: 0` deliberately, so `apply` does not start the agent; it is
+> raised with `kubectl scale`. KG-C-10 itself records the exception correctly.
+> The same "all six" slip was in `bringup_profiles.md` §2 and was fixed in the
+> same pass — the two must stay in step.
 
 ---
 
@@ -276,6 +283,26 @@ gs://anizai-pipehub-backups/postgres/2026-08-15/anizai.sql.gz   4865 bytes
 The GCS bucket rename is a class-B change (a separate globally-unique
 namespace, not a substring swap). A wrong bucket name in the CronJob would have
 surfaced only at 02:00 UTC the next day, as a silent failure.
+
+### ➕ Monitoring was provisioned, and this file failed to say so (added 2026-08-16)
+
+**`infrastructure/gcp/06_monitoring_setup.sh` WAS re-run against
+`anizai-pipehub`.** Verified on the cluster 2026-08-16: log-based metric
+`openai_rate_limit_errors` present, **both** alert policies enabled (WARNING and
+the CRITICAL storm policy), delivering to `ron.mintz21@gmail.com`, not orphaned.
+
+**The defect is that nothing above recorded it.** §8 covers gates S6 and S7, §2
+covers images, §3 covers secrets — monitoring appears nowhere. Eight of the nine
+`gcp/0*.sh` scripts left evidence somewhere in this record; `06` left none. A
+2026-08-16 doc audit reading this file therefore concluded the OpenAI
+rate-limit alert might not exist in the new project at all, and raised KG-C-17.
+The reasoning was sound; only the conclusion was wrong, and it took a cluster
+read to settle.
+
+**Standing rule this leaves behind:** a migration carry-over must record **every
+provisioning script that ran**, not only the ones whose output a gate happened
+to test. S6 tested the forecast path and S7 the backup path. Nothing tested
+alerting — so nothing wrote it down, and the silence read as absence.
 
 ### Layer 6 — a measured failure worth recording
 

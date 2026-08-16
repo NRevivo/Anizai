@@ -108,9 +108,18 @@ explicitly — but the floor underneath it is now 0, so a workload you forget to
 **absent**, not quietly present. That is the intended failure direction.
 
 This is a deliberate divergence from the old project, whose last teardown left Flink and
-`trigger-consumer` at desired 1. The committed manifests still declare `replicas: 1` for
-all six (KG-C-10), so a routine `kubectl apply` still overrides the resting state — read
-desired replicas from the cluster, never from the repo (§5 trap 4).
+`trigger-consumer` at desired 1. **Five of the six manifests declare `replicas: 1`** —
+`flink-jobmanager`, `flink-taskmanager`, `telegram`, `polymarket`, `trigger-consumer` — so
+a routine `kubectl apply` overrides the resting state for those (KG-C-10). Read desired
+replicas from the cluster, never from the repo (§5 trap 4).
+
+**`agent-worker` is the exception and is the one to get right:**
+`k8s/agent-deployment.yaml` declares **`replicas: 0`** deliberately, with a comment saying
+so. `kubectl apply` on it does *not* start the agent — it is brought up with
+`kubectl scale`, per §3 step 5. This paragraph said "all six" until 2026-08-16; anyone
+reconciling git against live on that reading goes looking for a `replicas: 1` in
+`agent-deployment.yaml` that has never been there. KG-C-10 itself states the exception
+correctly — it is the restatements that drifted.
 
 ---
 
@@ -120,6 +129,25 @@ desired replicas from the cluster, never from the repo (§5 trap 4).
 
 Confirm the active kubectl context and GCP project, then list the node pool and
 nodes. Expect 0 nodes. If the context is not the intended cluster, stop.
+
+```powershell
+kubectl config current-context
+# Expected: gke_anizai-pipehub_us-central1-a_anizai-cluster
+
+gcloud config get-value project
+# Expected: anizai-pipehub
+# Anything else and you are one command away from acting on the wrong project.
+
+gcloud container node-pools list --cluster=anizai-cluster `
+  --zone=us-central1-a --project=anizai-pipehub
+# Expected: exactly one pool, main-pool. There is no polymarket-pool.
+
+kubectl get nodes
+# Expected: "No resources found"
+```
+
+**These commands are spelled out rather than described because the prose form
+let Step 3 ship without `--project` for months** — see the note there.
 
 ### Step 1 — Apply the profile (live objects, pool still at 0)
 
@@ -142,9 +170,10 @@ skipping it means discovering the mistake by looking at a bill.
 
 ### Step 3 — Resize the pool
 
-```
-gcloud container clusters resize anizai-cluster --node-pool=main-pool --num-nodes=1 \
-  --zone=us-central1-a
+```powershell
+gcloud container clusters resize anizai-cluster `
+  --node-pool=main-pool --num-nodes=1 `
+  --zone=us-central1-a --project=anizai-pipehub
 ```
 
 **`--zone` is mandatory and the cluster is ZONAL** — `us-central1-a`, note the `-a`
@@ -152,6 +181,26 @@ suffix. Without a location flag the command fails outright with *"One of [--loca
 --zone, --region] must be supplied"*; with `--region us-central1` it addresses a
 regional cluster that does not exist. This line omitted the flag until 2026-08-01 and
 failed for everyone who ran it from the guide.
+
+**`--project=anizai-pipehub` is equally mandatory, and was missing until
+2026-08-16.** Without it the command runs against whatever `gcloud config` last
+pointed at. That is not a theoretical risk here: the project changed under
+everyone's feet at the 2026-08-15 migration, and there are **two Google
+identities, one per project** (`cloud_constants.md` §2). A resize that lands on
+the wrong project either fails confusingly or, once a same-named resource exists
+somewhere, succeeds somewhere unintended.
+
+> **Why the identity sweep did not catch this.** KG-C-11 swept for files
+> *containing* the string `anizai-pipeline`. This file contained none — so it
+> was never opened, and a **missing** flag has no string to match.
+> **Absence cannot be grepped.** When an identity pass runs again, enumerate the
+> commands that *should* carry `--project` and check each one, rather than
+> grepping for the old value. See KG-C-11's open procedural half.
+
+**The block is PowerShell** — backtick continuation, not `\`. It was previously
+written with bash `\` continuations while sitting in an untagged block: pasted
+into PowerShell, the second line parses as a separate command and `--zone` is
+silently dropped, which is exactly the failure the paragraph above warns about.
 
 Expect ~3–5 min for the node, plus ~30 s per pod.
 

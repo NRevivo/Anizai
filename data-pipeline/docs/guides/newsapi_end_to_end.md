@@ -1,6 +1,37 @@
 # A NewsAPI Article — End-to-End Walkthrough
 
-This document traces a single Reuters article about an OPEC production cut through every layer of the pipeline: **Ingestion → Bronze → Silver → Gold → Persistence**. Every code block is taken directly from the source files.
+> ## ⚠ Step 1 documents a producer that no longer exists (flagged 2026-08-16)
+>
+> This file was written against the **pre-Phase-7A** NewsAPI producer. The
+> **Phase 7A migration (2026-05-09)** replaced TheNewsAPI with **newsapi.ai /
+> Event Registry**, and `ingestion/newsapi_producer.py` was rewritten. Steps 2–4
+> (Silver, Gold, persistence) and every Python-syntax explainer are **still
+> accurate** — the migration was confined to the producer, which is the
+> API-shape boundary, and `source_name="newsapi"` plus the Bronze topic were
+> deliberately preserved so nothing downstream changed.
+>
+> **What is wrong in Step 1, specifically:**
+>
+> | Documented here | Actually now |
+> |---|---|
+> | `newsapi.org/v2/top-headlines?…&apiKey=` | `https://eventregistry.org/api/v1/article/getArticles` (`config/settings.py` → `NEWSAI_BASE_URL`) |
+> | `_fetch_top_headlines()` | `_fetch_articles()` |
+> | `TOP_HEADLINES_ENDPOINT` / `EVERYTHING_ENDPOINT` | `NEWSAI_GETARTICLES_URL` |
+> | **Gate 2 — `_passes_keyword_sniper()` on the `general` category** | **Removed from the producer in Phase 7A.** The method does not exist. The `GENERAL_KEYWORDS` pre-filter existed only to gate the noisy "news" root bucket, which newsapi.ai does not have; all 5 categories now pass through the authority whitelist uniformly. The keyword list survives in `keyword_sniper.py`, which is a *Silver*-layer concern |
+> | Every cited line range | Off by 30–120 lines (`run_pulse` 534–586 → **614**; `_passes_whitelist` 238–249 → **307**; `_build_raw_payload` 399–453 → **450**; `_emit` 459–489 → **545**; `_process_and_emit` 495–528 → **577**) |
+>
+> **Gate 1 (the authority whitelist) is unchanged and still correct.** So is the
+> Bronze envelope construction from `_emit()` onward — `build_bronze_message()`,
+> `build_bronze_payload()`, `build_envelope()` and `ndjson_serializer()` are all
+> current.
+>
+> **Read Step 1 as history, not as the current shape.** Re-deriving it from the
+> Phase-7A producer is outstanding work, deliberately not attempted in the
+> 2026-08-16 doc audit — a half-updated walkthrough would be worse than one with
+> an accurate banner. Related: KG-C-5, which had the *provider direction*
+> inverted in the opposite way and has been rewritten.
+
+This document traces a single Reuters article about an OPEC production cut through every layer of the pipeline: **Ingestion → Bronze → Silver → Gold → Persistence**. Code blocks in Steps 2–4 are taken directly from the source files; **Step 1's are not — see the banner above.**
 
 ---
 
@@ -990,7 +1021,7 @@ def insert(record: dict) -> str:
 15.                      apply_impact_boost()           → impact_level = min(5, 4+1) = 5
 16.                      call_openai_embedding()        → list[float] × 1536
 17.                      build_gold_global_signal()     → Gold record
-                         [Kafka topic: process.gold.global_news]
+                         [Kafka topic: serve.gold.global_news]
 18. knowledge_vault.py   archive()           → INSERT full-text → returns doc_id
 19. knowledge_vectors.py insert()            → INSERT Gold + vector → HNSW-indexed
 ```

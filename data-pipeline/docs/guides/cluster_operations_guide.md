@@ -4,12 +4,26 @@
 This is the long-term reference for operating the running pipeline.
 Audience: Ron, and future Claude sessions reaching for "how do I X?".
 
-> Last updated: 2026-08-15 — project-identity pass (KG-C-11). Every `--project=`,
+> Last updated: 2026-08-16 — **procedure audit against the manifests** (KG-C-11
+> procedural half). Every runnable command was checked against
+> `infrastructure/k8s/`, the DAG files and the agent source. Corrected here: the
+> DLQ reads (1 of 3 partitions, and `--offset latest` — §5.5, §9), `wc -l` inside
+> PowerShell blocks (§3, §5.8), bash variable assignments in `powershell`-tagged
+> blocks (§3, §5, §6, §7, §9), the missing `--project` on the Scheduler *pause*
+> commands (§4), and the undeclared local `jq` dependency (§3 preamble). §5.4
+> gained a KG-C-17 warning: the OpenAI rate-limit alert may not exist in this
+> project at all. §13 was verified correct and is unchanged.
+>
+> **Scope limit — still true, and it still matters:** this was a check against
+> the **repo**, not against a running cluster. Three findings could not be settled
+> from the repo and are listed in KG-C-17 / KG-C-14 / KG-C-5 for an operating
+> session to close.
+>
+> Prior stamp — 2026-08-15 — project-identity pass (KG-C-11). Every `--project=`,
 > the Artifact Registry path and the GCS backup bucket were re-pointed from the
 > retired `anizai-pipeline` to `anizai-pipehub`; identity facts are owned by
-> `docs/C_cloud/cloud_constants.md`. **Scope limit: identity strings only — no
-> procedure in this guide was re-verified against a live cluster in that pass.**
-> The two `anizai-pipeline-*` Grafana dashboard UIDs in §12 are class-D keys and
+> `docs/C_cloud/cloud_constants.md`. That pass was **identity strings only**.
+> The two `anizai-pipeline-*` Grafana dashboard UIDs in §13 are class-D keys and
 > were deliberately left alone; see the warning there.
 >
 > Prior stamp — 2026-07-27 — boundary-hygiene pass with `bringup_profiles.md`. Live
@@ -25,8 +39,15 @@ and `data-pipeline/docs/old_docs/phase95_cluster_robustness_implementation.md`
 (Phase 9.5).
 
 For day-to-day port-forward commands see
-`data-pipeline/docs/guides/CLOUD_CONNECTION_GUIDE.md` (fully swept for accuracy
-2026-07-26 — KG-C-6 closed).
+`data-pipeline/docs/guides/CLOUD_CONNECTION_GUIDE.md`.
+
+> **Do not treat any "fully swept" stamp as a reason not to re-read a file.**
+> That guide carried a *"full accuracy sweep 2026-07-26"* claim, and the
+> 2026-08-16 audit still found four defects that predated it — `component=` pod
+> selectors matching nothing, three PromQL samples returning nothing, Grafana
+> panel names that do not exist, and inverted `NEWSAI_API_KEY` guidance. This is
+> KG-C-6's own recorded lesson recurring: *a "closed" marker stopped anyone
+> re-reading the file, so the gap outlived the defects it described.*
 
 **For bringing the cluster up or down — whole system, pipeline-only, or
 agents-only — use `data-pipeline/docs/guides/bringup_profiles.md`.** That file
@@ -146,10 +167,18 @@ network calls + Flink checkpoint windows, not the pipeline itself.
 > tells you to run live here. Run its §3 / §4 and reach into this section for the
 > exact syntax; do not follow this section top-to-bottom as a start-up sequence.
 >
-> **Shell warning:** the blocks below are tagged `powershell` but are mixed. Steps 1–2
-> use PowerShell line continuation (backtick); steps 4–5 use bash (`JM=$(...)`,
-> `| wc -l`). Pasting a whole block into one shell will fail partway. Run them
-> individually, in a shell that matches.
+> **Shell:** these blocks are now uniformly **PowerShell** — backtick continuation,
+> `$JM = kubectl …` assignment, `Measure-Object -Line` in place of `wc -l`.
+> Until 2026-08-16 they were mixed: steps 1–2 PowerShell, steps 4–5 bash
+> (`JM=$(...)`, `| wc -l`), so pasting a block into either shell failed partway.
+> The same correction was applied in §5.8. **Blocks elsewhere in this guide are
+> still mixed where the bash form is load-bearing** — §6, §7 and §9 are called out
+> at the point of use; §9.2 holds the three Windows failure modes in full.
+>
+> **`jq` is required on the LOCAL machine** for §3's teardown-cancel loop, §7 and
+> the §9 Flink rows. In `kubectl exec … -- curl -s … | jq -r '…'` the pipe is
+> local, so `jq` runs on Windows, not in the pod. It is not installed by default:
+> `winget install jqlang.jq`. Without it those commands fail at the first pipe.
 
 ### Pool resize, 0 → 1
 
@@ -171,7 +200,7 @@ kubectl get pods -n anizai --watch
 #    NoBrokersAvailable while Kafka boots — that settles in ~60s and is not a fault.
 
 # 4. Verify Flink jobs auto-recovered to RUNNING:
-JM=$(kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}')
+$JM = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'
 kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview
 
 # Expected: both anizai-silver-polymarket and anizai-gold-all-sources in
@@ -179,8 +208,8 @@ kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview
 # runbook "Flink jobs in RESTARTING loop after a restart".
 
 # 5. Confirm topics exist (kafka-init CronJob may have already run):
-kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server localhost:9092 --list | wc -l
+(kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-topics.sh `
+  --bootstrap-server localhost:9092 --list | Measure-Object -Line).Lines
 # Expected: 19. If <19, manually re-run kafka-init:
 #   kubectl create job kafka-init-manual --from=cronjob/kafka-init -n anizai
 ```
@@ -194,10 +223,11 @@ kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 ```powershell
 # 1. Optional: cleanly cancel running Flink jobs first to ensure their
 #    final checkpoints land + their HA state is preserved cleanly:
-JM=$(kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}')
-for jid in $(kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview | jq -r '.jobs[].jid'); do
+$JM = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'
+$jobs = kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview | ConvertFrom-Json
+foreach ($jid in $jobs.jobs.jid) {
   kubectl exec -n anizai $JM -- curl -s -X PATCH "http://localhost:8081/jobs/$jid"
-done
+}
 # Cancel is NOT strictly necessary — HA preserves graphs across restarts
 # regardless — but it produces a cleaner state for diagnostics.
 
@@ -261,9 +291,16 @@ After the next 05:00 IL scale-up, monitor the first cycle:
 ### Re-pause if anything is off
 
 ```powershell
-gcloud scheduler jobs pause scale-up-main-pool   --location=us-central1
-gcloud scheduler jobs pause scale-down-main-pool --location=us-central1
+gcloud scheduler jobs pause scale-up-main-pool   `
+  --location=us-central1 --project=anizai-pipehub
+gcloud scheduler jobs pause scale-down-main-pool `
+  --location=us-central1 --project=anizai-pipehub
 ```
+
+> **`--project` was missing from these two until 2026-08-16**, while the resume
+> commands above carried it — an asymmetry in the wrong direction. This is the
+> *safety* command, run when something is already going wrong; without the flag
+> it targets whatever `gcloud config` last pointed at.
 
 ---
 
@@ -287,7 +324,7 @@ kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-get-offsets.sh `
   --bootstrap-server localhost:9092 --topic ingest.bronze.polymarket --time -1
 
 # Check Flink job state:
-JM=$(kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}')
+$JM = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'
 kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview
 ```
 
@@ -371,6 +408,20 @@ this fires under three common conditions:
 **Triage steps** (run in this order, stop when you have the answer):
 
 1. Check Cloud Monitoring for `OpenAI rate-limit (WARNING)` alert firing.
+
+   > **Where to look, and why it is not in Prometheus.** This alert is not a
+   > Prometheus rule — it is a Cloud Logging metric feeding Cloud Monitoring email,
+   > provisioned by `infrastructure/gcp/06_monitoring_setup.sh`. **Verified present
+   > in `anizai-pipehub` on 2026-08-16:** metric `openai_rate_limit_errors`, with
+   > both policies enabled (WARNING and the CRITICAL storm policy), delivering to
+   > `ron.mintz21@gmail.com`. Silence from it is therefore meaningful.
+   >
+   > If you ever need to re-confirm that:
+   > `gcloud logging metrics list --project=anizai-pipehub` and
+   > `gcloud alpha monitoring policies list --project=anizai-pipehub`.
+   > Grafana cannot answer this question — it scrapes no container or
+   > log-based metrics (KG-C-16).
+
    If yes → KG-PHASE-9.5-1 active. Options:
    - Wait for next midnight UTC (RPD ceiling resets).
    - If urgent, cancel the Gold job to stop OpenAI consumption + free
@@ -393,11 +444,33 @@ be RPD ceiling (KG-PHASE-9.5-1) or credit exhaustion.
 
 **Inspect**:
 ```powershell
-# Dump recent DLQ messages:
-kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-console-consumer.sh `
-  --bootstrap-server localhost:9092 --topic dead-letter-queue `
-  --partition 0 --offset latest --max-messages 10 --timeout-ms 30000
+# Dump DLQ messages. dead-letter-queue has THREE partitions — loop all of them.
+foreach ($p in 0,1,2) {
+  Write-Host "--- partition $p ---"
+  kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-console-consumer.sh `
+    --bootstrap-server localhost:9092 --topic dead-letter-queue `
+    --partition $p --offset earliest --max-messages 10 --timeout-ms 20000
+}
 ```
+
+> **Two fake-zero traps live in this one command — see §9.1.**
+> **(1) `dead-letter-queue` has 3 partitions** (`kafka-init-cronjob.yaml`).
+> Reading partition 0 alone can return nothing while the DLQ is full, because a
+> topic's data can sit entirely on one partition — `ingest.bronze.telegram` had
+> all of its records on partition 2.
+> **(2) `--offset latest` starts at the tail** and waits for *new* messages, so
+> on a quiet DLQ it prints `Processed a total of 0 messages` after the timeout —
+> indistinguishable from an empty DLQ. Use `earliest`.
+> This block used `--partition 0 --offset latest` until 2026-08-16.
+>
+> **For depth rather than content, use the offsets, not a consumer:**
+> ```powershell
+> kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-get-offsets.sh `
+>   --bootstrap-server localhost:9092 --topic dead-letter-queue --time -1
+> kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-get-offsets.sh `
+>   --bootstrap-server localhost:9092 --topic dead-letter-queue --time -2
+> ```
+> Depth is `sum(--time -1) - sum(--time -2)` across the three partitions.
 
 **Check OpenAI status**: https://platform.openai.com/usage. Look for
 - Daily request count approaching 10,000 (Tier 1 ceiling).
@@ -488,9 +561,9 @@ kubectl exec -n anizai kafka-0 -- printenv KAFKA_LOG_DIRS
 kubectl create job kafka-init-manual --from=cronjob/kafka-init -n anizai
 
 # 3. Wait for the Job pod to Complete, then verify:
-kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-topics.sh `
-  --bootstrap-server localhost:9092 --list | wc -l
-# Expected: 19
+(kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-topics.sh `
+  --bootstrap-server localhost:9092 --list | Measure-Object -Line).Lines
+# Expected: 19   (`wc -l` does not exist in PowerShell — corrected 2026-08-16)
 ```
 
 ### 5.9 — Flink jobs in RESTARTING loop after a restart
@@ -526,6 +599,11 @@ pre-rebuild compilation.
 
 ### Procedure: after rebuilding anizai-flink
 
+> **Shell:** steps 1–3 are PowerShell. Steps 4–7 use `$JM` — the PowerShell
+> assignment form is given below. Step 4's job-listing output is read by eye, so
+> no `jq` is needed here; §7's automated JID extraction does need local `jq`
+> (§3 preamble).
+
 ```powershell
 # 1. Confirm the new image is in Artifact Registry:
 gcloud artifacts docker images list `
@@ -545,7 +623,7 @@ kubectl rollout status deployment/flink-jobmanager -n anizai --timeout=180s
 kubectl rollout status deployment/flink-taskmanager -n anizai --timeout=180s
 
 # 4. Get the JIDs of the running (recovered-from-HA) jobs:
-JM=$(kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}')
+$JM = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'
 kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview
 
 # 5. CANCEL both jobs. (This is the step easy to forget.)
@@ -600,14 +678,19 @@ kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-get-offsets.sh `
 # 1. CANCEL the running Gold job. Flink will auto-clean its HA ConfigMap
 #    on CANCEL (confirmed Phase 9.5 Stage C — no manual ConfigMap deletion
 #    needed).
-JM=$(kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}')
-GOLD_JID=$(kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview | jq -r '.jobs[] | select(.name=="anizai-gold-all-sources") | .jid')
+$JM = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'
+# No local jq needed in this form — ConvertFrom-Json is built in.
+$overview = kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview | ConvertFrom-Json
+$GOLD_JID = ($overview.jobs | Where-Object { $_.name -eq "anizai-gold-all-sources" }).jid
+if (-not $GOLD_JID) { throw "Gold job not found in /jobs/overview — stop and investigate" }
 kubectl exec -n anizai $JM -- curl -s -X PATCH "http://localhost:8081/jobs/$GOLD_JID"
 
 # Wait for state=CANCELED before continuing.
-until kubectl exec -n anizai $JM -- curl -s "http://localhost:8081/jobs/$GOLD_JID" | grep -q '"state":"CANCELED"'; do
-  sleep 3
-done
+do {
+  Start-Sleep -Seconds 3
+  $state = (kubectl exec -n anizai $JM -- curl -s "http://localhost:8081/jobs/$GOLD_JID" | ConvertFrom-Json).state
+  Write-Host "state=$state"
+} while ($state -ne "CANCELED")
 
 # 2. Build the delete-records JSON file with current end offsets per partition.
 #    Save as ./delete-records.json (example for two topics × 3 partitions):
@@ -735,13 +818,14 @@ empty database). Don't do this unless absolutely necessary.
 | Pod CrashLoopBackOff | `kubectl logs -n anizai <pod> --previous --tail=50` |
 | Pod Pending | `kubectl describe pod -n anizai <pod>` (look at Events) |
 | Bronze topic offset count | `kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic <topic> --time -1` |
-| DLQ message inspection | `kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic dead-letter-queue --partition 0 --offset latest --max-messages 5 --timeout-ms 30000` |
-| Flink job state | `JM=$(kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'); kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview` |
+| DLQ message inspection | See §5.5 — **must loop partitions 0,1,2 and use `--offset earliest`**. A single-partition `--offset latest` read is a documented fake zero (§9.1) |
+| DLQ depth (authoritative) | `kubectl exec -n anizai kafka-0 -- /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic dead-letter-queue --time -1` then `--time -2`; depth = sum(latest) − sum(earliest) |
+| Flink job state | `$JM = kubectl get pods -n anizai -l app=flink-jobmanager -o jsonpath='{.items[0].metadata.name}'; kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/overview` |
 | Flink job checkpoint history | `kubectl exec -n anizai $JM -- curl -s http://localhost:8081/jobs/<jid>/checkpoints` |
 | Postgres row count by source | `kubectl exec -n anizai postgres-0 -- psql -U anizai -d anizai -c "SELECT source_name, COUNT(*) FROM <table> GROUP BY source_name;"` |
 | Recent Postgres connections | `kubectl exec -n anizai postgres-0 -- psql -U anizai -d anizai -c "SELECT pid, application_name, state, query_start FROM pg_stat_activity ORDER BY query_start;"` |
 | Agent recent log activity | `kubectl logs -n anizai -l app=agent-worker --tail=100` |
-| Airflow DAG run status | `SCHED=$(kubectl get pods -n anizai -l app=airflow-scheduler -o jsonpath='{.items[0].metadata.name}'); kubectl exec -n anizai $SCHED -- bash -c 'export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:$(cat /var/secrets/airflow/AIRFLOW_POSTGRES_PASSWORD)@airflow-postgres/airflow" && airflow dags list-runs -d <DAG_ID> -o plain | head -5'` |
+| Airflow DAG run status | `$SCHED = kubectl get pods -n anizai -l app=airflow-scheduler -o jsonpath='{.items[0].metadata.name}'` then `kubectl exec -n anizai $SCHED -- bash -c 'export AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:$(cat /var/secrets/airflow/AIRFLOW_POSTGRES_PASSWORD)@airflow-postgres/airflow" && airflow dags list-runs -d <DAG_ID> -o plain \| head -5'`. The **outer** assignment is PowerShell; everything inside `bash -c '…'` is bash and runs in the pod — see §9.2 item 1 before editing it, the `$(...)` inside is fragile in transit |
 | Trigger Airflow DAG manually | Same shell as above, then `airflow dags trigger <DAG_ID>` |
 
 ### 9.1 — Reading a topic: the fake-zero trap (verified 2026-08-15)
@@ -841,7 +925,7 @@ kubectl apply -f infrastructure/k8s/prometheus-rules-configmap.yaml
 #    file into the Prometheus pod.
 
 # 4. Trigger Prometheus to reload rules:
-PROM=$(kubectl get pods -n anizai -l app=prometheus -o jsonpath='{.items[0].metadata.name}')
+$PROM = kubectl get pods -n anizai -l app=prometheus -o jsonpath='{.items[0].metadata.name}'
 kubectl exec -n anizai $PROM -c prometheus -- wget --post-data="" -qO- `
   http://localhost:9090/-/reload
 
@@ -944,6 +1028,15 @@ operator doesn't alarm. Known Gaps now live per domain in each
 
 Port-forward: `kubectl port-forward -n anizai svc/grafana 3000:3000`.
 Credentials in Secret Manager: `gcloud secrets versions access latest --secret=GRAFANA_ADMIN_PASSWORD --project=anizai-pipehub`.
+
+> **⚠ Rotating this secret is not complete until the Grafana pod restarts.**
+> The pod reads the password once at container start and CSI does not rotate a
+> mounted file into a running pod, so after any rotation `latest` returns the new
+> value while the pod still authenticates against the old one — a 401 with a
+> provably correct password. Restart it:
+> `kubectl delete pod -n anizai -l app=grafana`. Safe — `/var/lib/grafana` is on
+> no PVC, so both dashboards re-provision from the ConfigMap. Full explanation and
+> the KG-C-14 precedent: `CLOUD_CONNECTION_GUIDE.md` §1.4.
 
 The "Known silent producers" text panel in Pipeline Health is kept up to
 date manually as the state in Section 12 changes — update both the panel
