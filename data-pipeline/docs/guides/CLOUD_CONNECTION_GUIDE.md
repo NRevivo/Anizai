@@ -1,4 +1,5 @@
 # Anizai Data Pipeline — Cloud Connection Guide
+
 ## GKE Cluster: anizai-cluster | Project: anizai-pipehub
 
 > Last updated: 2026-08-16 — procedure audit (see the second note below).
@@ -8,7 +9,7 @@
 > were re-pointed from the retired `anizai-pipeline` to `anizai-pipehub`. Identity
 > facts are owned by `docs/C_cloud/cloud_constants.md`. **Scope limit: identity
 > strings only — no procedure in this guide was re-verified against a live cluster
-> in that pass.** Four places where the rename alone does *not* make the surrounding
+> in that pass.** Four places where the rename alone does _not_ make the surrounding
 > instruction correct are called out inline: the two-identity note in §1.0.2, the
 > backup-bucket start date in §1.9, the registry tag inventory in §2.4, and the
 > billing history break in §2.6.
@@ -31,7 +32,7 @@
 > are `app=`), all three PromQL samples in §1.5 (all three returned nothing), the
 > Grafana panel names in §1.4 (named panels that do not exist, and omitted the
 > Latency row), the scrape-target expectation in §1.5 (three of five targets are
-> *correctly* DOWN at the D10 resting state), and the `NEWSAI_API_KEY` row in §2.5
+> _correctly_ DOWN at the D10 resting state), and the `NEWSAI_API_KEY` row in §2.5
 > (provider direction was inverted — see KG-C-5). §1.4 gained the KG-C-14 note on
 > why a correct Grafana password can still be rejected.
 >
@@ -102,15 +103,15 @@ gcloud container clusters resize anizai-cluster `
 
 **Port-forward reference:**
 
-| Service | Command | URL | Purpose |
-|---------|---------|-----|---------|
-| Airflow | `kubectl port-forward -n anizai svc/airflow-webserver 8090:8080` | http://localhost:8090 | DAG monitoring, trigger producers |
-| Kafka UI | `kubectl port-forward -n anizai svc/kafka-ui 8080:8080` | http://localhost:8080 | Topic inspection, message counts |
-| Flink UI | `kubectl port-forward -n anizai svc/flink-jobmanager 8081:8081` | http://localhost:8081 | Job status, checkpoint info |
-| Grafana | `kubectl port-forward -n anizai svc/grafana 3000:3000` | http://localhost:3000 | Pipeline metrics dashboards |
-| Prometheus | `kubectl port-forward -n anizai svc/prometheus 9090:9090` | http://localhost:9090 | Raw metrics |
-| PostgreSQL | `kubectl port-forward -n anizai svc/postgres 5432:5432` | `psql -h localhost -U anizai -d anizai` | Query vault tables directly |
-| Agent worker | `kubectl port-forward -n anizai svc/agent-worker 8000:8000` | http://localhost:8000/health | Agent /health + /metrics endpoint |
+| Service      | Command                                                          | URL                                     | Purpose                           |
+| ------------ | ---------------------------------------------------------------- | --------------------------------------- | --------------------------------- |
+| Airflow      | `kubectl port-forward -n anizai svc/airflow-webserver 8090:8080` | http://localhost:8090                   | DAG monitoring, trigger producers |
+| Kafka UI     | `kubectl port-forward -n anizai svc/kafka-ui 8080:8080`          | http://localhost:8080                   | Topic inspection, message counts  |
+| Flink UI     | `kubectl port-forward -n anizai svc/flink-jobmanager 8081:8081`  | http://localhost:8081                   | Job status, checkpoint info       |
+| Grafana      | `kubectl port-forward -n anizai svc/grafana 3000:3000`           | http://localhost:3000                   | Pipeline metrics dashboards       |
+| Prometheus   | `kubectl port-forward -n anizai svc/prometheus 9090:9090`        | http://localhost:9090                   | Raw metrics                       |
+| PostgreSQL   | `kubectl port-forward -n anizai svc/postgres 5432:5432`          | `psql -h localhost -U anizai -d anizai` | Query vault tables directly       |
+| Agent worker | `kubectl port-forward -n anizai svc/agent-worker 8000:8000`      | http://localhost:8000/health            | Agent /health + /metrics endpoint |
 
 **Start all port-forwards in one PowerShell window (background jobs):**
 
@@ -256,7 +257,7 @@ kubectl get pods -n anizai -l app=airflow-webserver
 
 > **These selectors read `app=`, not `component=`.** No pod in this deployment
 > carries a `component` label — the only `component:` keys in
-> `infrastructure/k8s/` are *alert* labels inside `prometheus-rules-configmap.yaml`.
+> `infrastructure/k8s/` are _alert_ labels inside `prometheus-rules-configmap.yaml`.
 > A `-l component=scheduler` selector returns `No resources found`, which is
 > indistinguishable from Airflow being down. Corrected 2026-08-16; the authority
 > is `airflow-scheduler-deployment.yaml` / `airflow-webserver-deployment.yaml`.
@@ -461,13 +462,13 @@ Open http://localhost:9090 in a browser. No credentials required.
   scrape jobs (`prometheus-configmap.yaml`), and **not all of them are supposed
   to be UP**:
 
-  | Job | Expected while the pool is up |
-  |---|---|
-  | `kafka-exporter` | **UP** — a DOWN here is a real fault |
-  | `postgres-exporter` | **UP** — a DOWN here is a real fault |
-  | `flink-jobmanager` | **DOWN unless Flink was scaled up.** Flink rests at desired 0 (D10) |
-  | `flink-taskmanager` | **DOWN unless Flink was scaled up** |
-  | `agent-worker` | **DOWN unless the agent was scaled up.** Declared `replicas: 0` |
+  | Job                 | Expected while the pool is up                                       |
+  | ------------------- | ------------------------------------------------------------------- |
+  | `kafka-exporter`    | **UP** — a DOWN here is a real fault                                |
+  | `postgres-exporter` | **UP** — a DOWN here is a real fault                                |
+  | `flink-jobmanager`  | **DOWN unless Flink was scaled up.** Flink rests at desired 0 (D10) |
+  | `flink-taskmanager` | **DOWN unless Flink was scaled up**                                 |
+  | `agent-worker`      | **DOWN unless the agent was scaled up.** Declared `replicas: 0`     |
 
   Reading the three conditional targets as a fault is the failure mode this
   table exists to prevent. Check desired replicas before concluding anything:
@@ -519,6 +520,30 @@ kubectl get pods -n anizai -l app=prometheus
 
 ## Section 1.6 — PostgreSQL (psql)
 
+> **Postgres is not an HTTP server. `http://localhost:5432` will never render
+> anything in a browser**, no matter how healthy the port-forward is — Postgres
+> speaks its own binary wire protocol. An empty browser tab here is expected
+> behaviour and proves nothing about the forward. (The forward terminal will
+> even log `Handling connection` for each attempt: the tunnel carried the
+> request; there was simply nothing on the far side that speaks HTTP.)
+> Only Airflow, Kafka UI, Flink, Grafana and Prometheus are browser targets.
+> Postgres needs a SQL client; `agent-worker` needs `curl`.
+
+### Fastest route — no port-forward, no local psql, no password
+
+One line. `psql` already exists inside the Postgres container, and a local
+socket connection there does not prompt for a password:
+
+```powershell
+kubectl exec -it -n anizai postgres-0 -- psql -U anizai -d anizai
+```
+
+You land on the `anizai=#` prompt. Paste any block from *What You Can Do Here*
+below, and leave with `\q`.
+
+Use the port-forward route instead when you need a GUI client (DBeaver,
+TablePlus) or a local script pointed at `localhost:5432`.
+
 ### Port-Forward
 
 ```powershell
@@ -550,35 +575,71 @@ Password: (retrieved from Secret Manager — secret: POSTGRES_PASSWORD)
 
 ### What You Can Do Here
 
-Query the five vault tables directly:
+Query the vault tables directly. Each block below is a **single paste** — they
+are deliberately not merged, so you can run one without editing anything.
+
+**1 — Row counts, every vault table:**
 
 ```sql
--- Record counts across all vault tables:
-SELECT 'knowledge_vault'  AS tbl, COUNT(*) FROM knowledge_vault
-UNION ALL
-SELECT 'knowledge_vectors', COUNT(*) FROM knowledge_vectors
-UNION ALL
-SELECT 'social_vault',      COUNT(*) FROM social_vault
-UNION ALL
-SELECT 'social_vectors',    COUNT(*) FROM social_vectors
-UNION ALL
-SELECT 'momentum_vault',    COUNT(*) FROM momentum_vault
-UNION ALL
-SELECT 'mapping_dict',      COUNT(*) FROM mapping_dict;
-
--- Most recent records per source:
-SELECT source_name, MAX(ingested_at) AS last_seen, COUNT(*) AS total
-FROM knowledge_vault
-GROUP BY source_name ORDER BY last_seen DESC;
-
--- Check for recent Gold enrichment:
-SELECT source_platform, entry_type, COUNT(*) AS records,
-       MAX(ingested_at) AS last_seen
-FROM knowledge_vectors
-GROUP BY source_platform, entry_type ORDER BY last_seen DESC;
+SELECT 'knowledge_vault' AS tbl, COUNT(*) FROM knowledge_vault
+UNION ALL SELECT 'knowledge_vectors', COUNT(*) FROM knowledge_vectors
+UNION ALL SELECT 'social_vault',      COUNT(*) FROM social_vault
+UNION ALL SELECT 'social_vectors',    COUNT(*) FROM social_vectors
+UNION ALL SELECT 'momentum_vault',    COUNT(*) FROM momentum_vault
+UNION ALL SELECT 'mapping_dict',      COUNT(*) FROM mapping_dict;
 ```
 
-See `data-pipeline/docs/VALIDATION_GUIDE.md` Section C for full query examples per table.
+**2 — Per source: total, last 24h, and newest row.** One block per vault:
+
+```sql
+-- knowledge_vault: newsapi · arxiv · telegram
+SELECT source_name, COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE ingested_at > NOW() - INTERVAL '24 hours') AS last_24h,
+       MAX(ingested_at) AS newest
+FROM knowledge_vault GROUP BY source_name ORDER BY source_name;
+```
+
+```sql
+-- social_vault: hackernews · polymarket
+SELECT source_name, COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE ingested_at > NOW() - INTERVAL '24 hours') AS last_24h,
+       MAX(ingested_at) AS newest
+FROM social_vault GROUP BY source_name ORDER BY source_name;
+```
+
+```sql
+-- momentum_vault: fred · googletrends · openweather · opensky · polymarket prices
+SELECT source_name, COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE ingested_at > NOW() - INTERVAL '24 hours') AS last_24h,
+       MAX(ingested_at) AS newest
+FROM momentum_vault GROUP BY source_name ORDER BY source_name;
+```
+
+**3 — Gold side: is enrichment keeping up?**
+
+```sql
+SELECT source_platform, COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE ingested_at > NOW() - INTERVAL '24 hours') AS last_24h
+FROM knowledge_vectors GROUP BY source_platform ORDER BY source_platform;
+```
+
+```sql
+SELECT source_platform, entry_type, COUNT(*) AS total
+FROM social_vectors GROUP BY source_platform, entry_type ORDER BY source_platform;
+```
+
+**Reading the result.** A `_vault` table filling while its `_vectors` twin does
+not points at the Flink Gold job, not at the producers. A `MAX(ingested_at)`
+older than a few hours for one source means that source is silent in fact —
+**regardless of what Airflow shows**, because a DAG can report SUCCESS on a
+total fetch failure and send no alert (KG-A-23, open across five of seven
+producers). Query first, Airflow second.
+
+`social_vectors` being far below `social_vault` for polymarket is correct:
+temporal bundling collapses many comments into one `market_consensus` row.
+
+See `data-pipeline/docs/guides/VALIDATION_GUIDE.md` Section C for per-table
+sample rows and field-level examples.
 
 **Note:** PostgreSQL is self-hosted inside the GKE cluster — it is **not** Cloud SQL.
 Its data is not visible anywhere in the GCP Console. Port-forward is the only way
@@ -736,9 +797,9 @@ Lifecycle: backups older than 30 days are auto-deleted from the bucket.
 
 The cluster has **one** node pool:
 
-| Pool | Purpose | Cost when running |
-|------|---------|------------------|
-| `main-pool` | Everything — Airflow, Kafka, Flink, PostgreSQL, the producers, the agent, and monitoring | ~$0.15/hr |
+| Pool        | Purpose                                                                                  | Cost when running |
+| ----------- | ---------------------------------------------------------------------------------------- | ----------------- |
+| `main-pool` | Everything — Airflow, Kafka, Flink, PostgreSQL, the producers, the agent, and monitoring | ~$0.15/hr         |
 
 `polymarket-pool` was **deleted in Phase 9.5 Stage A**; Polymarket now runs on
 `main-pool` with everything else. There is no second pool, and nothing keeps running
@@ -841,10 +902,10 @@ Use the project switcher at the top to select the correct project for each secti
 
 ## Section 2.1 — Projects
 
-| Project ID | What lives here |
-|------------|----------------|
+| Project ID       | What lives here                                                  |
+| ---------------- | ---------------------------------------------------------------- |
 | `anizai-pipehub` | GKE cluster, Artifact Registry, Secret Manager, Billing, Storage |
-| `anizai-ai` | Firestore (Agentic Hub — forecasting query sessions) |
+| `anizai-ai`      | Firestore (Agentic Hub — forecasting query sessions)             |
 
 **Switch projects:** Click the project name in the top bar → select from the list,
 or type the project ID in the search box.
@@ -858,6 +919,7 @@ or type the project ID in the search box.
 **Path:** Hamburger menu → **Kubernetes Engine** → **Workloads**
 
 What you can do here:
+
 - See all Deployments and StatefulSets in the `anizai` namespace.
 - Click a workload name → **Pods** tab → click a pod name → **Logs** tab to stream logs in-browser.
 - Click a workload → **Details** tab to see the Docker image, environment variables, resource requests.
@@ -878,6 +940,7 @@ click `anizai-cluster` to see node pool status, node count, and cluster version.
 **Path:** Hamburger menu → **Compute Engine** → **Disks**
 
 What you can find here:
+
 - PVCs for PostgreSQL and Kafka are backed by GCE persistent disks.
 - Disk names follow the pattern `pvc-*` — match to the PVC name in `kubectl get pvc -n anizai`.
 - Check disk size, type (SSD vs. standard), and zone.
@@ -901,6 +964,7 @@ If a disk is accidentally deleted, vault data is lost. Do not delete disks named
 **Path:** Hamburger menu → **Artifact Registry** → **Repositories**
 
 What you can find here:
+
 - The `anizai-images` repository holds all custom Docker images.
 - Key images: `anizai-flink`, `anizai-airflow`, `anizai-agent`, `anizai-polymarket`,
   `anizai-telegram`, `anizai-trigger-consumer`.
@@ -917,7 +981,7 @@ docker pull us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/<IMAGE>:<TAG
 > **⚠ This registry holds only the 10 tags pushed at the 2026-08-15 migration**
 > — it is not a copy of the retired project's registry. A tag you remember from
 > before that date may simply not exist here; `gcloud artifacts docker images
-> list` before pulling. One tag is gone for good: `anizai-polymarket:0.3.0-price`
+list` before pulling. One tag is gone for good: `anizai-polymarket:0.3.0-price`
 > was never pushed and ceases to exist when the old project is deleted
 > (`carryover-20260815-migration.md` §10, an accepted loss).
 
@@ -934,6 +998,7 @@ silently changes what runs. When identity matters, compare the `@sha256:` digest
 **Path:** Hamburger menu → **Security** → **Secret Manager**
 
 What you can find here:
+
 - All service credentials: PostgreSQL passwords, Airflow admin credentials, Grafana admin credentials, API keys for external data sources.
 - Click a secret name → **Versions** tab → click a version → **Access Secret Value** to reveal the value in-browser.
 - Secret rotation history: each new version appears as a new row.
@@ -946,23 +1011,23 @@ gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipe
 
 **Key secrets reference:**
 
-| Secret Name | Used By |
-|-------------|---------|
-| `POSTGRES_PASSWORD` | PostgreSQL `anizai` user |
-| `AIRFLOW_ADMIN_PASSWORD` | Airflow web login (username is plain env var `admin`) |
-| `AIRFLOW_FERNET_KEY` | Airflow connection encryption |
-| `GRAFANA_ADMIN_PASSWORD` | Grafana web login (username is plain env var `admin`) |
-| `OPENAI_API_KEY` | Gold enrichment + agent synthesis (GPT-4o / GPT-4o-mini) |
-| `NEWSAI_API_KEY` | NewsAPI ingestion. **Provider is newsapi.ai / Event Registry (`eventregistry.org`) since the Phase 7A migration, 2026-05-09** — `config/settings.py` sets `NEWSAI_BASE_URL = "https://eventregistry.org/api/v1"` and the producer calls `{BASE}/article/getArticles` with `apiKey=`. **Rotate an eventregistry.org key into it.** The secret name is correct and matches the provider. |
-| `FRED_API_KEY` | FRED economic data |
-| `OPENWEATHER_API_KEY` | OpenWeather source |
-| `OPENSKY_CLIENT_ID` | OpenSky OAuth2 |
-| `OPENSKY_CLIENT_SECRET` | OpenSky OAuth2 |
-| `TELEGRAM_API_ID` | Telegram MTProto |
-| `TELEGRAM_API_HASH` | Telegram MTProto |
+| Secret Name              | Used By                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`      | PostgreSQL `anizai` user                                                                                                                                                                                                                                                                                                                                                               |
+| `AIRFLOW_ADMIN_PASSWORD` | Airflow web login (username is plain env var `admin`)                                                                                                                                                                                                                                                                                                                                  |
+| `AIRFLOW_FERNET_KEY`     | Airflow connection encryption                                                                                                                                                                                                                                                                                                                                                          |
+| `GRAFANA_ADMIN_PASSWORD` | Grafana web login (username is plain env var `admin`)                                                                                                                                                                                                                                                                                                                                  |
+| `OPENAI_API_KEY`         | Gold enrichment + agent synthesis (GPT-4o / GPT-4o-mini)                                                                                                                                                                                                                                                                                                                               |
+| `NEWSAI_API_KEY`         | NewsAPI ingestion. **Provider is newsapi.ai / Event Registry (`eventregistry.org`) since the Phase 7A migration, 2026-05-09** — `config/settings.py` sets `NEWSAI_BASE_URL = "https://eventregistry.org/api/v1"` and the producer calls `{BASE}/article/getArticles` with `apiKey=`. **Rotate an eventregistry.org key into it.** The secret name is correct and matches the provider. |
+| `FRED_API_KEY`           | FRED economic data                                                                                                                                                                                                                                                                                                                                                                     |
+| `OPENWEATHER_API_KEY`    | OpenWeather source                                                                                                                                                                                                                                                                                                                                                                     |
+| `OPENSKY_CLIENT_ID`      | OpenSky OAuth2                                                                                                                                                                                                                                                                                                                                                                         |
+| `OPENSKY_CLIENT_SECRET`  | OpenSky OAuth2                                                                                                                                                                                                                                                                                                                                                                         |
+| `TELEGRAM_API_ID`        | Telegram MTProto                                                                                                                                                                                                                                                                                                                                                                       |
+| `TELEGRAM_API_HASH`      | Telegram MTProto                                                                                                                                                                                                                                                                                                                                                                       |
 
-> **The `NEWSAI_API_KEY` row was inverted until 2026-08-16.** It read *"holds a
-> thenewsapi.com key … do not rotate a newsapi.ai key into it"* — which is
+> **The `NEWSAI_API_KEY` row was inverted until 2026-08-16.** It read _"holds a
+> thenewsapi.com key … do not rotate a newsapi.ai key into it"_ — which is
 > exactly the key the producer needs. Following it during a rotation would have
 > taken NewsAPI ingestion down, with KG-A-23 masking the DAG failure. The
 > inversion originated in the KG-C-5 row, not here; that row has been rewritten,
@@ -985,6 +1050,7 @@ gcloud secrets versions access latest --secret=SECRET_NAME --project=anizai-pipe
 **Path:** Hamburger menu → **Billing** → select the billing account → **Budgets & alerts**
 
 What you can find here:
+
 - Current spend vs. budget threshold for the month.
 - Alert history — emails sent to `ron.mintz21@gmail.com` when 50%, 90%, or 100% of budget is reached.
 - Click a budget name → **Edit** to adjust the threshold or alert recipients.
@@ -1023,11 +1089,12 @@ task logs are only visible via the Airflow UI (Section 1.1) or via `kubectl logs
 
 ## Section 2.8 — Firestore (Agentic Hub)
 
-**Project:** `anizai-ai` *(different project — switch before navigating)*
+**Project:** `anizai-ai` _(different project — switch before navigating)_
 
 **Path:** Hamburger menu → **Firestore**
 
 What you can find here:
+
 - `forecastQueries` — the worker's **queue** collection. The agent's main listener watches
   `status=='pending'`; documents also rest at `claimed`, `awaiting_clarification`, `done`,
   and `failed`. Nothing scans `claimed`, so orphans there sit forever (KG-B-21).
