@@ -1,26 +1,26 @@
 {
-  "generated_at": "2026-07-31T14:34:43+00:00",
-  "scorable_forecasts": 0,
-  "mean_brier": null,
+  "generated_at": "2026-08-17T21:44:31+00:00",
+  "scorable_forecasts": 3,
+  "mean_brier": 0.25,
   "uninformed_baseline": 0.25,
-  "skill_vs_coin_flip": null,
-  "questions_tracked": 28,
-  "questions_resolved": 0,
+  "skill_vs_coin_flip": 0.0,
+  "questions_tracked": 43,
+  "questions_resolved": 18,
   "forecasts_by_status": {
     "dispatched": 0,
-    "completed": 5,
-    "failed": 0,
+    "completed": 20,
+    "failed": 1,
     "timed_out": 0,
     "needs_clarification": 0
   },
   "resolutions_by_outcome": {
-    "YES": 0,
-    "NO": 0,
+    "YES": 8,
+    "NO": 10,
     "AMBIGUOUS": 0
   },
   "how_to_read_this": [
-    "No forecast has been scored yet. A forecast is scored only once its Polymarket market settles, which for these questions is weeks after the forecast was made. An empty calibration curve at this stage is the expected state, not a failure.",
-    "28 question(s) are still open and will be scored as their markets settle.",
+    "Only 3 forecast(s) have been scored. At this sample size the calibration curve and the per-cohort scores are indicative at best — a single question resolving the other way would move them visibly. Every table here carries its n for that reason.",
+    "25 question(s) are still open and will be scored as their markets settle.",
     "Brier score: lower is better. 0.25 is what you get by always saying 50%, so it is the bar any forecaster must clear to be worth running.",
     "Forecasts marked failed, timed_out, or needs_clarification are excluded from every score but are counted in forecasts_by_status — a metric that silently drops its failures overstates itself."
   ]

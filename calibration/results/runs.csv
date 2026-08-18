@@ -1,4 +1,13 @@
 triggered_at,run_type,triggered_by,questions_dispatched,forecasts_completed,forecasts_failed,finished_at,purpose,evidence_caveat
+2026-08-17 21:41:43.169719+00:00,manual,cli,,3,0,2026-08-17 21:41:45.664618+00:00,,
+2026-08-17 21:40:55.020857+00:00,manual,cli,,3,0,2026-08-17 21:40:57.338682+00:00,,
+2026-08-17 21:40:06.169214+00:00,manual,cli,,8,0,2026-08-17 21:40:09.419325+00:00,,
+2026-08-17 21:38:49.178045+00:00,initial_seed,cli,14,,0,2026-08-17 21:38:52.183146+00:00,"evidence-ablation arm B - 14 short-horizon Polymarket questions forecast against an EMPTY vault, paired against the 3 arm-A forecasts made 2026-07-29 against a populated vault","vault rebuilt empty at the anizai-pipehub migration 2026-08-15; run on a LOCAL agent worker because the cloud agent-worker sits at replicas:0 and this operator holds no IAM on anizai-pipehub; AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION=0 (no local Kafka; the trigger adds no evidence to its own run); questions labelled cohort 7d but true horizon is 1 day, so 7d cohort_brier now mixes horizons"
+2026-08-17 21:38:08.845965+00:00,manual,cli,,1,0,2026-08-17 21:38:11.096666+00:00,,
+2026-08-17 21:37:17.260782+00:00,single_question,cli,1,,0,2026-08-17 21:37:19.725013+00:00,"evidence-ablation arm B, probe retry after disabling the reactive-ingestion trigger",local agent worker (cloud agent-worker is at replicas:0 and we hold no permissions on anizai-pipehub); vault rebuilt EMPTY 2026-08-15 and the local vault is empty by design; AGENT_REACTIVE_TRIGGER_MAX_PER_SESSION=0 because there is no local Kafka broker - the trigger requests future ingestion only and adds no evidence to this run
+2026-08-17 21:37:14.602035+00:00,manual,cli,,0,1,2026-08-17 21:37:16.842465+00:00,,
+2026-08-17 21:20:32.934634+00:00,single_question,cli,1,,0,2026-08-17 21:20:39.645237+00:00,"evidence-ablation arm B, probe dispatch — confirming the agent claims sessions before sending the batch","vault rebuilt EMPTY at the anizai-pipehub migration 2026-08-15; agent 0.6.0-trackA (identify by digest sha256:937dfed1, /health misreports 0.5.0-sprint26); short-horizon question labelled cohort 7d, true horizon 1d"
+2026-08-17 17:24:47.373128+00:00,manual,cli,,,,2026-08-17 17:24:53.660530+00:00,,
 2026-07-29 17:55:46.661313+00:00,manual,cli,,1,0,2026-07-29 17:55:48.154783+00:00,,
 2026-07-29 17:55:24.783165+00:00,manual,cli,,0,0,2026-07-29 17:55:26.021004+00:00,,
 2026-07-29 17:55:02.746914+00:00,manual,cli,,1,0,2026-07-29 17:55:04.120095+00:00,,

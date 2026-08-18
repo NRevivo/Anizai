@@ -42,6 +42,22 @@ CREATE TABLE IF NOT EXISTS calibration_questions (
                                                 CHECK (cohort IN ('7d','14d','30-45d')),
     expected_resolution_date    DATE            NOT NULL,
     liquidity_usd_at_pickup     NUMERIC(14,2),
+    -- The market's own probability at the moment we picked the question up.
+    --
+    -- This is the comparison that makes a Brier score mean something. "The
+    -- agent scored 0.25" is unreadable on its own; "the agent scored 0.25 and
+    -- the market scored 0.03 on the same questions" is a result. Polymarket
+    -- prices move continuously and are not recoverable after settlement
+    -- without a price-history call, so it has to be captured at pickup or not
+    -- at all.
+    --
+    -- Nullable, and null for every question added before 2026-08-18: those
+    -- were picked up before this column existed and their pickup prices are
+    -- gone. Backfilling them with a later price would be inventing data.
+    market_probability_at_pickup NUMERIC(5,4)
+                                                CHECK (market_probability_at_pickup IS NULL
+                                                       OR (market_probability_at_pickup >= 0
+                                                           AND market_probability_at_pickup <= 1)),
     status                      TEXT            NOT NULL
                                                 CHECK (status IN ('open','resolved','archived'))
                                                 DEFAULT 'open',
