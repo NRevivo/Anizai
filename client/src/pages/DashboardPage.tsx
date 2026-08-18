@@ -161,10 +161,21 @@ export function DashboardPage({
     const [failedRetryError, setFailedRetryError] = useState<string | null>(null);
     const [currentView, setCurrentView] = useState<'dashboard' | 'new-forecast'>('dashboard');
 
-    const suggestedActions = useMemo<SuggestedAction[]>(
-        () => (prediction?.suggestedActions ?? []).slice(0, 3),
-        [prediction]
-    );
+    const suggestedActions = useMemo<SuggestedAction[]>(() => {
+        const latestAssistantMessage = [...messages]
+            .reverse()
+            .find((message) => message.role === 'assistant');
+
+        // A missing field belongs to a legacy assistant message, so preserve
+        // the forecast-level suggestions until the first dynamic response.
+        // An explicit [] is a degraded generation result and must clear stale
+        // choices rather than showing questions for an earlier answer.
+        if (latestAssistantMessage?.suggestedActions !== undefined && latestAssistantMessage?.suggestedActions !== null) {
+            return latestAssistantMessage.suggestedActions.slice(0, 3);
+        }
+
+        return (prediction?.suggestedActions ?? []).slice(0, 3);
+    }, [messages, prediction]);
 
     // Send-lock (T3): block a new follow-up while the session is still
     // producing an answer — either the initial forecast is processing
