@@ -23,7 +23,7 @@ Why a separate, smaller state (not a reuse of `ForecastState`):
     would drag in fields no follow-up node reads or writes and blur the two
     contracts. This is the follow-up analogue of `ForecastState`.
 
-The 8-field ratified set (plan §3 "FollowupState full field set", refined
+The state fields (plan §3 "FollowupState full field set", refined
 2026-07-04 to add the two `trigger_*` fields):
 
     Seeded by the listener/sweep when it builds the initial state
@@ -68,6 +68,10 @@ The 8-field ratified set (plan §3 "FollowupState full field set", refined
                                    transparent message; on budget overrun a
                                    complete caveat message (never truncated).
 
+    Written by `generate_suggested_actions`:
+        - suggested_actions      — the next 2-3 `{id, label, prompt}` choices
+                                   that are persisted with the assistant reply.
+
     Accumulated by `answer_from_context` (T24.4) — the "born instrumented"
     accumulator (plan §2 / 23.5.11):
         - total_cost_usd         — running USD cost of the follow-up,
@@ -109,6 +113,9 @@ class FollowupState(TypedDict, total=False):
 
     # --- Answer (written by answer_from_context; §4 T24.4) ---
     response_text: str
+
+    # --- Suggestions (written after each assistant answer) ---
+    suggested_actions: list[dict]
 
     # --- Cost ("born instrumented" accumulator; §2 / §4 T24.4) ---
     total_cost_usd: float
