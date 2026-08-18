@@ -19,7 +19,7 @@ import pytest
 
 from calibration import auth
 
-SCHEDULER_SA = "calibration-scheduler@anizai-pipeline.iam.gserviceaccount.com"
+SCHEDULER_SA = "calibration-scheduler@anizai-pipehub.iam.gserviceaccount.com"
 STRANGER_SA = "someone-else@some-other-project.iam.gserviceaccount.com"
 AUDIENCE = "https://calibration-runner-abc123-uc.a.run.app"
 

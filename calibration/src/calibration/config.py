@@ -11,9 +11,11 @@ The plan (§6) permitted `config.settings` as the one allowed cross-package
 import. We take neither: a duplicated four-line `load_dotenv` is cheaper than
 a dependency on a module whose import has side effects.
 
-.env resolution mirrors the pipeline's convention so operators do not have to
-learn a second one: `data-pipeline/.env`, falling back to
-`data-pipeline/infrastructure/.env`.
+.env resolution keeps the pipeline's two-location shape so operators do not
+have to learn a second one, but both locations are inside `calibration/`:
+`calibration/.env`, falling back to `calibration/infrastructure/.env`. Reading
+the pipeline's .env would be the one cross-boundary read in a package whose
+whole premise is that it has none.
 
 Configuration groups:
     1. Database        — the separate calibration Postgres (plan P6/B1)
@@ -44,9 +46,22 @@ from dotenv import load_dotenv
 # ==========================================================
 # 1. .env loading
 # ==========================================================
-# BASE_DIR points at data-pipeline/ (this file lives at
-# data-pipeline/calibration/config.py, so two dirnames up).
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# BASE_DIR points at calibration/ — this file lives at
+# calibration/src/calibration/config.py, so three dirnames up.
+#
+# It was two while the package sat at data-pipeline/calibration/. The move to a
+# top-level src/ layout added a directory level and left the count behind, so
+# BASE_DIR resolved to calibration/src/ and both .env lookups pointed at a
+# directory that will never hold one.
+#
+# Nothing failed loudly, which is why it survived the move: every setting below
+# has a working default, so a stale BASE_DIR degrades into "the .env was
+# silently ignored" rather than an error. Anyone who had put a
+# CALIBRATION_DATABASE_URL in that file would have been quietly running against
+# the local default instead.
+BASE_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 
 _dotenv_path = os.path.join(BASE_DIR, ".env")
 _dotenv_infra_path = os.path.join(BASE_DIR, "infrastructure", ".env")

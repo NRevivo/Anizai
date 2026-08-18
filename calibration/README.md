@@ -57,7 +57,7 @@ calibration/
 │   ├── services/          discovery · dispatch · harvest · resolution
 │   ├── metrics/           Brier · calibration curve · cohorts · improvement
 │   └── sql/init.sql       the schema
-├── tests/                 451 tests
+├── tests/                 528 tests
 └── dashboard/             separate Vite + React operator UI
 ```
 
@@ -145,11 +145,21 @@ the IAM binding) are in the runbook.
 
 ```bash
 cd calibration
-pytest                      # 451 tests
+pytest                      # 528 tests
 ```
 
 Tests needing a backend skip cleanly when it is absent, so this passes on a
-machine with neither Postgres nor the Firestore emulator. To run everything:
+machine with neither Postgres nor the Firestore emulator.
+
+**Read the skip count, not just the pass count.** A skip here means "this
+backend is absent", but an undeclared dependency produces the same green
+output: until 2026-08-17 `fastapi` was missing from `requirements.txt`, so all
+of `test_api.py` — including the tests asserting that an unauthenticated call
+to `/api/*` is refused — skipped on every machine and had never run. The suite
+reported green throughout. With the backends up the count is 494 passed / 34
+skipped; the remaining skips are the Firestore-emulator tests.
+
+To run everything:
 
 ```bash
 docker run -d --name calibration-test-db \

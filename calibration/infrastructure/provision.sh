@@ -20,7 +20,13 @@
 
 set -euo pipefail
 
-PROJECT="${CALIBRATION_PROJECT:-anizai-pipeline}"
+# anizai-pipeline is DEAD (expired trial) and is being deleted. Every name
+# below that interpolates ${PROJECT} — both service accounts and the image path
+# — would otherwise be built from a project that no longer exists, and the
+# failures would appear one step at a time rather than at the top.
+#
+# Identity facts live in data-pipeline/docs/C_cloud/cloud_constants.md §1.
+PROJECT="${CALIBRATION_PROJECT:-anizai-pipehub}"
 FIRESTORE_PROJECT="${CALIBRATION_FIRESTORE_PROJECT:-anizai-ai}"
 REGION="${CALIBRATION_REGION:-us-central1}"
 

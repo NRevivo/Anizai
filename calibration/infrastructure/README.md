@@ -78,9 +78,15 @@ discovering it after.
 
 Checked against the live project with the credentials available at the time.
 
+> **Re-read this table against the project rename (2026-08-17).** It was
+> measured on `anizai-pipeline`, which has since expired and is being deleted;
+> the pipeline moved to **`anizai-pipehub`**. The blockers below are stated
+> against the new project because their commands are runnable, but none of them
+> has been **re-measured** there. Treat the statuses as inherited, not verified.
+
 | Blocker | Status | What it needs |
 |---|---|---|
-| **Cloud Run API not enabled** on `anizai-pipeline` | blocking `deploy` | `gcloud services enable run.googleapis.com --project=anizai-pipeline` — a project decision, not a script's |
+| **Cloud Run API not enabled** on `anizai-pipehub` | blocking `deploy`, unverified since the move | `gcloud services enable run.googleapis.com --project=anizai-pipehub` — a project decision, not a script's |
 | **No `resourcemanager.projects.setIamPolicy`** | blocking `iam` | The cross-project Firestore binding must be run by an admin on `anizai-ai`. `provision.sh iam` attempts it and prints the exact command on failure. Without it the service deploys and cannot write — the worst place to discover a permission gap. |
 | **Ingestion pipeline paused** since 2026-07-23 | not blocking, but see below | Automation over a frozen vault measures noise. Every scheduled forecast would see the same evidence and return the same answer. |
 

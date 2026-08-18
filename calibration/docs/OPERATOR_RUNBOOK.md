@@ -48,9 +48,25 @@ gcloud scheduler jobs pause calibration-weekly-reforecast --location us-central1
 
 ```bash
 gcloud projects remove-iam-policy-binding anizai-ai \
-  --member="serviceAccount:calibration-runner@anizai-pipeline.iam.gserviceaccount.com" \
+  --account=ron.mintz21@gmail.com \
+  --member="serviceAccount:calibration-runner@anizai-pipehub.iam.gserviceaccount.com" \
   --role="roles/datastore.user"
 ```
+
+> **This command named `anizai-pipeline` until 2026-08-17.** That project is
+> dead (expired trial) and its service account with it, so the old command
+> removed a binding that no longer existed, **exited 0, and stopped nothing**.
+> A safety lever that reports success while doing nothing is worse than one
+> that fails loudly — the failure at least sends you to Lever 1.
+>
+> `--account` is not optional. `kingron79@` has no access to `anizai-ai` at all
+> and an IAM call under it returns a permission error, not an empty result.
+>
+> If access was granted by **impersonation** rather than to the service account
+> directly, this is not the lever — revoke the caller's
+> `roles/iam.serviceAccountTokenCreator` on the service account instead, in
+> `anizai-pipehub`. That cuts token minting immediately and needs no
+> `anizai-ai` permissions.
 
 ### What stopping does NOT do
 
@@ -303,15 +319,23 @@ TRUNCATE calibration_forecasts, calibration_resolutions,
 ## §10 — Running the tests
 
 ```bash
-cd data-pipeline
-venv/Scripts/python -m pytest tests/test_calibration -q \
-  --confcutdir=tests/test_calibration
+cd calibration
+pytest
 ```
 
-`--confcutdir` is required: the repository's root `tests/conftest.py` imports
-the pipeline's database layer, which calibration deliberately does not depend
-on. Skipping it is what lets the calibration suite run without the pipeline's
-dependencies installed — a property worth keeping.
+That is the whole command. `pytest.ini` in this directory sets `pythonpath=src`
+and `testpaths=tests`, so the suite needs no installation step and no
+environment fiddling.
+
+Run it **from `calibration/`**. The repository also holds
+`data-pipeline/tests/conftest.py`, which imports the pipeline's database layer;
+pulling that in would make this suite require the pipeline's dependencies, and
+running without them is a property worth keeping. From the repository root the
+cut has to be passed explicitly, because an ini file cannot set it:
+
+```bash
+pytest calibration --confcutdir=calibration
+```
 
 Tests needing a backend skip cleanly when it is absent. To run them all:
 
@@ -329,10 +353,27 @@ export FIRESTORE_EMULATOR_HOST=localhost:8080
 Dashboard:
 
 ```bash
-cd data-pipeline/calibration/dashboard
+cd calibration/dashboard
+npm install
 npm test
 npm run build
 ```
+
+To run it against a live API instead of the test suite, start the operator API
+first and then Vite **bound explicitly**:
+
+```bash
+# terminal 1 — the API
+CALIBRATION_DATABASE_URL=... uvicorn calibration.server:app --host 127.0.0.1 --port 8000
+
+# terminal 2 — the UI
+node node_modules/vite/bin/vite.js --host 0.0.0.0
+```
+
+`--host` is not cosmetic. Vite's default binds `::1` only; a browser resolving
+`localhost` to `127.0.0.1` then gets a connection refusal that looks like the
+dev server never started. The proxy in `vite.config.ts` already points `/api`
+at `127.0.0.1:8000` for the mirror image of this problem.
 
 ---
 

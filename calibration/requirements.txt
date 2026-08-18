@@ -9,6 +9,10 @@
 # the same version. That is the point — a measurement harness that changed the
 # project's dependency graph would be perturbing the thing it measures.
 #
+# The two web-server pins are the one exception, and are marked as such where
+# they appear: nothing else in the repository serves HTTP, so there is no
+# existing version for them to match.
+#
 # Notably absent:
 #   click       — the CLI uses argparse from the standard library instead.
 #   psycopg3    — the plan proposed async psycopg3; this uses psycopg2 like
@@ -27,5 +31,30 @@ requests==2.31.0
 # PostgreSQL client for the dedicated calibration database
 psycopg2-binary==2.9.9
 
+# Firestore — the dispatch/harvest bridge to the agent
+# (calibration/firestore_client.py, and operator token verification in
+# calibration/auth.py). Matches data-pipeline/requirements.txt:140.
+#
+# Omitting this was a real defect, not a tidiness issue: `dispatch` and
+# `harvest` are the two commands that make the harness more than a database,
+# and on a clean install both died at `from firebase_admin import ...`.
+firebase-admin==6.5.0
+
+# --- Operator API (calibration/server.py) ---
+# The exception to the "already pinned elsewhere" rule above — no other
+# component in the repository serves HTTP.
+fastapi==0.141.1
+uvicorn==0.52.3
+
 # --- Test-only ---
 pytest==8.1.1
+
+# starlette.testclient needs an HTTP client; without it every test in
+# test_api.py errors at fixture setup.
+#
+# This was invisible until `fastapi` was declared above: with fastapi absent,
+# the whole of test_api.py skipped as "backend not available", so the operator
+# API's auth tests — the ones that assert an unauthenticated call is refused —
+# had never actually run in CI or locally. An undeclared dependency turned a
+# security test suite into a no-op that reported as a skip.
+httpx==0.28.1
