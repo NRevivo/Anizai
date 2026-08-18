@@ -58,26 +58,43 @@ spec:
       restartPolicy: Always
       containers:
         - name: agent-worker
-          # Tag corrected 2026-08-14 (anizai-pipehub migration, R6).
-          # Was `0.5.0-sprint26` (agentVersion 0.5.0-sprint26+55e8093, index
-          # digest sha256:7fce4e8b0b13700fed2ff05071d9ebd277e9b27fab2f70a46d6ba5917c316ef4),
-          # carrying cumulative hub Sprints 22→26: BI-card wiring (22),
-          # reactive-trigger node (23), follow-up subgraph + 2nd Firestore
-          # listener (24), suggested-actions + agentEvents (25), pre-test
-          # hardening (26). That tag is retained as the rollback and is pushed
-          # alongside, but is no longer referenced by any manifest.
+          # Tag bumped 2026-08-18 (evidence-URL patch) — see the rollback chain
+          # below. Kept in step with the live Deployment on purpose: leaving the
+          # old tag here after a `kubectl set image` roll would add an IMAGE
+          # drift on top of the replicas drift KG-C-10 already tracks, and the
+          # replicas line above is the one deliberate divergence, not two.
           #
-          # `0.6.0-trackA`, digest sha256:937dfed1…471d9aee — the image the
-          # Deployment carried at the 2026-08-01 window-2 teardown
-          # (docs/C_cloud/archive_carryovers/carryover-20260801-window2.md §4 —
-          # archived 2026-08-15; it describes the retired anizai-pipeline
-          # project, so read the tag/digest from it, nothing else).
+          # `0.6.1-evidence-url` — populates EvidenceItem.url for newsapi and
+          # arxiv vault evidence (researcher._derive_url +
+          # rate_evidence.PLATFORMS_WITH_PUBLIC_URL). telegram / polymarket /
+          # hackernews / fred stay null by product decision. Additive only: the
+          # field was declared from Sprint 20 and always written None.
           #
-          # NOTE: the full AGENT_VERSION string for this tag carries a
-          # `+<git-sha>` suffix that is recorded NOWHERE in this repo, so it is
-          # deliberately not written here rather than guessed. It is read from
-          # /health at migration-plan S6 and recorded in the carry-over.
-          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-agent:0.6.0-trackA
+          # AGENT_VERSION for this tag is `0.5.0-sprint26+<short sha of the
+          # commit carrying this line>` — the version BASE is deliberately NOT
+          # bumped (one variable per change), so the git sha is the only
+          # discriminator between this image and 0.6.0-trackA. The base is
+          # env-overridable via AGENT_VERSION (agent/config/settings.py) if a
+          # future build wants a cleaner label without a code change. Resolved
+          # digest + the exact version string are recorded in
+          # docs/C_cloud/cloud_state.md §3 after the roll.
+          #
+          # ROLLBACK CHAIN, newest first:
+          #   0.6.0-trackA      digest sha256:937dfed1…471d9aee
+          #                     — ran 2026-08-15 → 2026-08-18, /health reported
+          #                       0.5.0-sprint26+35c343b (tag moved without the
+          #                       internal stamp; identify by DIGEST, not
+          #                       version). This is the primary rollback.
+          #   0.5.0-sprint26    index digest
+          #                     sha256:7fce4e8b0b13700fed2ff05071d9ebd277e9b27fab2f70a46d6ba5917c316ef4
+          #                     — agentVersion 0.5.0-sprint26+55e8093, the
+          #                       cumulative hub Sprints 22→26 image: BI-card
+          #                       wiring (22), reactive-trigger node (23),
+          #                       follow-up subgraph + 2nd Firestore listener
+          #                       (24), suggested-actions + agentEvents (25),
+          #                       pre-test hardening (26). Older fallback; still
+          #                       pushed, referenced by no manifest.
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-agent:0.6.1-evidence-url
           imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:

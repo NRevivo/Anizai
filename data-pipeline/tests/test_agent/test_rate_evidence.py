@@ -12,6 +12,8 @@ Coverage:
 - pulse polymarket consensus → vault_market
 - pulse hackernews discussion → vault_hackernews
 - market fred anomalies → vault_fred
+- public-URL gate: newsapi/arxiv keep the packed url, telegram + all
+  non-researcher sources stay None; blank never becomes "" (2026-08-18 patch)
 - recency_weight computed deterministically (newest item gets ~1.0)
 - credibility_tier assigned per-platform mapping
 - batching: 17 items → 3 batches (8+8+1)
@@ -36,6 +38,7 @@ import pytest
 
 from agent.errors import AgentProcessingError
 from agent.nodes import rate_evidence
+from agent.schemas import EvidenceItem
 from agent.prompts.evidence_rating import (
     BATCH_SIZE,
     RESPONSE_SCHEMA,
@@ -99,7 +102,16 @@ def _researcher_article(
     title: str = "Sample headline",
     snippet: str = "Body text. " * 20,
     published_at: str | None = None,
+    url: str | None = "https://reuters.com/world/sample-article",
 ) -> dict:
+    """
+    Mirror of researcher._pack_article's output shape.
+
+    `url` is packed by the researcher for EVERY platform (evidence-URL patch,
+    2026-08-18) — the newsapi/arxiv gate lives in rate_evidence, so the fixture
+    must supply a URL on telegram rows too or the gate tests would pass for the
+    wrong reason (asserting None because nothing was there to drop).
+    """
     if published_at is None:
         published_at = datetime.now(tz=timezone.utc).isoformat()
     return {
@@ -107,6 +119,7 @@ def _researcher_article(
         "source_platform": source_platform,
         "publisher": publisher,
         "title": title,
+        "url": url,
         "published_at": published_at,
         "executive_summary": "exec",
         "key_findings": [],
@@ -286,6 +299,96 @@ def test_fred_anomaly_becomes_vault_fred_tier_1():
     assert item["source_type"] == "vault_fred"
     assert item["credibility_tier"] == "tier_1"
     assert item["source_domain"] == "fred.stlouisfed.org"
+
+
+# ==========================================================
+# Public-URL gate (evidence-URL patch, 2026-08-18)
+# ==========================================================
+# EvidenceItem.url was declared from Sprint 20 but hardcoded None at every
+# normalize site, so no vault evidence ever reached the frontend with a
+# clickable link. rate_evidence now honours the packed url for the platforms
+# in PLATFORMS_WITH_PUBLIC_URL and drops it for the rest.
+@pytest.mark.parametrize("source_platform,expected_url", [
+    ("newsapi", "https://reuters.com/world/sample-article"),
+    ("arxiv", "https://reuters.com/world/sample-article"),
+    ("telegram", None),
+])
+def test_researcher_url_gated_to_public_url_platforms(
+    source_platform: str,
+    expected_url: str | None,
+):
+    """newsapi/arxiv surface the article link; telegram does not (product decision)."""
+    state = {
+        "raw_question": "Q?",
+        "researcher_evidence": _researcher_package(
+            [_researcher_article(source_platform=source_platform)]
+        ),
+    }
+    out = _run_with_dynamic_ratings(state=state)
+    assert out["evidence_trail"][0]["url"] == expected_url
+
+
+def test_public_url_gate_membership_is_exactly_newsapi_and_arxiv():
+    """
+    Pin the gate itself. Adding a platform puts a live outbound link in front
+    of a user — a product change that must break this test, not slip through.
+    """
+    assert rate_evidence.PLATFORMS_WITH_PUBLIC_URL == frozenset({"newsapi", "arxiv"})
+
+
+@pytest.mark.parametrize("url", [None, "", "   "])
+def test_researcher_url_absent_or_blank_becomes_none(url):
+    """
+    Absent/blank never becomes "" — EvidenceItem.url is Optional[str] and the
+    frontend branches on presence (`Boolean(row.url)`).
+    """
+    state = {
+        "raw_question": "Q?",
+        "researcher_evidence": _researcher_package(
+            [_researcher_article(source_platform="newsapi", url=url)]
+        ),
+    }
+    out = _run_with_dynamic_ratings(state=state)
+    assert out["evidence_trail"][0]["url"] is None
+
+
+def test_non_researcher_sources_keep_url_none():
+    """
+    polymarket / hackernews / fred are normalized by _normalize_pulse and
+    _normalize_market, which surface no URL at all. Unchanged by this patch —
+    asserted so a future edit to those helpers is a deliberate one.
+    """
+    state = {
+        "raw_question": "Q?",
+        "pulse_evidence": _pulse_package(
+            market_consensus=[_polymarket_consensus_item()],
+            community_discussion=[_hackernews_item()],
+        ),
+        "market_evidence": _market_package(fred_anomalies=[_fred_anomaly()]),
+    }
+    out = _run_with_dynamic_ratings(state=state)
+    trail = out["evidence_trail"]
+    assert len(trail) == 3
+    assert {item["source_type"] for item in trail} == {
+        "vault_market", "vault_hackernews", "vault_fred",
+    }
+    assert all(item["url"] is None for item in trail)
+
+
+def test_url_survives_into_a_valid_evidence_item():
+    """
+    The rated dict must still construct an EvidenceItem — url is a declared
+    field, so this proves the patch is additive and not a contract change.
+    """
+    state = {
+        "raw_question": "Q?",
+        "researcher_evidence": _researcher_package(
+            [_researcher_article(source_platform="newsapi")]
+        ),
+    }
+    out = _run_with_dynamic_ratings(state=state)
+    item = EvidenceItem(**out["evidence_trail"][0])
+    assert item.url == "https://reuters.com/world/sample-article"
 
 
 def test_unknown_researcher_platform_is_skipped_with_warning(caplog):

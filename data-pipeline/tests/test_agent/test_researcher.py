@@ -23,6 +23,12 @@ Coverage map (spec §8.4.1):
        test_run_publisher_unknown_when_url_missing)
     - Drill-down miss tolerance (test_run_handles_missing_drilldown_gracefully)
     - Recency range as ISO8601 (test_run_recency_range_iso8601)
+    - URL derivation, evidence-URL patch 2026-08-18
+      (test_run_url_prefers_vault_original_url,
+       test_run_url_falls_back_to_content_vitals_when_drilldown_misses,
+       test_run_url_falls_back_when_vault_original_url_is_blank,
+       test_run_url_is_none_when_no_source_has_one,
+       test_run_url_packed_for_every_platform)
 """
 
 from __future__ import annotations
@@ -386,6 +392,116 @@ def test_run_publisher_unknown_when_url_missing(fake_embedding):
         result = researcher.run(fake_embedding, now=NOW)
 
     assert result["articles"][0]["publisher"] == "Unknown"
+
+
+# ==========================================================
+# URL derivation (evidence-URL patch, 2026-08-18)
+# ==========================================================
+# The fixtures make the preference observable on purpose: _make_full_doc's
+# original_url has no "www." while _make_row's content_vitals.url does, so a
+# test can tell which field was actually read. On live data the two are
+# byte-identical (verified 2026-08-18, 2,031/2,031 newsapi+arxiv cloud rows),
+# which is exactly why the distinction has to be pinned here instead.
+
+def test_run_url_prefers_vault_original_url(fake_embedding):
+    """
+    original_url wins over content_vitals.url — it is the schema-enforced
+    field (validate_silver_document) and is additionally guarded non-empty at
+    the Silver url_guard for newsapi and arxiv.
+    """
+    row = _make_row(url="https://www.reuters.com/article/123")
+    with (
+        patch.object(
+            researcher.knowledge_tools, "similarity_search", return_value=[row]
+        ),
+        patch.object(
+            researcher.knowledge_tools, "fetch_full_text", return_value=_make_full_doc()
+        ),
+    ):
+        result = researcher.run(fake_embedding, now=NOW)
+
+    assert result["articles"][0]["url"] == "https://reuters.com/article/123"
+
+
+def test_run_url_falls_back_to_content_vitals_when_drilldown_misses(fake_embedding):
+    """
+    Drill-down is best-effort. When full_doc is None the Gold-side copy is the
+    only URL in scope — dropping the link there would be strictly worse than
+    using the unenforced field.
+    """
+    row = _make_row(url="https://www.reuters.com/article/123")
+    with (
+        patch.object(
+            researcher.knowledge_tools, "similarity_search", return_value=[row]
+        ),
+        patch.object(
+            researcher.knowledge_tools, "fetch_full_text", return_value=None
+        ),
+    ):
+        result = researcher.run(fake_embedding, now=NOW)
+
+    assert result["articles"][0]["url"] == "https://www.reuters.com/article/123"
+
+
+def test_run_url_falls_back_when_vault_original_url_is_blank(fake_embedding):
+    """A present-but-empty original_url must not shadow a usable Gold copy."""
+    row = _make_row(url="https://www.reuters.com/article/123")
+    full_doc = _make_full_doc()
+    full_doc["original_url"] = "   "
+    with (
+        patch.object(
+            researcher.knowledge_tools, "similarity_search", return_value=[row]
+        ),
+        patch.object(
+            researcher.knowledge_tools, "fetch_full_text", return_value=full_doc
+        ),
+    ):
+        result = researcher.run(fake_embedding, now=NOW)
+
+    assert result["articles"][0]["url"] == "https://www.reuters.com/article/123"
+
+
+def test_run_url_is_none_when_no_source_has_one(fake_embedding):
+    """
+    None, never "" — EvidenceItem.url is Optional[str] and the frontend
+    branches on presence.
+    """
+    row = _make_row(url="")
+    full_doc = _make_full_doc()
+    full_doc["original_url"] = ""
+    with (
+        patch.object(
+            researcher.knowledge_tools, "similarity_search", return_value=[row]
+        ),
+        patch.object(
+            researcher.knowledge_tools, "fetch_full_text", return_value=full_doc
+        ),
+    ):
+        result = researcher.run(fake_embedding, now=NOW)
+
+    assert result["articles"][0]["url"] is None
+
+
+@pytest.mark.parametrize("source_platform", ["newsapi", "arxiv", "telegram"])
+def test_run_url_packed_for_every_platform(fake_embedding, source_platform: str):
+    """
+    The researcher reports what the vault holds for ALL platforms; the
+    newsapi/arxiv gate is rate_evidence's job (rate_evidence.
+    PLATFORMS_WITH_PUBLIC_URL). Packing telegram here is deliberate — if this
+    ever starts returning None for telegram, the gate has leaked upstream.
+    """
+    row = _make_row(source_platform=source_platform, channel_username="@CoinDesk")
+    with (
+        patch.object(
+            researcher.knowledge_tools, "similarity_search", return_value=[row]
+        ),
+        patch.object(
+            researcher.knowledge_tools, "fetch_full_text", return_value=_make_full_doc()
+        ),
+    ):
+        result = researcher.run(fake_embedding, now=NOW)
+
+    assert result["articles"][0]["url"] == "https://reuters.com/article/123"
 
 
 # ==========================================================
