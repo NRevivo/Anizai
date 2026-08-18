@@ -249,6 +249,7 @@ export const sessionRepository = {
                 status: data.status ?? null,
                 userId: data.userId ?? null,
                 replyToMessageId: data.replyToMessageId ?? null,
+                suggestedActions: data.suggestedActions ?? null,
                 meta: data.meta ?? null,
             };
         };

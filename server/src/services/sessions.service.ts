@@ -67,6 +67,9 @@ export interface SessionMessage {
     // Present on hub-written assistant messages: the doc id of the user message
     // this reply answers. Lets the frontend link answer <-> question.
     replyToMessageId?: string | null;
+    // Present on hub-written assistant messages. A missing value distinguishes
+    // legacy messages from an explicitly empty, degraded suggestion result.
+    suggestedActions?: SuggestedAction[] | null;
     meta: {
         model?: string;
         tokensIn?: number;
