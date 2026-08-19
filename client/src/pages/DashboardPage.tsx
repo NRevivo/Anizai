@@ -240,14 +240,32 @@ export function DashboardPage({
         setIsSidebarOpen(false);
     };
 
-    const handleSubmitForecast = async (question: string, idempotencyKey: string) => {
+    /**
+     * `conditionId` must be threaded, not defaulted. It is the picker's market
+     * identity, and the agent's A1 exact lookup
+     * (`agent/agents/market_bridge.py`) is the only thing that can resolve a
+     * market the pg_trgm question-matcher misses — so dropping it here silently
+     * demotes a picked market to Tier 2 ("No market benchmark").
+     *
+     * It was dropped for exactly that reason until 2026-08-19: this handler took
+     * two parameters while `CreateForecastViewProps.onSubmit` declared three, and
+     * TypeScript accepts a shorter function wherever a longer signature is
+     * expected. Nothing failed to compile and no test caught it; every forecast
+     * in production reached the agent with `conditionId: null`. Keep all three
+     * parameters here even though the body only forwards them.
+     */
+    const handleSubmitForecast = async (
+        question: string,
+        idempotencyKey: string,
+        conditionId?: string | null
+    ) => {
         if (isCreatingForecast) {
             return;
         }
 
         try {
             setIsCreatingForecast(true);
-            await onCreateSession(question, idempotencyKey);
+            await onCreateSession(question, idempotencyKey, conditionId);
             setCurrentView('dashboard');
         } finally {
             setIsCreatingForecast(false);
