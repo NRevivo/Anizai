@@ -1,16 +1,20 @@
 # cloud_state.md
 > Domain: C — Cloud
 > Type: State
-> Last updated: 2026-08-15 — **partial: identity only.** §2 re-pointed to
+> Last updated: 2026-08-18 — **partial: the §3 `agent-worker` row only.** Refreshed and
+> verified live during the evidence-URL roll (`anizai-agent:0.6.1-evidence-url` @
+> `sha256:06b72af5…`). Prior partial 2026-08-15 — identity only: §2 re-pointed to
 > `anizai-pipehub` (project, Artifact Registry, GCS bucket) and the secret count
-> corrected 16 → 15. **Nothing else in this file was refreshed.**
+> corrected 16 → 15. **Nothing else in this file has been refreshed.**
 >
 > ⚠️ **§1, §3 and §6 are two teardowns and a project migration out of date — do not
-> read them as current (KG-C-12).** They were last verified 2026-07-27 and predate the
+> read them as current (KG-C-12).** **KG-C-12 does NOT lift.** Exactly one row of §3 —
+> `agent-worker` — is verified as of 2026-08-18 and is marked as such inline; every
+> other row in this file remains unverified and stale. One verified row is not a
+> refresh. They were last verified 2026-07-27 and predate the
 > 2026-08-01 windows *and* the `anizai-pipeline` → `anizai-pipehub` rebuild. Known
-> wrong: the Flink tag (`1.19.1-7d` → `1.19.1-pmcov`), the agent tag
-> (`0.5.0-sprint26` → `0.6.0-trackA`, which **misreports its own version** — identify
-> by digest), the polymarket tag (`0.3.0-price`, an image that was never pushed to the
+> wrong: the Flink tag (`1.19.1-7d` → `1.19.1-pmcov`), the polymarket tag
+> (`0.3.0-price`, an image that was never pushed to the
 > new registry), both Flink JobIDs, and the count of workloads resting at 0 (**six**,
 > not four — the D10 divergence). **Until the refresh lands, take identity from
 > `cloud_constants.md` and post-migration state from `carryover-20260815-migration.md`.**
@@ -99,7 +103,7 @@ for the full image/version table; this lists kind + the most recent change per w
 | polymarket | Deployment | **Live Deployment references `anizai-polymarket:0.3.0-price`** (digest `sha256:2ae00dae…899cac8`, pushed 2026-07-30) — the collaborator's price fix. **This row said `0.2.0-p95` until 2026-08-01: the tag was never recorded here and existed only in a gitignored file on his machine.** Rollback tag `0.2.0-p95` = digest `sha256:a2a3e82e…e93cfd5c`. Coverage image `0.4.0-coverage` (digest `sha256:1d27ec05…6c43d758`) was deployed for the 2026-08-01 V5 window and returned to `replicas: 0`. **Superseded — current image to roll out: `0.4.1-inactive`, digest `sha256:c7b15eb7…e69dcfc4`, built from `35c343b`**, which drops inactive placeholder legs at selection (KG-A-20). Verified inside the built image, not inferred from the build: inactive → skipped, archived and active → kept. On main-pool; comments feature-flagged off. **Held at `replicas: 0` live (manifest says 1 — KG-C-10)** | 9.5-B; hold verified 2026-07-26; tag corrected + `0.4.0-coverage` pushed 2026-08-01 |
 | telegram | Deployment | `anizai-telegram:0.1.0`; session file via CSI. Continuous MTProto listener — **not** an Airflow DAG, so pausing the DAGs does not stop it. **Held at `replicas: 0` live (manifest says 1 — KG-C-10)** | Phase 9 (9D); hold verified 2026-07-26 |
 | trigger-consumer | Deployment | `anizai-trigger-consumer:0.1.0`; on `ingestion_triggers` | Phase 9 (9D) |
-| agent-worker | Deployment | `anizai-agent:0.5.0-sprint26` (digest `sha256:7fce4e8b…c316ef4`); `AGENT_VERSION 0.5.0-sprint26+55e8093`; **`replicas:0` — declared 0 in the manifest, deliberate; brought up with `kubectl scale`**; Sprint 22→26 in this image; cross-project Firestore. Health-verified in cloud 2026-07-26 (7 real forecasts, then returned to 0) | 2026-07-23 (B-deploy Stage-1 T1.2); run 2026-07-26 |
+| agent-worker | Deployment | ✅ **VERIFIED CURRENT 2026-08-18 — the one row in this section that is.** **`anizai-agent:0.6.1-evidence-url`, digest `sha256:06b72af5e5316abcda3cf69b7e3d64821f276ad231c379c1d9a188ecdb4dea00`; `AGENT_VERSION 0.5.0-sprint26+b71ac5a`.** Carries the evidence-URL patch (commit `b71ac5a`, `hub_sprints.md §1`) on top of Sprint 22→26; cross-project Firestore. **The version BASE was deliberately not bumped** — the git sha is the sole discriminator between this image and `0.6.0-trackA`. The base *is* env-overridable via `AGENT_VERSION` (`agent/config/settings.py:214`) and was deliberately left unused: one variable per change. **Live at `replicas: 1`; the committed manifest declares `replicas: 0` — KG-C-10.** **Live pins by DIGEST** (rolled with `kubectl set image …@sha256:06b72af5…`, targeted — no blanket apply) **while the committed manifest carries the TAG `0.6.1-evidence-url`** — same image, two forms; a `kubectl apply` would rewrite the field to the tag form and, more importantly, scale to 0. **Rollback chain, newest first:** `0.6.0-trackA` @ `sha256:937dfed1…471d9aee` (ran 2026-08-15→18; `/health` reported `0.5.0-sprint26+35c343b` — the tag was moved without the internal stamp, so **identify it by digest, not version**) → `0.5.0-sprint26` @ `sha256:7fce4e8b…c316ef4` (`AGENT_VERSION 0.5.0-sprint26+55e8093`, Sprint 22→26; older fallback, referenced by no manifest). Live verification 2026-08-18: digest + `AGENT_VERSION` match, `/health` 200 (which is itself the proof both Firestore listeners attached — `agent/worker.py:222` sets `_ready_event` only after both watches register), and 3 real frontend forecasts rendering **newsapi AND arxiv** evidence as working clickable links. Prior: health-verified 2026-07-26 (7 real forecasts, then returned to 0) | **2026-08-18 (evidence-URL roll)** |
 | prometheus | Deployment | `prom/prometheus:v2.51.2`; 2Gi + 7d retention (9.5-A); 5 scrape targets (9.5-C added kafka/postgres exporters) | 9.5-C |
 | grafana | Deployment | `grafana/grafana:10.4.2`; 2 dashboards (9.5-C added `Anizai Pipeline Health`) | 9.5-C |
 | alertmanager | Deployment | `prom/alertmanager:v0.27.0`; Gmail SMTP → `ron.mintz21@gmail.com` (9.5-C) | 9.5-C |

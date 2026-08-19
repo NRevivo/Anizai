@@ -8,7 +8,8 @@ query embedding.
 Algorithm (spec §8.4.1):
     1. similarity_search(limit=15, min_impact_level=2, min_reliability=0.3)
     2. Composite ranking: 0.6*similarity + 0.25*(impact_level/5) + 0.15*recency
-    3. Top 5 → drill down via silver_data_ref → knowledge_vault.full_text_raw
+    3. Top 5 → drill down via silver_data_ref → knowledge_vault
+       (full_text_raw for the snippet; original_url for the article link)
     4. evidence_weight := composite ranking score (no normalization, OQ-1)
     5. Return ResearcherEvidence dict (articles, source_diversity,
        recency_range, empty)
@@ -169,6 +170,10 @@ def _pack_article(
     `full_doc` is the knowledge_vault row from drill-down, or None if the
     silver_data_ref was missing/unresolvable. Snippet falls back to "" so
     downstream rendering doesn't need to null-check.
+
+    `url` is packed unconditionally for every platform — see `_derive_url`.
+    Which platforms actually surface a link to the user is a product policy
+    applied downstream in `rate_evidence`, not here.
     """
     enrichment = row.get("enrichment_ai") or {}
     content_vitals = row.get("content_vitals") or {}
@@ -190,6 +195,7 @@ def _pack_article(
         "source_platform": row.get("source_platform") or "",
         "publisher": _derive_publisher(row),
         "title": content_vitals.get("title") or "",
+        "url": _derive_url(row, full_doc=full_doc),
         "published_at": published_at_iso,
         "executive_summary": enrichment.get("executive_summary") or "",
         "key_findings": key_findings,
@@ -201,6 +207,41 @@ def _pack_article(
         "evidence_weight": evidence_weight,
         "canonical_event_id": row.get("canonical_event_id") or "",
     }
+
+
+def _derive_url(row: dict, *, full_doc: Optional[dict]) -> Optional[str]:
+    """
+    Source URL for the article, preferring the Silver vault's `original_url`.
+
+    Why `original_url` first (evidence-URL patch, 2026-08-18):
+        `original_url` is the field the pipeline actually guarantees. It is a
+        required key of `validate_silver_document` (utils/validators.py) and is
+        additionally guarded non-empty at the Silver url_guard for both newsapi
+        (processing/silver_job.py, newsapi branch) and arxiv (arxiv branch) —
+        an empty URL is dead-lettered, never persisted. `content_vitals.url` is
+        only a Gold-side copy of the same value (processing/gold_job.py:984
+        newsapi, :1223 arxiv — both `"url": silver_doc.get("original_url", "")`)
+        and carries no schema enforcement of its own.
+
+    Why `content_vitals.url` is still a fallback:
+        The drill-down is best-effort — `full_doc` is None when `silver_data_ref`
+        is missing or unresolvable. In that case the Gold copy is the only URL in
+        scope, and losing the link there would be a strictly worse outcome than
+        using the unenforced field. Measured on cloud data 2026-08-18 the two are
+        byte-identical on all 2,031 newsapi+arxiv rows, so the fallback changes
+        no value today — it only protects the drill-down-miss path.
+
+    Returns None (not "") when neither source yields a non-empty URL, so the
+    EvidenceItem.url Optional[str] contract carries a real absence rather than
+    an empty string the frontend would have to treat as a link.
+    """
+    original_url = ((full_doc or {}).get("original_url") or "").strip()
+    if original_url:
+        return original_url
+
+    content_vitals = row.get("content_vitals") or {}
+    fallback_url = (content_vitals.get("url") or "").strip()
+    return fallback_url or None
 
 
 def _derive_publisher(row: dict) -> str:

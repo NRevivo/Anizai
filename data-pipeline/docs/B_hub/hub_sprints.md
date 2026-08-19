@@ -1,7 +1,7 @@
 # hub_sprints.md
 > Domain: B — Agentic Hub
 > Type: Sprints
-> Last updated: 2026-07-26
+> Last updated: 2026-08-18
 > TL;DR: Sprint status for the whole hub (18–27), the cross-sprint Phase-8 rationale +
 >        dependency map, deferred items, and the hub Known Gaps (KG-B-*). Each open
 >        sprint's full task table lives in its own `plans/` file (linked from the §1
@@ -34,9 +34,54 @@
 | 26 — Pre-Test Hardening | **Closed** | 2026-07-18 | Clarification strip (KG-B-8); vault-read retry (tight 3/0.5/2.0, fits vault_query's 15s); git-sha `agentVersion` **(Domain-C injection of `AGENT_GIT_COMMIT_SHORT_SHA` now LIVE in deployed `anizai-agent:0.5.0-sprint26`+55e8093, 2026-07-23 — T26.5 Domain-C dependency satisfied)**; delivery-path retarget closing **KG-B-18** (step 6 → `query_doc_id` + `_mark_failed` no-downgrade guard); 3 Prometheus metrics (real `/metrics`, stub gone); per-node latency report (`synthesize`+`rate_evidence` dominate ~85% of ~35s, within ≤60s p95). Gate 1/2/3 green + 2 real-OpenAI latency forecasts. Full agent suite 637 passed / 15 documented infra-skips / 0 xfail. Closes KG-B-8/-18; opened KG-B-20. → `hub_archive.md` | `archive_plans/sprint26_pretest_hardening.md` |
 | Initial test (~2 days, cloud) | Pending | — | Gated on Sprint 26; baseline real cost + forecast quality on live vault data. **Stage-1 deploy prerequisites satisfied 2026-07-23** (agent image `0.5.0-sprint26` on cloud at `replicas:0`; `reactive_triggers_log` present; partner Firestore index+rules deployed); remaining before the run: **Stage 2** — `anizai-airflow` rebuild + scale agent to 1. | — |
 | 27 — Post-Test Polish + Closeout | **Not planned** (partial/stub) | — | Deferred Sprint-26 hardening + Phase 8 State Ledger; tasks added post-test | `plans/sprint27_post_test_closeout.md` |
+| **Evidence URL patch** (out-of-sprint) | **Closed** | 2026-08-18 | `EvidenceItem.url` populated for newsapi + arxiv vault evidence. Shipped as `anizai-agent:0.6.1-evidence-url`, commit `b71ac5a`. Detail below the table. | — (in-session) |
 
 **Pre-test path:** 22 → 23 → ~~23.5~~ → ~~24~~ → ~~25~~ → ~~26~~ (closed 2026-07-18) → **initial test (NEXT)** → 27.
 **Active plans:** `plans/sprint27_post_test_closeout.md` (partial/stub — gated on the initial test); closed & archived: `archive_plans/sprint26_pretest_hardening.md` (2026-07-18, all `[x]`), `archive_plans/sprint25_suggested_actions.md` (2026-07-16, all `[x]`), `archive_plans/sprint24_followups.md` (2026-07-04, all `[x]`), `archive_plans/sprint23_5_pre26_remediation.md` (superseded Sprint 26 T26.1/T26.5/T26.7).
+
+### Evidence URL patch — 2026-08-18 (out-of-sprint, no KG)
+
+`EvidenceItem.url` had been a declared field since Sprint 20 but was never populated
+for vault evidence, so every evidence card reached the frontend with `url: null` and
+nothing was clickable. Confirmed on live data before the fix: 24 recent sessions, every
+`vault_news` item `url: null` with `source_domain` correctly set.
+
+**Two sites dropped it; both fixed.**
+
+- `agent/agents/researcher.py` — `_pack_article()` built the article dict with no `url`
+  key although both sources were in scope. A new `_derive_url()` now packs it for every
+  platform, preferring `original_url` (required by `validate_silver_document`, and
+  guarded non-empty at the Silver `url_guard` for newsapi and arxiv) over
+  `content_vitals.url` (an unenforced Gold-side copy), falling back to the copy when the
+  drill-down misses, and returning `None` rather than `""` when neither yields a URL.
+- `agent/nodes/rate_evidence.py` — `_normalize_researcher()` hardcoded `"url": None`. It
+  now honours the packed value for the platforms in the new `PLATFORMS_WITH_PUBLIC_URL`
+  frozenset.
+
+**Scope: newsapi and arxiv only.** telegram / polymarket / hackernews / fred stay `null`
+by **product decision, not data gap** — telegram's `original_url` is a `t.me` permalink
+guarded non-empty exactly like the other two. The gate lives in `rate_evidence` beside
+the sibling per-platform policy maps, so retrieval reports what the vault holds and the
+evidence layer decides what a reader sees. Adding a platform is a one-line change but a
+product change; a Gate-1 test pins the set so it cannot drift silently.
+
+**Additive and low-risk:** no schema change, no migration, no BFF or client change.
+`write_to_firestore` passes the item through verbatim, the BFF already maps
+`url: data.url ?? null`, and the frontend already renders an anchor when `url` is
+present.
+
+**Verified live in cloud 2026-08-18** — 3 forecasts through the frontend. **Both
+platforms proven: newsapi on geopolitical questions and arxiv on a research-shaped
+question that pulled `vault_arxiv` evidence with a working abstract link.** Acceptance
+was visual — headlines render as clickable links that open the source — not merely a
+non-null Firestore field. The earlier Gate-1-only caveat no longer applies.
+
+**Pre-existing sessions keep `url: null` — there is no backfill.**
+
+Agent suite 693 passed / 15 skipped (12 local-Postgres env, 3 KG-PHASE8-25 Kafka) /
+0 failed. Commit `b71ac5a`; image identity and rollback chain in
+`docs/C_cloud/cloud_state.md` §3. **No KG number** — found and fixed in one motion,
+so it was never a known gap.
 
 ---
 

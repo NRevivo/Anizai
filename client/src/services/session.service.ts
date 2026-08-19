@@ -50,6 +50,9 @@ export interface SessionMessage {
     // Hub-written on assistant messages: links each answer to the exact user
     // message it replies to (top-level on the doc, not nested in meta).
     replyToMessageId?: string | null;
+    // Hub-written on assistant messages. Null means this is a legacy message
+    // without dynamic suggestions; [] means generation intentionally degraded.
+    suggestedActions?: SuggestedAction[] | null;
     meta: {
         model?: string;
         tokensIn?: number;
@@ -230,8 +233,21 @@ function mapSessionMessageDoc(docSnapshot: QueryDocumentSnapshot): SessionMessag
                         : null,
         userId: typeof data.userId === 'string' ? data.userId : null,
         replyToMessageId: typeof data.replyToMessageId === 'string' ? data.replyToMessageId : null,
+        suggestedActions: Array.isArray(data.suggestedActions)
+            ? data.suggestedActions.filter(isSuggestedAction)
+            : null,
         meta: data.meta && typeof data.meta === 'object' ? (data.meta as SessionMessage['meta']) : null,
     };
+}
+
+function isSuggestedAction(value: unknown): value is SuggestedAction {
+    return Boolean(
+        value &&
+        typeof value === 'object' &&
+        typeof (value as SuggestedAction).id === 'string' &&
+        typeof (value as SuggestedAction).label === 'string' &&
+        typeof (value as SuggestedAction).prompt === 'string'
+    );
 }
 
 export async function fetchSessions(): Promise<SessionListItem[]> {

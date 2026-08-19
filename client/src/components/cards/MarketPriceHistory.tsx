@@ -244,7 +244,7 @@ export function MarketPriceHistory({
     const isUp = changePct > 0;
     const gapPct = anizaiPct - last.pct;
 
-    const headline =
+    const movementSummary =
         Math.abs(changePct) < 0.5
             ? `Market held near ${Math.round(last.pct)}% across the period`
             : `Market moved ${isUp ? 'up' : 'down'} ${Math.abs(changePct).toFixed(1)} points, ` +
@@ -275,10 +275,10 @@ export function MarketPriceHistory({
         <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm">
             <CardHeader className="p-4 sm:p-5 pb-2">
                 <CardTitle className="text-base font-semibold leading-tight text-gray-900 break-words">
-                    {headline}
+                    Market odds over time
                 </CardTitle>
                 <CardDescription className="text-xs text-gray-500">
-                    The market's own price over time, against the Anizai forecast
+                    Teal is the market's Yes price over time. The dashed purple line is the fixed Anizai forecast.
                 </CardDescription>
             </CardHeader>
             <CardContent className="p-4 sm:p-5 pt-2">
@@ -363,7 +363,7 @@ export function MarketPriceHistory({
 
                 <div className="mt-3 flex flex-col gap-3 border-t border-gray-50 pt-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-xs leading-relaxed text-gray-500 break-words">
-                        {data.length.toLocaleString()} price
+                        {movementSummary}. {data.length.toLocaleString()} price
                         {data.length === 1 ? ' point' : ' points'} from{' '}
                         {formatStamp(first.t, spanMs)} to {formatStamp(last.t, spanMs)}.
                     </p>

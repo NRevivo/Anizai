@@ -4,7 +4,8 @@ agent/followup/graph.py — the follow-up subgraph (Sprint 24, T24.6).
 A small, linear LangGraph over `FollowupState`, structurally separate from
 the main forecast graph (`agent/graph.py`):
 
-    START → load_context → answer_from_context → write_message → END
+    START → load_context → answer_from_context → generate_suggested_actions
+          → write_message → END
 
 No escalation branch (that is Future Enhancement 2) — hence no conditional
 edges. Each node exposes `run(state)` and communicates only through
@@ -30,13 +31,19 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 
 from agent.followup.state import FollowupState
-from agent.followup.nodes import answer_from_context, load_context, write_message
+from agent.followup.nodes import (
+    answer_from_context,
+    generate_suggested_actions,
+    load_context,
+    write_message,
+)
 
 
 # Node names — module-level constants so tests can introspect the graph
 # structure by name (mirrors agent/graph.py).
 NODE_LOAD_CONTEXT = "load_context"
 NODE_ANSWER_FROM_CONTEXT = "answer_from_context"
+NODE_GENERATE_SUGGESTED_ACTIONS = "generate_suggested_actions"
 NODE_WRITE_MESSAGE = "write_message"
 
 
@@ -55,11 +62,13 @@ def _build_graph() -> StateGraph:
 
     builder.add_node(NODE_LOAD_CONTEXT, load_context.run)
     builder.add_node(NODE_ANSWER_FROM_CONTEXT, answer_from_context.run)
+    builder.add_node(NODE_GENERATE_SUGGESTED_ACTIONS, generate_suggested_actions.run)
     builder.add_node(NODE_WRITE_MESSAGE, write_message.run)
 
     builder.add_edge(START, NODE_LOAD_CONTEXT)
     builder.add_edge(NODE_LOAD_CONTEXT, NODE_ANSWER_FROM_CONTEXT)
-    builder.add_edge(NODE_ANSWER_FROM_CONTEXT, NODE_WRITE_MESSAGE)
+    builder.add_edge(NODE_ANSWER_FROM_CONTEXT, NODE_GENERATE_SUGGESTED_ACTIONS)
+    builder.add_edge(NODE_GENERATE_SUGGESTED_ACTIONS, NODE_WRITE_MESSAGE)
     builder.add_edge(NODE_WRITE_MESSAGE, END)
 
     return builder

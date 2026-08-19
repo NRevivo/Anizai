@@ -34,10 +34,11 @@ import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from firebase_admin import firestore as fb_firestore
 
 from agent.followup import listener
-from agent.followup.nodes import answer_from_context
+from agent.followup.nodes import answer_from_context, generate_suggested_actions
 
 
 # ==========================================================
@@ -97,6 +98,25 @@ def _answerable_client(answer: str = "Because the evidence was dense.") -> Magic
         usage=SimpleNamespace(prompt_tokens=200, completion_tokens=100, total_tokens=300),
     )
     return client
+
+
+@pytest.fixture(autouse=True)
+def _mock_suggested_actions_client(monkeypatch):
+    """Keep Firestore integration tests independent from the second LLM call."""
+    client = MagicMock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content='''{"actions": [
+            {"label": "First next question", "prompt": "What is the first next question?"},
+            {"label": "Second next question", "prompt": "What is the second next question?"},
+            {"label": "Third next question", "prompt": "What is the third next question?"}
+        ]}'''))],
+        usage=SimpleNamespace(prompt_tokens=200, completion_tokens=100, total_tokens=300),
+    )
+    monkeypatch.setattr(
+        generate_suggested_actions.shared_actions,
+        "_get_default_client",
+        lambda: client,
+    )
 
 
 def _messages(db, session_id: str) -> list[dict]:

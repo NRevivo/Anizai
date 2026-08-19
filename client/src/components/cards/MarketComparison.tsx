@@ -25,13 +25,11 @@ export function MarketComparison({ anizaiProbability, marketProbability, tier = 
     const difference = hasMarketProbability ? anizaiPct - marketPct : 0;
     const isBullish = difference > 0;
 
-    const insightTitle = insight?.trim()
-        ? insight.trim()
-        : !hasMarketProbability
-            ? 'No market benchmark available'
-            : isBullish
-                ? `Anizai is ${difference.toFixed(1)} points above the market benchmark`
-                : `Anizai is ${Math.abs(difference).toFixed(1)} points below the market benchmark`;
+    const comparisonSummary = !hasMarketProbability
+        ? 'No market benchmark available'
+        : isBullish
+            ? `The Anizai forecast is ${difference.toFixed(1)} percentage points above the current market odds.`
+            : `The Anizai forecast is ${Math.abs(difference).toFixed(1)} percentage points below the current market odds.`;
 
     const emptyDescription = isFreeformTier
         ? 'No market benchmark available for this freeform forecast.'
@@ -59,10 +57,10 @@ export function MarketComparison({ anizaiProbability, marketProbability, tier = 
         <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm flex flex-col">
             <CardHeader className="p-4 sm:p-5 pb-2">
                 <CardTitle className="text-base font-semibold text-gray-900 leading-tight break-words">
-                    {insightTitle}
+                    Forecast vs market odds
                 </CardTitle>
                 <CardDescription className="text-xs text-gray-500">
-                    Secondary comparison against prediction-market data
+                    A one-time comparison. Both bars show the current implied probability of a Yes outcome.
                 </CardDescription>
             </CardHeader>
             <CardContent className="p-4 sm:p-5 pt-2 flex-1 flex flex-col justify-center">
@@ -126,7 +124,7 @@ export function MarketComparison({ anizaiProbability, marketProbability, tier = 
                 {hasMarketProbability ? (
                     <div className="mt-4 pt-3 border-t border-gray-50">
                         <p className="text-xs text-gray-500">
-                            Use this as context. The forecast result above remains the primary answer.
+                            {comparisonSummary} {insight?.trim() ? insight.trim() : 'Use this as context; the forecast remains the primary answer.'}
                         </p>
                     </div>
                 ) : null}

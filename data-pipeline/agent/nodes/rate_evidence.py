@@ -140,6 +140,26 @@ PLATFORM_TO_SOURCE_TYPE: dict[str, str] = {
     "fred": "vault_fred",
 }
 
+# Platforms whose vault URL is surfaced to the user as a clickable link on the
+# evidence card (evidence-URL patch, 2026-08-18).
+#
+# Why only these two: newsapi and arxiv URLs are public article/abstract
+# permalinks — the thing a reader wants when they click an evidence headline.
+# The excluded platforms are a PRODUCT decision, not a data gap:
+#   - telegram   — `original_url` is a t.me permalink and is guarded non-empty
+#                  at the Silver url_guard exactly like the two above, so the
+#                  value exists; we simply don't send readers into Telegram.
+#   - hackernews — the vault carries the HN item URL, but pulse items are packed
+#                  by pulse_analyst, which surfaces no URL to normalize (below).
+#   - polymarket
+#   - fred       — both are aggregate/market rows, not per-article documents;
+#                  their source_domain already tells the reader where they came
+#                  from and there is no single article to open.
+#
+# Adding a platform here is a one-line change, but it is a product change —
+# it puts a live outbound link in front of a user. Decide it deliberately.
+PLATFORMS_WITH_PUBLIC_URL: frozenset[str] = frozenset({"newsapi", "arxiv"})
+
 # Source-domain fallbacks for items that don't carry a derivable URL.
 PLATFORM_TO_SOURCE_DOMAIN: dict[str, str] = {
     "arxiv": "arxiv.org",
@@ -270,7 +290,9 @@ def _normalize_researcher(
     Each article carries `source_platform` ∈ {"newsapi", "arxiv",
     "telegram"}, `published_at` as ISO string, `title`, `full_text_snippet`
     (already capped at 500 chars by researcher.py — re-truncated here to
-    SNIPPET_MAX_CHARS), and various enrichment fields not used here.
+    SNIPPET_MAX_CHARS), `url` (packed for every platform; gated to
+    PLATFORMS_WITH_PUBLIC_URL here — see `_resolve_url_for_researcher`), and
+    various enrichment fields not used here.
     """
     if not package or package.get("empty"):
         return []
@@ -295,13 +317,33 @@ def _normalize_researcher(
             "origin": "knowledge_vault",
             "title": article.get("title") or "",
             "snippet": (article.get("full_text_snippet") or "")[:SNIPPET_MAX_CHARS],
-            "url": None,
+            "url": _resolve_url_for_researcher(platform, article),
             "source_domain": _resolve_domain_for_researcher(platform, publisher),
             "published_at": _parse_published_at(article.get("published_at"), fetched_at),
             "fetched_at": fetched_at,
             "credibility_tier": PLATFORM_TO_CREDIBILITY_TIER[platform],
         })
     return out
+
+
+def _resolve_url_for_researcher(platform: str, article: dict) -> Optional[str]:
+    """
+    Apply the public-link policy to a researcher article's packed `url`.
+
+    researcher.py packs `url` for EVERY platform it retrieves — it reports what
+    the vault holds (retrieval fidelity). Deciding which of those URLs a reader
+    actually sees is EvidenceItem policy, and this module is where the other
+    per-platform policies already live (credibility tier, source_type, source
+    domain). Keeping the gate here means the researcher never has to know what
+    the frontend renders, and there is exactly one place to change the policy.
+
+    Returns None for any platform outside PLATFORMS_WITH_PUBLIC_URL, and None
+    (not "") when the packed url is absent or empty — `EvidenceItem.url` is
+    Optional[str] and the frontend branches on presence.
+    """
+    if platform not in PLATFORMS_WITH_PUBLIC_URL:
+        return None
+    return (article.get("url") or "").strip() or None
 
 
 def _resolve_domain_for_researcher(platform: str, publisher: str) -> str:

@@ -31,7 +31,7 @@ import pytest
 
 from agent import firestore_client
 from agent.followup.graph import graph as followup_graph
-from agent.followup.nodes import answer_from_context
+from agent.followup.nodes import answer_from_context, generate_suggested_actions
 from agent.prompts import followup as followup_prompt
 
 
@@ -55,6 +55,20 @@ def _output(*, classification: str, answer: str) -> dict:
         "classification_reason": "test",
         "answer": answer,
     }
+
+
+def _suggestions_response() -> SimpleNamespace:
+    return _make_response({"actions": [
+        {"label": "First next question", "prompt": "What is the first next question?"},
+        {"label": "Second next question", "prompt": "What is the second next question?"},
+        {"label": "Third next question", "prompt": "What is the third next question?"},
+    ]})
+
+
+def _suggestions_client() -> MagicMock:
+    client = MagicMock()
+    client.chat.completions.create = MagicMock(return_value=_suggestions_response())
+    return client
 
 
 def _wire_common(monkeypatch, captured):
@@ -84,6 +98,11 @@ def _wire_common(monkeypatch, captured):
     monkeypatch.setattr(
         firestore_client, "claim_and_write_followup_answer", _fake_claim
     )
+    monkeypatch.setattr(
+        generate_suggested_actions.shared_actions,
+        "_get_default_client",
+        _suggestions_client,
+    )
 
 
 def _initial_state() -> dict:
@@ -107,7 +126,6 @@ def test_graph_sufficient_context_writes_model_answer(monkeypatch):
         )
     )
     monkeypatch.setattr(answer_from_context, "_get_default_client", lambda: client)
-
     final_state = followup_graph.invoke(_initial_state())
 
     assert final_state["response_text"] == "Dense, consistent evidence."
@@ -115,6 +133,7 @@ def test_graph_sufficient_context_writes_model_answer(monkeypatch):
     assert captured["user_message_id"] == "msg-1"
     assert captured["assistant_message"]["content"] == "Dense, consistent evidence."
     assert captured["assistant_message"]["replyToMessageId"] == "msg-1"
+    assert captured["assistant_message"]["suggestedActions"][0]["id"] == "fu-sa-1"
 
 
 def test_graph_insufficient_context_writes_transparent_message(monkeypatch):
@@ -149,7 +168,9 @@ def test_graph_accumulates_cost_through_answer_node(monkeypatch):
     monkeypatch.setattr(answer_from_context, "_get_default_client", lambda: client)
     monkeypatch.setattr(
         answer_from_context.llm_cost, "record_usage",
-        lambda model, response, *, site: (300, 0.0007),
+        lambda model, response, *, site: (300, 0.0007)
+        if site == "answer_from_context"
+        else (300, 0.0),
     )
 
     final_state = followup_graph.invoke(_initial_state())

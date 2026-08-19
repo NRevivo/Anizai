@@ -161,10 +161,21 @@ export function DashboardPage({
     const [failedRetryError, setFailedRetryError] = useState<string | null>(null);
     const [currentView, setCurrentView] = useState<'dashboard' | 'new-forecast'>('dashboard');
 
-    const suggestedActions = useMemo<SuggestedAction[]>(
-        () => (prediction?.suggestedActions ?? []).slice(0, 3),
-        [prediction]
-    );
+    const suggestedActions = useMemo<SuggestedAction[]>(() => {
+        const latestAssistantMessage = [...messages]
+            .reverse()
+            .find((message) => message.role === 'assistant');
+
+        // A missing field belongs to a legacy assistant message, so preserve
+        // the forecast-level suggestions until the first dynamic response.
+        // An explicit [] is a degraded generation result and must clear stale
+        // choices rather than showing questions for an earlier answer.
+        if (latestAssistantMessage?.suggestedActions !== undefined && latestAssistantMessage?.suggestedActions !== null) {
+            return latestAssistantMessage.suggestedActions.slice(0, 3);
+        }
+
+        return (prediction?.suggestedActions ?? []).slice(0, 3);
+    }, [messages, prediction]);
 
     // Send-lock (T3): block a new follow-up while the session is still
     // producing an answer — either the initial forecast is processing
@@ -229,14 +240,32 @@ export function DashboardPage({
         setIsSidebarOpen(false);
     };
 
-    const handleSubmitForecast = async (question: string, idempotencyKey: string) => {
+    /**
+     * `conditionId` must be threaded, not defaulted. It is the picker's market
+     * identity, and the agent's A1 exact lookup
+     * (`agent/agents/market_bridge.py`) is the only thing that can resolve a
+     * market the pg_trgm question-matcher misses — so dropping it here silently
+     * demotes a picked market to Tier 2 ("No market benchmark").
+     *
+     * It was dropped for exactly that reason until 2026-08-19: this handler took
+     * two parameters while `CreateForecastViewProps.onSubmit` declared three, and
+     * TypeScript accepts a shorter function wherever a longer signature is
+     * expected. Nothing failed to compile and no test caught it; every forecast
+     * in production reached the agent with `conditionId: null`. Keep all three
+     * parameters here even though the body only forwards them.
+     */
+    const handleSubmitForecast = async (
+        question: string,
+        idempotencyKey: string,
+        conditionId?: string | null
+    ) => {
         if (isCreatingForecast) {
             return;
         }
 
         try {
             setIsCreatingForecast(true);
-            await onCreateSession(question, idempotencyKey);
+            await onCreateSession(question, idempotencyKey, conditionId);
             setCurrentView('dashboard');
         } finally {
             setIsCreatingForecast(false);

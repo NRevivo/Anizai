@@ -74,6 +74,7 @@ def run(state: dict) -> dict:
     session_id = state.get("parent_session_id")
     user_message_id = state.get("trigger_message_id")
     response_text = state.get("response_text")
+    suggested_actions = state.get("suggested_actions") or []
 
     if not session_id:
         raise AgentProcessingError(
@@ -96,6 +97,7 @@ def run(state: dict) -> dict:
         # Explicit answer -> question linkage (24.5 / 24.14). No time-ordering
         # inference anywhere.
         "replyToMessageId": user_message_id,
+        "suggestedActions": suggested_actions,
         "agentVersion": settings.AGENT_VERSION,
     }
 

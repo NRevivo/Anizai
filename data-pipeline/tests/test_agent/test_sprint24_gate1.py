@@ -36,7 +36,12 @@ import pytest
 
 from agent import firestore_client
 from agent.errors import AgentProcessingError
-from agent.followup.nodes import answer_from_context, load_context, write_message
+from agent.followup.nodes import (
+    answer_from_context,
+    generate_suggested_actions,
+    load_context,
+    write_message,
+)
 from agent.followup.state import FollowupState
 from agent.prompts import followup as followup_prompt
 
@@ -81,6 +86,23 @@ def _output(
     }
 
 
+def _suggestions_response() -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=json.dumps({"actions": [
+                    {"label": "First next question", "prompt": "First next question?"},
+                    {"label": "Second next question", "prompt": "Second next question?"},
+                    {"label": "Third next question", "prompt": "Third next question?"},
+                ]}))
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=200, completion_tokens=100, total_tokens=300
+        ),
+    )
+
+
 def _followup_state(**overrides) -> dict:
     base = {
         "parent_session_id": "sess-1",
@@ -108,7 +130,7 @@ def _evidence(evidence_id: str, *, rank: int = 0, relevance: float = 0.5) -> dic
 # ==========================================================
 # state.py — FollowupState
 # ==========================================================
-def test_followup_state_has_eight_ratified_fields():
+def test_followup_state_has_expected_fields():
     annotations = FollowupState.__annotations__
     assert set(annotations) == {
         "parent_session_id",
@@ -118,8 +140,41 @@ def test_followup_state_has_eight_ratified_fields():
         "parent_session_result",
         "parent_evidence",
         "response_text",
+        "suggested_actions",
         "total_cost_usd",
     }
+
+
+# ==========================================================
+# generate_suggested_actions
+# ==========================================================
+def test_followup_suggestions_are_attached_with_deterministic_ids(monkeypatch):
+    monkeypatch.setattr(
+        generate_suggested_actions.llm_cost,
+        "record_usage",
+        lambda model, response, *, site: (300, 0.0002),
+    )
+
+    result = generate_suggested_actions.run(
+        _followup_state(response_text="The evidence is dense and consistent."),
+        client=_client_returning(_suggestions_response()),
+    )
+
+    assert result["suggested_actions"] == [
+        {"id": "fu-sa-1", "label": "First next question", "prompt": "First next question?"},
+        {"id": "fu-sa-2", "label": "Second next question", "prompt": "Second next question?"},
+        {"id": "fu-sa-3", "label": "Third next question", "prompt": "Third next question?"},
+    ]
+    assert result["total_cost_usd"] == pytest.approx(0.0002)
+
+
+def test_followup_suggestions_degrade_when_the_call_fails():
+    result = generate_suggested_actions.run(
+        _followup_state(response_text="A complete answer."),
+        client=_client_raising(RuntimeError("unavailable")),
+    )
+
+    assert result == {"suggested_actions": []}
 
 
 # ==========================================================

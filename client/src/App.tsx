@@ -253,6 +253,7 @@ function toChatMessage(message: SessionMessage): ChatMessage {
         : message.status === 'answered'
           ? 'answered'
           : 'sent',
+    suggestedActions: message.suggestedActions ?? null,
   };
 }
 

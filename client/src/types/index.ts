@@ -55,6 +55,7 @@ export interface ChatMessage {
     content: string;
     timestamp: Date;
     status?: 'pending' | 'sent' | 'failed' | 'answered';
+    suggestedActions?: SuggestedAction[] | null;
 }
 
 export interface SentimentDataPoint {
