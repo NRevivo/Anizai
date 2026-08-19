@@ -38,6 +38,17 @@ Each completed forecast is presented as a decision-oriented workspace:
 - Reasoning chain and follow-up chat over the completed forecast.
 - Market odds, sentiment, and price-history surfaces where supporting data exists.
 
+The dashboard also exposes the quantitative context behind a forecast: market consensus,
+price movement over time, and sentiment split by evidence source family.
+
+![Market odds and sentiment panels](docs/images/product-market-sentiment.png)
+
+Evidence is kept visible instead of being hidden behind the final answer. The user can
+inspect source type, publication date, domain, relevance, credibility tier, and whether a
+piece of evidence was marked as key support for the forecast.
+
+![Evidence timeline](docs/images/product-evidence.png)
+
 ## System Context
 
 At the highest level, Anizai continuously ingests external information, grounds a user
@@ -365,4 +376,3 @@ Historical task logs and audits live under `docs/archive/` and the domain archiv
   task.
 - **Calibration harness**: built as a standalone measurement system; cloud automation is
   coded but not switched on.
-
