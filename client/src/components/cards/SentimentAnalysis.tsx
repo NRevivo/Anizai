@@ -36,9 +36,9 @@ export function SentimentAnalysis({ data, insight = null }: SentimentAnalysisPro
     return (
         <Card className="h-full max-w-full overflow-hidden border-gray-200 bg-white shadow-sm">
             <CardHeader className="p-4 sm:p-5 pb-2">
-                <CardTitle className="text-base font-semibold text-gray-900">Sentiment Signals</CardTitle>
+                <CardTitle className="text-base font-semibold text-gray-900">Sentiment over time</CardTitle>
                 <CardDescription className="text-xs text-gray-500">
-                    {insight?.trim() ? insight.trim() : 'Expert and public sentiment as supporting context'}
+                    Scores from 0 (most negative) to 100 (most positive). Teal is expert sources; purple is public sources.
                 </CardDescription>
             </CardHeader>
             <CardContent className="p-4 sm:p-5 pt-2">
@@ -95,7 +95,7 @@ export function SentimentAnalysis({ data, insight = null }: SentimentAnalysisPro
                         </div>
                         <div className="mt-4 pt-3 border-t border-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                             <p className="text-xs text-gray-500 leading-relaxed break-words">
-                                Sentiment is supporting context; use it alongside the forecast result.
+                                {insight?.trim() ? insight.trim() : 'Sentiment is supporting context, not a probability forecast.'}
                             </p>
                             <div className="flex shrink-0 gap-4">
                                 <div className="text-left sm:text-right">
