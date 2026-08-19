@@ -1,9 +1,9 @@
 {
   "aggregate_brier": {
-    "n": 3,
-    "mean_brier": 0.25,
-    "std_brier": 0.19595917942265423,
-    "skill_vs_coin_flip": 0.0,
+    "n": 12,
+    "mean_brier": 0.23666666666666666,
+    "std_brier": 0.10749676997731399,
+    "skill_vs_coin_flip": 0.053333333333333344,
     "uninformed_baseline": 0.25
   },
   "calibration_curve": {
@@ -19,21 +19,21 @@
       },
       {
         "bucket": "0.2-0.4",
-        "count": 1,
+        "count": 2,
         "mean_predicted": 0.3,
-        "actual_yes_rate": 1.0,
+        "actual_yes_rate": 0.5,
         "yes_count": 1,
-        "lower_bound": 0.20654931430031861,
-        "upper_bound": 1.0
+        "lower_bound": 0.0945312057016527,
+        "upper_bound": 0.9054687942983473
       },
       {
         "bucket": "0.4-0.6",
-        "count": 1,
+        "count": 9,
         "mean_predicted": 0.5,
-        "actual_yes_rate": 1.0,
-        "yes_count": 1,
-        "lower_bound": 0.20654931430031861,
-        "upper_bound": 1.0
+        "actual_yes_rate": 0.5555555555555556,
+        "yes_count": 5,
+        "lower_bound": 0.26665129344507676,
+        "upper_bound": 0.8112214789418183
       },
       {
         "bucket": "0.6-0.8",
@@ -54,20 +54,20 @@
         "upper_bound": 1.0
       }
     ],
-    "total_forecasts": 3,
+    "total_forecasts": 12,
     "unbucketed": 0,
-    "aggregate_brier": 0.25,
-    "skill_vs_coin_flip": 0.0
+    "aggregate_brier": 0.23666666666666666,
+    "skill_vs_coin_flip": 0.053333333333333344
   },
   "cohort_brier": {
     "items": [
       {
         "cohort": "7d",
-        "n": 1,
-        "mean_brier": 0.25,
-        "std_brier": null,
-        "skill_vs_coin_flip": 0.0,
-        "small_sample": true
+        "n": 10,
+        "mean_brier": 0.23399999999999999,
+        "std_brier": 0.047999999999999994,
+        "skill_vs_coin_flip": 0.06400000000000006,
+        "small_sample": false
       },
       {
         "cohort": "14d",
@@ -87,18 +87,18 @@
       },
       {
         "cohort": "all",
-        "n": 3,
-        "mean_brier": 0.25,
-        "std_brier": 0.19595917942265423,
-        "skill_vs_coin_flip": 0.0,
-        "small_sample": true
+        "n": 12,
+        "mean_brier": 0.23666666666666666,
+        "std_brier": 0.10749676997731399,
+        "skill_vs_coin_flip": 0.053333333333333344,
+        "small_sample": false
       }
     ]
   },
   "improvement_curve": {
     "points": [],
     "n_paired_questions": 0,
-    "single_forecast_questions": 3,
+    "single_forecast_questions": 12,
     "mean_delta": null,
     "improved_count": 0,
     "worsened_count": 0,
@@ -111,19 +111,19 @@
       {
         "vault_type": "knowledge",
         "n_with": 3,
-        "n_without": 0,
+        "n_without": 9,
         "mean_brier_with": 0.25,
-        "mean_brier_without": null,
-        "delta": null,
+        "mean_brier_without": 0.23222222222222222,
+        "delta": 0.01777777777777778,
         "helps": false,
         "comparable": false
       },
       {
         "vault_type": "social",
         "n_with": 0,
-        "n_without": 3,
+        "n_without": 12,
         "mean_brier_with": null,
-        "mean_brier_without": 0.25,
+        "mean_brier_without": 0.23666666666666666,
         "delta": null,
         "helps": false,
         "comparable": false
@@ -131,9 +131,9 @@
       {
         "vault_type": "momentum",
         "n_with": 0,
-        "n_without": 3,
+        "n_without": 12,
         "mean_brier_with": null,
-        "mean_brier_without": 0.25,
+        "mean_brier_without": 0.23666666666666666,
         "delta": null,
         "helps": false,
         "comparable": false
@@ -141,9 +141,9 @@
       {
         "vault_type": "mapping",
         "n_with": 0,
-        "n_without": 3,
+        "n_without": 12,
         "mean_brier_with": null,
-        "mean_brier_without": 0.25,
+        "mean_brier_without": 0.23666666666666666,
         "delta": null,
         "helps": false,
         "comparable": false
@@ -151,15 +151,15 @@
       {
         "vault_type": "reactive_search",
         "n_with": 0,
-        "n_without": 3,
+        "n_without": 12,
         "mean_brier_with": null,
-        "mean_brier_without": 0.25,
+        "mean_brier_without": 0.23666666666666666,
         "delta": null,
         "helps": false,
         "comparable": false
       }
     ],
-    "total_forecasts": 3,
+    "total_forecasts": 12,
     "min_group_size": 5,
     "interpretation": "Observational, not causal. Vaults are not randomly assigned to questions, so a vault's delta may reflect which questions it fires on rather than what it contributes. Do not de-prioritise a vault on this number alone."
   }

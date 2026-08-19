@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-08-17T21:44:31+00:00",
-  "scorable_forecasts": 3,
-  "mean_brier": 0.25,
+  "generated_at": "2026-08-19T18:15:28+00:00",
+  "scorable_forecasts": 12,
+  "mean_brier": 0.23666666666666666,
   "uninformed_baseline": 0.25,
-  "skill_vs_coin_flip": 0.0,
+  "skill_vs_coin_flip": 0.053333333333333344,
   "questions_tracked": 43,
-  "questions_resolved": 18,
+  "questions_resolved": 27,
   "forecasts_by_status": {
     "dispatched": 0,
     "completed": 20,
@@ -14,13 +14,12 @@
     "needs_clarification": 0
   },
   "resolutions_by_outcome": {
-    "YES": 8,
-    "NO": 10,
+    "YES": 12,
+    "NO": 15,
     "AMBIGUOUS": 0
   },
   "how_to_read_this": [
-    "Only 3 forecast(s) have been scored. At this sample size the calibration curve and the per-cohort scores are indicative at best — a single question resolving the other way would move them visibly. Every table here carries its n for that reason.",
-    "25 question(s) are still open and will be scored as their markets settle.",
+    "16 question(s) are still open and will be scored as their markets settle.",
     "Brier score: lower is better. 0.25 is what you get by always saying 50%, so it is the bar any forecaster must clear to be worth running.",
     "Forecasts marked failed, timed_out, or needs_clarification are excluded from every score but are counted in forecasts_by_status — a metric that silently drops its failures overstates itself."
   ]

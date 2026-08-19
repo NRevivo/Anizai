@@ -1,6 +1,6 @@
 vault,n_with,n_without,brier_with,brier_without,delta,statistically_comparable
-knowledge,3,0,0.25,,,False
-social,0,3,,0.25,,False
-momentum,0,3,,0.25,,False
-mapping,0,3,,0.25,,False
-reactive_search,0,3,,0.25,,False
+knowledge,3,9,0.25,0.23222222222222222,0.01777777777777778,False
+social,0,12,,0.23666666666666666,,False
+momentum,0,12,,0.23666666666666666,,False
+mapping,0,12,,0.23666666666666666,,False
+reactive_search,0,12,,0.23666666666666666,,False
