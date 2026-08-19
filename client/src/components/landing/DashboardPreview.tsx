@@ -20,7 +20,7 @@ export function DashboardPreview({ id }: DashboardPreviewProps) {
                         </span>
                     </div>
                     <h2 className="text-3xl sm:text-4xl lg:text-[2.75rem] font-light leading-tight tracking-[-0.02em] text-gray-900">
-                        A recession forecast our system generated, with every driver,
+                        A live geopolitical forecast our system generated, with every driver,
                         headwind, and source visible.
                     </h2>
                 </div>
@@ -32,7 +32,7 @@ export function DashboardPreview({ id }: DashboardPreviewProps) {
                         ) : (
                             <img
                                 src={IMAGE_SRC}
-                                alt="Anizai dashboard showing a recession-in-2026 forecast — verdict, probability ring, drivers, headwinds, and cited evidence."
+                                alt="Anizai dashboard showing a Strait of Hormuz traffic forecast, with verdict, probability ring, drivers, headwinds, and follow-up analysis."
                                 className="block w-full h-auto"
                                 loading="lazy"
                                 decoding="async"
