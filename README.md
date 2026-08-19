@@ -1,149 +1,264 @@
 # Anizai
 
-RAG-based event-forecasting platform with a React client, an Express BFF, and a Kafka/Flink data pipeline feeding a LangGraph forecasting agent.
+Anizai is an intelligent RAG-based forecasting platform for context-aware event
+prediction. A user asks a future-facing question, or selects a live prediction-market
+question, and receives a structured forecast with probability, confidence, cited
+evidence, weighted drivers and headwinds, transparent reasoning, and follow-up analysis.
 
-![Anizai Hero](docs/images/landing-hero.png)
+The project combines a React product surface, an Express BFF, Firestore queue/state
+documents, a LangGraph forecasting agent, and a Kafka/Flink medallion data pipeline
+backed by PostgreSQL, pgvector, and TimescaleDB.
 
-## Overview
+![Anizai dashboard forecast](docs/images/product-dashboard.png)
 
-A user asks a future-oriented question ("Will X happen before Y?") and receives a
-structured forecast: probability, confidence, key drivers, a reasoning chain, and an
-evidence trail.
+## Product
 
-Anizai is organized as a monorepo with three main parts:
+Anizai is built for questions where a bare probability is not enough. Prediction markets
+can tell a user what the crowd price is, and search engines can return documents, but
+neither explains how fresh evidence, public discussion, structured indicators, and market
+movement should be interpreted together.
 
-- `client/`: React + TypeScript SPA (dashboard, sessions, trending, auth flows)
-- `server/`: Express + TypeScript **BFF** — auth, session CRUD, idempotency, usage
-  charging, and Firestore reads. It is a mediator: it does not call OpenAI, does not
-  query the vector store, and does not generate forecasts.
-- `data-pipeline/`: Python — Kafka + Flink medallion pipeline (Bronze → Silver → Gold)
-  into PostgreSQL/pgvector, plus the LangGraph agent that produces the forecasts.
+The product flow has two entry points:
 
-The two halves meet in Firestore: the BFF writes a queue document, the agent claims it,
-runs its graph, and writes the result back for the client to read.
+- **Market-backed forecasts**: the user chooses a live Polymarket event or outcome. The
+  result can compare Anizai's forecast against the market's own implied probability.
+- **Freeform forecasts**: the user asks any future-facing question. The system still
+  returns a structured forecast, but without a market benchmark when no matching market
+  exists.
 
-## Documentation
+![New forecast screen](docs/images/product-new-forecast.png)
 
-| Area | Start here |
+Each completed forecast is presented as a decision-oriented workspace:
+
+- Final probability and confidence.
+- Verdict language suitable for fast interpretation.
+- Key drivers and headwinds, weighted by impact.
+- Cited evidence and source traceability.
+- Known gaps: what the system could not verify.
+- Reasoning chain and follow-up chat over the completed forecast.
+- Market odds, sentiment, and price-history surfaces where supporting data exists.
+
+## System Context
+
+At the highest level, Anizai continuously ingests external information, grounds a user
+question in that evidence base, and returns a forecast that is explicit about its
+probability, evidence, and uncertainty.
+
+![System context](docs/images/architecture-system-context.png)
+
+## Architecture
+
+The repository is organized as a monorepo with five main parts:
+
+| Area | Role |
 |---|---|
-| Client + BFF (`client/`, `server/`) | [`docs/C_frontend/frontend_overview.md`](docs/C_frontend/frontend_overview.md) |
-| Data pipeline (`data-pipeline/`) | [`data-pipeline/docs/A_pipeline/pipeline_overview.md`](data-pipeline/docs/A_pipeline/pipeline_overview.md) |
+| `client/` | React + TypeScript SPA: landing page, authentication, forecast creation, dashboard, follow-up chat, settings. |
+| `server/` | Express + TypeScript BFF: Firebase auth, session CRUD, idempotency, usage accounting, Firestore reads/writes. |
+| `data-pipeline/` | Python data platform: ingestion producers, Kafka topics, Flink Silver/Gold jobs, PostgreSQL vault persistence, LangGraph agent. |
+| `calibration/` | Standalone harness that evaluates whether forecast probabilities are calibrated against resolved Polymarket outcomes. |
+| `docs/` | Frontend/BFF docs, cross-domain specs, historical audits, and product/architecture images. |
 
-Historical task logs and audits live at the top level of `docs/` and are indexed —
-with accuracy warnings where they have gone stale — in
-[`docs/C_frontend/frontend_archive.md`](docs/C_frontend/frontend_archive.md).
+The BFF is deliberately not the reasoning layer. It authenticates the user, creates a
+session, writes a queue document, and reads the result back from Firestore. The agent
+claims work asynchronously, queries the evidence vaults read-only, and writes the final
+forecast back to the session collections.
 
-## Tech Stack
+![End-to-end architecture](docs/images/architecture-end-to-end.png)
 
-### Client
+### Client and BFF
 
-- React 19
-- TypeScript
-- Vite
-- Tailwind CSS
-- Firebase Web SDK
-- Recharts
+The user-facing product is a Vite + React SPA with a small Express BFF in front of
+Firestore. The client uses two read paths:
 
-### Server
+- **REST pull path** for full aggregates such as sessions, messages, evidence, results,
+  market series, and trending markets.
+- **Firestore listener path** for low-latency session status, messages, and agent events
+  while a forecast is running.
 
-- Node.js (>= 20)
-- TypeScript
-- Express
-- Firebase Admin SDK
-- Zod
-- Pino
-- Vitest
+The BFF does not call OpenAI, does not query pgvector, and does not generate forecasts.
+Its boundary is authentication, authorization, session lifecycle rules, idempotency, plan
+limits, and Firestore mediation.
+
+Key docs:
+
+- [Frontend/BFF overview](docs/C_frontend/frontend_overview.md)
+- [Frontend API contract](docs/C_frontend/frontend_api.md)
+- [Frontend UI map](docs/C_frontend/frontend_ui.md)
+
+### Forecast Agent
+
+The forecasting engine is a LangGraph state machine. It claims pending Firestore queue
+documents, understands the question, embeds it, retrieves evidence from three specialist
+retrieval agents, checks evidence sufficiency, rates the evidence, synthesizes the final
+forecast, generates suggested follow-ups, and persists the result.
+
+![Forecast agent state machine](docs/images/architecture-agent-state-machine.png)
+
+The graph is intentionally split into small nodes so that classification, retrieval,
+evidence scoring, final synthesis, and persistence can be tested and monitored
+independently. Retrieval agents are deterministic functions, not autonomous chat agents:
+
+- **Researcher** reads `knowledge_vectors` and `knowledge_vault`.
+- **Pulse Analyst** reads `social_vectors` and `social_vault`.
+- **Market Bridge** reads `momentum_vault` and `mapping_dict`.
+
+Every vault access is read-only from the agent's perspective. Final product writes go
+to Firestore under the user's session.
+
+![Single forecast sequence](docs/images/architecture-forecast-sequence.png)
+
+Key docs:
+
+- [Agentic Hub overview](data-pipeline/docs/B_hub/hub_overview.md)
+- [Agent state machine and contracts](data-pipeline/docs/B_hub/hub_agents.md)
 
 ### Data Pipeline
 
-- Python 3.11
-- Kafka (`kafka-python`)
-- Apache Flink / PyFlink 1.19 (runs in Docker; not installed in the local venv)
-- PostgreSQL + pgvector + TimescaleDB (`psycopg2`, `pgvector`)
-- OpenAI (GPT-4o, `text-embedding-3-small`) + LangGraph
-- Airflow (scheduled producers)
+The data platform is the evidence foundation for the agent. It ingests nine source
+families into Kafka, refines them through Bronze, Silver, and Gold layers using Flink,
+and persists high-signal documents, social discussion, vectors, and structured metrics
+into PostgreSQL.
+
+![Data pipeline](docs/images/architecture-data-pipeline.png)
+
+Current source families include prediction markets, Telegram, Hacker News, NewsAPI,
+ArXiv, FRED, Google Trends, OpenWeather, and OpenSky. Airflow runs scheduled producers;
+standalone streamers handle continuously updated sources; Kafka decouples producers,
+Flink jobs, persistence, and reactive triggers.
+
+The pipeline uses a two-stage relevance filter so the vaults stay focused:
+
+1. A deterministic keyword sniper scores records cheaply.
+2. A semantic rescue pass embeds borderline records and promotes conceptually relevant
+   items that the keyword pass missed.
+
+![Two-stage relevance filter](docs/images/architecture-relevance-filter.png)
+
+Key docs:
+
+- [Pipeline overview](data-pipeline/docs/A_pipeline/pipeline_overview.md)
+- [Pipeline processing](data-pipeline/docs/A_pipeline/pipeline_processing.md)
+- [Pipeline storage](data-pipeline/docs/A_pipeline/pipeline_storage.md)
+- [Pipeline sources](data-pipeline/docs/A_pipeline/pipeline_sources.md)
+
+### Calibration
+
+The calibration harness is separate from production code. It submits real Polymarket
+questions through the same Firestore queue used by the product, waits for outcomes to
+settle, and computes scoring metrics such as Brier score and calibration curves.
+
+This gives the project a quantitative feedback loop: a forecast labeled 70% should
+resolve positively roughly 70% of the time across a large enough cohort.
+
+Key docs:
+
+- [Calibration overview](calibration/README.md)
+- [Calibration plan](calibration/docs/calibration_plan.md)
+- [Calibration operator runbook](calibration/docs/OPERATOR_RUNBOOK.md)
+
+## Technology Stack
+
+| Layer | Technologies |
+|---|---|
+| Client | React 19, TypeScript, Vite, Tailwind CSS, Firebase Web SDK, Recharts, lucide-react |
+| BFF | Node.js 20+, Express, TypeScript, Firebase Admin SDK, Zod, Pino, Vitest |
+| Agent | Python, LangGraph, OpenAI GPT-4o / GPT-4o-mini, `text-embedding-3-small`, Firestore worker |
+| Pipeline | Kafka, Apache Flink / PyFlink, Airflow, PostgreSQL, pgvector, TimescaleDB |
+| Calibration | Python, FastAPI operator API, PostgreSQL, Vite + React dashboard, pytest |
+| Cloud / Ops | Docker, Kubernetes manifests, Prometheus, Grafana, structured JSON logging |
 
 ## Repository Structure
 
 ```text
 .
-├── client/                  # Frontend (Vite + React + TS)
-├── server/                  # BFF (Express + TS)
-│   ├── firebase/            # Firestore rules + indexes
-│   ├── scripts/             # Seed, probe, emulator, migration scripts
+├── client/                  # Frontend product (Vite + React + TypeScript)
+├── server/                  # Express BFF and Firebase rules
+│   ├── firebase/            # Firestore rules, indexes, Firebase config
+│   ├── scripts/             # Seed, probe, emulator, migration helpers
 │   └── tests/               # Vitest suites
-├── data-pipeline/           # Ingestion/streaming pipeline + LangGraph agent (Python)
-│   └── docs/A_pipeline/     # Pipeline documentation
-├── docs/
-│   ├── C_frontend/          # Client + BFF documentation
-│   ├── backend-specs/       # Cross-team data contracts
-│   ├── audits/              # Historical audits
-│   └── images/              # README and product images
+├── data-pipeline/           # Ingestion, Flink jobs, persistence, LangGraph agent
+│   ├── agent/               # Forecast and follow-up LangGraph workers
+│   ├── ingestion/           # Source producers
+│   ├── processing/          # Silver/Gold jobs, filtering, enrichment
+│   ├── persistence/         # PostgreSQL vault writers/readers
+│   ├── infrastructure/      # Docker, Kubernetes, Prometheus, Grafana
+│   └── docs/                # Pipeline, hub, and cloud documentation
+├── calibration/             # Standalone forecast calibration harness
+├── docs/                    # Product docs, BFF docs, specs, images, archives
 └── README.md
 ```
 
-## Prerequisites
+## Quick Start
+
+### Prerequisites
 
 - Node.js 20+
 - npm
-- Python 3.10+ (for `data-pipeline`)
-- Docker + Docker Compose (optional, for Kafka infra)
+- Python 3.10+ for `data-pipeline/`
+- Docker + Docker Compose for local Kafka/Flink infrastructure
+- Firebase project with Authentication and Firestore enabled
 
-## Setup
+### Firebase Setup
 
-Required Firebase console steps (one-time, per Firebase project):
+One-time Firebase console steps:
 
-1. **Authentication → Sign-in method**: enable **Email/Password** and **Google** providers.
-2. **Firestore Database**: create a Firestore instance and deploy the rules from `server/firebase/firestore.rules`.
-3. From the Firebase console (Project settings → General → Your apps → Web app), copy the SDK config values into the env files below.
+1. Enable **Email/Password** and **Google** sign-in providers.
+2. Create a Firestore database.
+3. Deploy rules from `server/firebase/firestore.rules`.
+4. Copy Firebase web config values into `client/.env`.
 
-Local environment files (never committed; use the `.env.example` files as templates):
-
-```bash
-cp client/.env.example client/.env   # fill VITE_FIREBASE_* and VITE_API_BASE_URL
-cp server/.env.example server/.env   # fill FIREBASE_PROJECT_ID
-```
-
-Then follow the Quick Start below.
-
-## Quick Start
-
-### 1. Clone
+Environment templates:
 
 ```bash
-git clone <your-repo-url>
-cd Anizai
+cp client/.env.example client/.env
+cp server/.env.example server/.env
 ```
 
-### 2. Client Setup
+### Run the Client
 
 ```bash
 cd client
 npm install
-cp .env.example .env
 npm run dev
 ```
 
-Client runs at `http://localhost:5173`.
+The client runs at `http://localhost:5173`.
 
-### 3. Server Setup
-
-In a new terminal:
+### Run the BFF
 
 ```bash
 cd server
 npm install
-cp .env.example .env
 npm run dev
 ```
 
-Server runs at `http://localhost:3000`.
+The server runs at `http://localhost:3000`.
+
+### Run Local Pipeline Infrastructure
+
+```bash
+cd data-pipeline/infrastructure
+docker compose up -d
+```
+
+Install pipeline dependencies:
+
+```bash
+cd data-pipeline
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Run a producer:
+
+```bash
+python ingestion/newsapi_producer.py
+```
 
 ## Environment Variables
 
-### Client (`client/.env`)
-
-Copy from `client/.env.example`:
+Client variables, copied from `client/.env.example`:
 
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
@@ -151,72 +266,63 @@ Copy from `client/.env.example`:
 - `VITE_FIREBASE_STORAGE_BUCKET`
 - `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
-- `VITE_API_BASE_URL` (default: `/api`)
+- `VITE_API_BASE_URL`
 
-### Server (`server/.env`)
+Server variables, copied from `server/.env.example`:
 
-Copy from `server/.env.example`:
+- `PORT`
+- `NODE_ENV`
+- `FIREBASE_PROJECT_ID`
+- `ALLOW_DEMO_ROUTES`
+- `FIREBASE_AUTH_EMULATOR_HOST`
+- `FIRESTORE_EMULATOR_HOST`
 
-- `PORT` (default: `3000`)
-- `NODE_ENV` (`development`, `production`, `test`)
-- `FIREBASE_PROJECT_ID` (required)
-- `ALLOW_DEMO_ROUTES` (`true` / `false`, default off) — must be `true` **and**
-  `NODE_ENV=development` for the `/demo/*` routes to mount at all
-- Optional emulator vars:
-  - `FIREBASE_AUTH_EMULATOR_HOST`
-  - `FIRESTORE_EMULATOR_HOST`
+The pipeline, agent, and calibration harness each have their own environment contracts
+documented in their local `.env.example`, config, or runbook files.
 
-## API Endpoints (Current)
+## API Surface
 
-Routes are mounted at the server root — there is no `/api` prefix on the server. The
-client prefixes `/api` and the Vite dev proxy strips it. See
-[`frontend_api.md`](docs/C_frontend/frontend_api.md) §7.3.
+Routes are mounted at the server root. In development, the Vite client prefixes
+requests with `/api` and the dev proxy rewrites them to the BFF.
 
 Public:
 
 - `GET /`
 - `GET /health`
-- `GET /trending` (`?limit`, default 20, max 100)
+- `GET /trending`
+- `GET /trending/search`
 
-Protected (Firebase ID token required):
+Protected by Firebase ID token:
 
 - `GET /me`
 - `PATCH /me/plan`
 - `GET /sessions`
 - `GET /sessions/:id`
-- `POST /sessions` — requires a UUID `idempotencyKey`
+- `POST /sessions`
 - `POST /sessions/:id/messages`
-- `POST /sessions/:id/clarify` — only when status is `awaiting_clarification`
-- `POST /sessions/:id/retry` — only when status is `failed`
+- `POST /sessions/:id/clarify`
+- `POST /sessions/:id/retry`
 - `DELETE /sessions/:id`
 
-Development only (both gates required, see `ALLOW_DEMO_ROUTES`):
+Development-only demo routes are double-gated by `ALLOW_DEMO_ROUTES=true` and
+`NODE_ENV=development`.
 
-- `GET /demo/sessions`, `GET /demo/sessions/:id`, `GET /demo/user`
-
-Full route matrix with validation, status codes, and error codes:
-[`frontend_api.md`](docs/C_frontend/frontend_api.md) §3.
+Full route details live in [frontend_api.md](docs/C_frontend/frontend_api.md).
 
 ## Development Commands
 
-### Client
+Client:
 
 ```bash
 cd client
 npm run dev
 npm run build
-npm run test     # vitest
-npm run lint     # currently fails — see note below
+npm run test
+npm run lint
 npm run preview
 ```
 
-> **Known issue:** `npm run lint` in `client/` fails with
-> `Cannot find package '@eslint/js'` — the root `eslint.config.js` imports ESLint
-> packages that are installed per-package rather than at the repo root. Typecheck and
-> tests are unaffected. Tracked as KG-C-2 in
-> [`frontend_sprints.md`](docs/C_frontend/frontend_sprints.md) §4.
-
-### Server
+Server:
 
 ```bash
 cd server
@@ -227,96 +333,36 @@ npm run lint
 npm run test
 ```
 
-Emulator helpers:
+Calibration:
 
 ```bash
-cd server
-npm run dev:emu             # run against the Firebase emulators
-npm run emu:token
-npm run emu:test:me
-npm run test:session-result
-npm run seed                # seed one fully-populated forecast session
-npm run seed:clean -- --yes # remove it
-npm run probe:all-sessions  # read-only inventory of the sessions collection
+cd calibration
+pytest
 ```
 
-## Data Pipeline
+## Documentation Map
 
-Owned by a separate track — see
-[`pipeline_overview.md`](data-pipeline/docs/A_pipeline/pipeline_overview.md) for the
-authoritative documentation. Quick local start below.
+| Topic | Start here |
+|---|---|
+| Product UI and BFF | [docs/C_frontend/frontend_overview.md](docs/C_frontend/frontend_overview.md) |
+| REST and Firestore contracts | [docs/C_frontend/frontend_contracts.md](docs/C_frontend/frontend_contracts.md) |
+| Screens and dashboard composition | [docs/C_frontend/frontend_ui.md](docs/C_frontend/frontend_ui.md) |
+| Data pipeline | [data-pipeline/docs/A_pipeline/pipeline_overview.md](data-pipeline/docs/A_pipeline/pipeline_overview.md) |
+| Agentic Hub | [data-pipeline/docs/B_hub/hub_overview.md](data-pipeline/docs/B_hub/hub_overview.md) |
+| Cloud deployment notes | [data-pipeline/docs/C_cloud/cloud_overview.md](data-pipeline/docs/C_cloud/cloud_overview.md) |
+| Calibration | [calibration/README.md](calibration/README.md) |
 
-Install dependencies:
-
-```bash
-cd data-pipeline
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Start Kafka infrastructure:
-
-```bash
-cd data-pipeline/infrastructure
-docker compose up -d
-```
-
-Run a producer (nine are available in `data-pipeline/ingestion/`):
-
-```bash
-cd data-pipeline
-python ingestion/newsapi_producer.py
-```
-
-## One-time: migrate legacy demo-user data
-
-The original frontend signed every login in as a hardcoded `demo-user-001`. After real auth was restored, any sessions seeded under that UID become invisible to real users (server enforces ownership). The `migrate:demo-data` script reassigns ownership of every demo-owned Firestore document to a real Firebase Auth user.
-
-It is **dry-run by default**. Always run without `--apply` first and inspect the report.
-
-```bash
-cd server
-
-# Option A — create a fresh Firebase Auth user as part of the migration:
-npm run migrate:demo-data -- --email=viewer@anizai.local --password=<pwd>           # dry-run
-npm run migrate:demo-data -- --email=viewer@anizai.local --password=<pwd> --apply   # commit
-
-# Option B — migrate to a UID you already created (e.g. via Google sign-in in the UI):
-npm run migrate:demo-data -- --target-uid=<existingUid>            # dry-run
-npm run migrate:demo-data -- --target-uid=<existingUid> --apply    # commit
-
-# Override the source UID if it differs from the default `demo-user-001`:
-npm run migrate:demo-data -- --target-uid=... --demo-uid=<otherUid> --apply
-```
-
-The script:
-- Updates `userId` in `sessions`, `sessionResults`, `forecastQueries`, and `sessions/*/messages` (the only collections with that field).
-- Leaves `users/demo-user-001` and the legacy demo Auth user in place in case other artifacts still reference them.
-- Is idempotent — re-running on already-migrated docs is a no-op.
-
-This is a one-time operation tied to the legacy seed data; remove it once it has run successfully against every environment that needs it.
-
-## Screenshots
-
-![How It Works](docs/images/how-it-works.png)
-![Plan Selection](docs/images/plan-selection.png)
-![Dashboard Desktop](docs/images/dashboard-desktop.png)
-![Dashboard Mobile](docs/images/dashboard-mobile.png)
+Historical task logs and audits live under `docs/archive/` and the domain archive files.
 
 ## Status
 
-Client, BFF, and data pipeline are all implemented and running end to end. Current
-state per area:
+- **Product client and BFF**: implemented end to end with real Firebase auth,
+  market-first forecast creation, session dashboard, and follow-up chat.
+- **Agentic Hub**: implemented through the main forecast graph, follow-up graph,
+  suggested actions, Firestore worker flow, and metrics.
+- **Data pipeline**: implemented with Bronze/Silver/Gold streaming architecture and
+  PostgreSQL vault persistence. Filter-threshold calibration remains an open quality
+  task.
+- **Calibration harness**: built as a standalone measurement system; cloud automation is
+  coded but not switched on.
 
-- **Client + BFF** — no sprint currently open. Known gaps are tracked as `KG-C-*` in
-  [`frontend_sprints.md`](docs/C_frontend/frontend_sprints.md) §4.
-- **Data pipeline** — fully implemented and operationally closed; the one open item is
-  filter-threshold calibration. See
-  [`pipeline_sprints.md`](data-pipeline/docs/A_pipeline/pipeline_sprints.md).
-- **Not yet live in the product** — market comparison and sentiment time series (the
-  agent emits nothing for them yet), and the live agent reasoning trace.
-
-## License
-
-MIT
