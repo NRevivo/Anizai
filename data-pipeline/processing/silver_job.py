@@ -2623,10 +2623,76 @@ if PYFLINK_AVAILABLE:
         The process_fn argument must follow the signature:
             (envelope_dict) -> (topic_str | None, record_dict | None)
         where topic_str is the target Silver topic name or DEAD_LETTER_QUEUE.
+
+        needs_openai_client=True switches that contract to:
+            (envelope_dict, client) -> (topic_str | None, record_dict | None)
+        and is used ONLY by the Telegram branch, whose Silver mapper translates
+        non-English channels to English before Keyword Sniper scoring
+        (Section 4.1D). The other seven branches keep the one-argument call.
+
+        Why the client is built in open() and NOT passed into __init__:
+            This object is pickled and shipped to the TaskManagers. The OpenAI
+            SDK v1 client does not survive that boundary — see the module
+            docstring of utils/openai_client.py. __init__ therefore stores only
+            a bool; the client is constructed once per task slot in open(), on
+            the TaskManager, from that TaskManager's own environment. Building
+            it in build_pipeline() and closing over it would fail at submit
+            time or yield a dead client on the TM.
+
+        Why a flag rather than a Telegram-specific subclass:
+            A subclass would duplicate this class's parse / route / DLQ logic
+            for a two-line difference (Section 3.2 — DRY). The flag defaults to
+            False, so the seven non-Telegram branches are byte-identical in
+            behaviour to the pre-flag version.
         """
 
-        def __init__(self, process_fn):
+        def __init__(self, process_fn, needs_openai_client: bool = False):
             self._process_fn = process_fn
+            self._needs_openai_client = needs_openai_client
+            # Placeholder so a direct unit-test instantiation that never calls
+            # open() still has the attribute. The real client (when required) is
+            # assigned in open() on the TaskManager.
+            self._openai_client = None
+
+        def open(self, runtime_context):
+            """
+            Build the per-task-slot OpenAI client for branches that need one.
+
+            Called once per task slot lifetime on the TaskManager — the same
+            pattern as PolymarketGoldSocialFunction.open() in gold_job.py.
+            The imports are deferred into this method so the API key is read
+            from the TaskManager's environment at runtime rather than being
+            captured on the submitting client at graph-build time.
+
+            Missing/empty OPENAI_API_KEY is NOT fatal (Section 4.3): it logs a
+            WARNING and leaves the client None, which makes translate_to_english()
+            fall through to its existing pass-through. The Silver job must never
+            fail to start over a missing enrichment credential.
+
+            Why the emptiness check is explicit: get_openai_client(api_key="")
+            does NOT raise — the OpenAI SDK only rejects api_key=None — so an
+            empty key would otherwise produce a live client that 401s on every
+            message and burns the retry budget.
+            """
+            if not self._needs_openai_client:
+                return
+
+            from config.settings import OPENAI_API_KEY
+
+            if not (OPENAI_API_KEY or "").strip():
+                logger.warning(
+                    "[silver/flink] OPENAI_API_KEY missing or empty — Silver "
+                    "translation disabled, falling back to pass-through "
+                    "(non-English channels will not be translated before "
+                    "Keyword Sniper scoring, Section 4.1D)."
+                )
+                self._openai_client = None
+                return
+
+            # Phase 9.5 Stage B Item 2: centralised factory (timeout=60, max_retries=5).
+            from utils.openai_client import get_openai_client
+            self._openai_client = get_openai_client(api_key=OPENAI_API_KEY)
+            logger.info("[silver/flink] Silver translation client ready (Section 4.1D).")
 
         def process_element(self, value: str, _ctx: ProcessFunction.Context):
             try:
@@ -2635,7 +2701,10 @@ if PYFLINK_AVAILABLE:
                 yield (DLQ_TAG, json.dumps({"parse_error": str(exc)}))
                 return
 
-            topic, record = self._process_fn(envelope)
+            if self._needs_openai_client:
+                topic, record = self._process_fn(envelope, self._openai_client)
+            else:
+                topic, record = self._process_fn(envelope)
 
             if topic is None:
                 return  # intentional skip (empty batch, low-signal guard, etc.)
@@ -2750,6 +2819,7 @@ if PYFLINK_AVAILABLE:
             operator_name: str,
             process_fn,
             silver_topic: str,
+            needs_openai_client: bool = False,
         ) -> None:
             """
             Wire a single-output Silver branch: bronze_topic → silver_topic + DLQ.
@@ -2761,8 +2831,16 @@ if PYFLINK_AVAILABLE:
                 bronze_topic:   Kafka topic to consume from (Bronze layer).
                 group_id:       Consumer group ID for this branch.
                 operator_name:  Human-readable Flink operator label.
-                process_fn:     Silver process function (envelope → (topic, record)).
+                process_fn:     Silver process function (envelope → (topic, record)),
+                                or (envelope, client) → (topic, record) when
+                                needs_openai_client is True.
                 silver_topic:   Silver Kafka topic to sink valid records to.
+                needs_openai_client:
+                                True only for branches whose Silver mapper calls
+                                OpenAI (Telegram translation, Section 4.1D). The
+                                client is built per task slot in the operator's
+                                open(), never here — see GenericSilverProcessFunction.
+                                Defaults False so every other call site is unchanged.
             """
             stream = env.from_source(
                 _kafka_source(bronze_topic, group_id),
@@ -2770,7 +2848,7 @@ if PYFLINK_AVAILABLE:
                 operator_name,
             )
             processed = stream.process(
-                GenericSilverProcessFunction(process_fn),
+                GenericSilverProcessFunction(process_fn, needs_openai_client),
                 output_type=_tuple_type,
             )
             _tag_split(processed, "main").sink_to(_kafka_sink(silver_topic))
@@ -2780,7 +2858,15 @@ if PYFLINK_AVAILABLE:
         _wire_simple(BRONZE_FRED,         "flink-silver-fred",         "fred-bronze-source",         process_fred_message,         SILVER_STRUCTURED_METRICS)
         _wire_simple(BRONZE_NEWSAPI,      "flink-silver-newsapi",      "newsapi-bronze-source",      process_newsapi_message,      SILVER_GLOBAL_NEWS)
         _wire_simple(BRONZE_ARXIV,        "flink-silver-arxiv",        "arxiv-bronze-source",        process_arxiv_message,        SILVER_GLOBAL_NEWS)
-        _wire_simple(BRONZE_TELEGRAM,     "flink-silver-telegram",     "telegram-bronze-source",     process_telegram_message,     SILVER_GLOBAL_NEWS)
+        # Telegram is the ONLY branch that takes an OpenAI client: its Silver mapper
+        # translates the non-English channels (abualiexpress, yediotnews25 — Hebrew)
+        # to English BEFORE Keyword Sniper scoring (Section 4.1D). Without the client,
+        # translate_to_english() falls through to its client=None pass-through and the
+        # English-only MASTER_KEYWORD_LIST scores Hebrew text a structural 0.0 — the
+        # two channels then never reach knowledge_vault at all.
+        # process_googletrends_message has the same client parameter and is deliberately
+        # NOT opted in here — that branch is out of scope for this fix.
+        _wire_simple(BRONZE_TELEGRAM,     "flink-silver-telegram",     "telegram-bronze-source",     process_telegram_message,     SILVER_GLOBAL_NEWS, needs_openai_client=True)
         _wire_simple(BRONZE_HACKERNEWS,   "flink-silver-hackernews",   "hackernews-bronze-source",   process_hackernews_message,   SILVER_SOCIAL_PULSE)
         _wire_simple(BRONZE_GOOGLETRENDS, "flink-silver-googletrends", "googletrends-bronze-source", process_googletrends_message, SILVER_STRUCTURED_METRICS)
         _wire_simple(BRONZE_OPENWEATHER,  "flink-silver-openweather",  "openweather-bronze-source",  process_openweather_message,  SILVER_STRUCTURED_METRICS)

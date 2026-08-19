@@ -87,7 +87,7 @@ spec:
           #
           # MUST be byte-identical to the JobManager's tag (header, above):
           # mismatched tags produce Py4J bridge errors at job submission.
-          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-flink:1.19.1-pmcov
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-flink:1.19.1-tgtrans
           imagePullPolicy: IfNotPresent
           # Shell wrapper — same pattern as the JobManager.
           # Reads CSI-mounted secret files, exports as env vars, then

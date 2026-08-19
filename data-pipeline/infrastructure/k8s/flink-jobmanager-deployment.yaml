@@ -99,7 +99,7 @@ spec:
           # movement (cloud_state.md §3).
           #
           # MUST match the TaskManager tag exactly — see that manifest's header.
-          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-flink:1.19.1-pmcov
+          image: us-central1-docker.pkg.dev/anizai-pipehub/anizai-images/anizai-flink:1.19.1-tgtrans
           imagePullPolicy: IfNotPresent
           # Shell wrapper: reads CSI-mounted secret files and exports them as
           # env vars before handing off to the Flink entrypoint.
